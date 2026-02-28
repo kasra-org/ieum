@@ -46,3 +46,6 @@ var/
 pip-log.txt
 pip-delete-this-directory.txt
 __pypackages__/
+
+# Celery Beat
+celerybeat-schedule*
