@@ -711,6 +711,7 @@
 	"eventRegister_instructions": "Please fill the following form to register for the event. Your information was automatically filled based on your account information.",
 	"eventRegister_warning": "Once this form is submitted, you cannot change the information you provided to the event. If you need to update your information, please contact the event organizers.",
 	"eventRegister_eventSpecificInfo": "Additional Questions",
+	"eventRegister_selectOption": "-- Select an option --",
 	"eventRegister_closed": "Registration for this event has been closed.",
 	"eventRegister_returnToEvent": "Return to Event Page",
 	"eventRegister_submit": "Register",

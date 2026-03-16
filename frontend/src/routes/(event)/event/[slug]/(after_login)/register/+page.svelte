@@ -477,7 +477,8 @@
                                     <div>
                                         <Label for={question.id} class="block mb-2">{@render process_spaces(question.question.question)}</Label>
                                         {#if question.question.type === 'select'}
-                                            <Select id={question.id} name={question.id} required>
+                                            <Select id={question.id} name={question.id} required bind:value={$formData[question.id]}>
+                                                <option value="" disabled selected>{m.eventRegister_selectOption()}</option>
                                                 {#each question.question.options as option, oidx}
                                                     <option value={option}>{option}</option>
                                                 {/each}

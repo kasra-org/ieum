@@ -711,6 +711,7 @@
 	"eventRegister_instructions": "등록을 위해 아래 양식을 작성해 주세요. 일부 필드는 회원 정보를 통해 자동으로 입력되었습니다.",
 	"eventRegister_warning": "양식을 제출한 후에는 행사에 제공한 정보를 변경할 수 없습니다. 정보를 업데이트해야 하는 경우 행사 주최자에게 문의하세요.",
 	"eventRegister_eventSpecificInfo": "추가 질문",
+	"eventRegister_selectOption": "-- 옵션을 선택하세요 --",
 	"eventRegister_closed": "이 행사의 등록이 마감되었습니다.",
 	"eventRegister_returnToEvent": "행사 페이지로 돌아가기",
 	"eventRegister_submit": "등록하기",
