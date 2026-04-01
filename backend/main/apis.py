@@ -945,6 +945,29 @@ def update_event_answers(request, event_id: int, attendee_id: int):
         )
     return {"code": "success", "message": "Answers updated."}
 
+@api.post("/event/{event_id}/verify_invitation_code", response=MessageSchema)
+def verify_invitation_code(request, event_id: int):
+    """Verify invitation code for an event"""
+    try:
+        event = Event.objects.get(id=event_id)
+    except Event.DoesNotExist:
+        return api.create_response(
+            request,
+            {"code": "not_found", "message": "Event not found."},
+            status=404,
+        )
+    if not event.invitation_code:
+        return {"code": "success", "message": "No invitation code required."}
+    data = json.loads(request.body)
+    submitted_code = data.get("invitation_code", "").strip().upper()
+    if submitted_code != event.invitation_code:
+        return api.create_response(
+            request,
+            {"code": "invalid_invitation_code", "message": "Invalid invitation code. Please check and try again."},
+            status=400,
+        )
+    return {"code": "success", "message": "Valid invitation code."}
+
 @api.post("/event/{event_id}/register", response=MessageSchema)
 def register_event(request, event_id: int):
     # get the deadline for registration

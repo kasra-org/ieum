@@ -208,6 +208,7 @@
 	"validation_instituteRequired": "Institute is required.",
 	"validation_jobTitleRequired": "Position is required.",
 	"validation_invitationCodeRequired": "Invitation code is required for this event.",
+	"validation_invalidInvitationCode": "Invalid invitation code. Please check and try again.",
 	"validation_nameRequired": "Please provide either your Korean name or both first and last name.",
 
 	"completeProfile_title": "Complete Your Profile",
@@ -422,6 +423,8 @@
 	"attendees_title": "Attendees",
 	"attendees_description": "Below is the list of attendees for this event.",
 	"attendees_sendEmailToSelected": "Send Emails to Selected",
+	"attendees_printNametagsForSelected": "Print Nametags for Selected",
+	"attendees_batchNametag": "Batch Nametag Printing",
 	"attendees_sendCertificatesToSelected": "Send Certificates to Selected",
 	"attendees_sendCertificatesConfirmTitle": "Send Certificates",
 	"attendees_sendCertificatesConfirmMessage": "Are you sure you want to send certificates to the selected attendees?",

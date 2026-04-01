@@ -9,6 +9,7 @@
     import { createForm } from 'felte';
     import { validator } from '@felte/validator-yup';
     import * as yup from 'yup';
+    import { get } from 'svelte/store';
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
     import { requestCardPayment } from '$lib/tossPayments.js';
@@ -117,6 +118,7 @@
 
     let me = data.user;
     let error_message = $state('');
+    let invitation_code_error = $state('');
     let isSubmittingFinal = $state(false);
     let checkoutModalOpen = $state(false);
     let checkoutStatus = $state('processing'); // 'processing' or 'success'
@@ -150,17 +152,53 @@
 
     // Handler for "Next Step" button - validates and shows summary
     async function handleNextStep() {
+        // Read store values synchronously before async calls
+        const currentFormData = get(formData);
+
         await validate();
 
-        // Check $errors store for any validation errors
-        const errorValues = Object.values($errors).filter(err => err && err.length > 0);
+        // Read errors after validation completes
+        const currentErrors = get(errors);
+        const errorEntries = Object.entries(currentErrors).filter(([, err]) => err && err.length > 0);
 
-        if (errorValues.length === 0) {
-            error_message = '';
-            currentStep = 2;
-        } else {
-            error_message = 'Please fill in all required fields correctly.';
+        if (errorEntries.length > 0) {
+            // Scroll to the first field with an error
+            const firstErrorField = errorEntries[0][0];
+            const el = document.getElementById(firstErrorField);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.focus();
+            }
+            return;
         }
+
+        // Verify invitation code if event is invitation-only
+        if (isInvitationOnly) {
+            invitation_code_error = '';
+            try {
+                const fd = new FormData();
+                fd.append('invitation_code', currentFormData.invitation_code || '');
+                const response = await fetch('?/verify_invitation_code', {
+                    method: 'POST',
+                    body: fd
+                });
+                if (!response.ok) {
+                    invitation_code_error = m.validation_invalidInvitationCode();
+                    const el = document.getElementById('invitation_code');
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.focus();
+                    }
+                    return;
+                }
+            } catch (err) {
+                invitation_code_error = m.validation_invalidInvitationCode();
+                return;
+            }
+        }
+
+        error_message = '';
+        currentStep = 2;
     }
 
     // Handle step 2 confirmation - for free events, register directly; for paid events, register then go to step 3
@@ -175,6 +213,21 @@
             // Paid event - submit registration first, then move to payment step
             await submitRegistrationForPayment();
         }
+    }
+
+    // Handle registration error - navigate back to step 1 if needed
+    function handleRegistrationError(message) {
+        error_message = message;
+        currentStep = 1;
+        isSubmittingFinal = false;
+        // Scroll to the relevant field after DOM update
+        requestAnimationFrame(() => {
+            const el = document.getElementById('invitation_code') || document.querySelector('.error');
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.focus?.();
+            }
+        });
     }
 
     // Submit registration for paid events (before payment)
@@ -192,19 +245,18 @@
             );
 
             if (!response.ok || response.status !== 200) {
+                let msg = 'Registration failed';
                 try {
                     const contentType = response.headers.get('content-type');
                     if (contentType && contentType.includes('application/json')) {
                         const rtn = await response.json();
-                        error_message = rtn.error?.message || 'Registration failed';
+                        msg = rtn.error?.message || msg;
                     } else {
                         const text = await response.text();
-                        error_message = text || 'Registration failed';
+                        msg = text || msg;
                     }
-                } catch (parseErr) {
-                    error_message = 'Registration failed';
-                }
-                isSubmittingFinal = false;
+                } catch (parseErr) {}
+                handleRegistrationError(msg);
                 return;
             }
 
@@ -214,8 +266,7 @@
             currentStep = 3;
         } catch (err) {
             console.error('Registration error:', err);
-            error_message = err.message || 'Registration failed';
-            isSubmittingFinal = false;
+            handleRegistrationError(err.message || 'Registration failed');
         }
     }
 
@@ -278,20 +329,18 @@
             );
 
             if (!response.ok || response.status !== 200) {
-                // Try to parse error response as JSON, fallback to text
+                let msg = 'Registration failed';
                 try {
                     const contentType = response.headers.get('content-type');
                     if (contentType && contentType.includes('application/json')) {
                         const rtn = await response.json();
-                        error_message = rtn.error?.message || 'Registration failed';
+                        msg = rtn.error?.message || msg;
                     } else {
                         const text = await response.text();
-                        error_message = text || 'Registration failed';
+                        msg = text || msg;
                     }
-                } catch (parseErr) {
-                    error_message = 'Registration failed';
-                }
-                isSubmittingFinal = false;
+                } catch (parseErr) {}
+                handleRegistrationError(msg);
                 return;
             }
 
@@ -300,8 +349,7 @@
             goto(`/event/${event.id}`);
         } catch (err) {
             console.error('Registration error:', err);
-            error_message = err.message || 'Registration failed';
-            isSubmittingFinal = false;
+            handleRegistrationError(err.message || 'Registration failed');
         }
     }
 
@@ -462,6 +510,9 @@
                             />
                             {#if $errors.invitation_code}
                                 <p class="text-sm text-red-600 mt-1">{$errors.invitation_code}</p>
+                            {/if}
+                            {#if invitation_code_error}
+                                <p class="text-sm text-red-600 mt-1">{invitation_code_error}</p>
                             {/if}
                             <p class="text-sm text-blue-700 mt-2">{m.eventRegister_invitationCodeHelp()}</p>
                         </div>

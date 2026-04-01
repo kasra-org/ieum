@@ -3,10 +3,11 @@
     import { Modal, Heading, Textarea, Select, Label, Card, Input } from 'flowbite-svelte';
     import { Alert } from 'flowbite-svelte';
     import { enhance } from '$app/forms';
+    import { invalidateAll } from '$app/navigation';
     import { UserEditSolid, UserRemoveSolid, TagOutline, AwardOutline, CheckCircleSolid } from 'flowbite-svelte-icons';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
-    import { generateNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
+    import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
@@ -360,10 +361,13 @@
             formData.append('nametag_paper_width', nametag_paper_width);
             formData.append('nametag_paper_height', nametag_paper_height);
             formData.append('nametag_orientation', nametag_orientation);
-            await fetch('?/save_nametag_settings', {
+            const response = await fetch('?/save_nametag_settings', {
                 method: 'POST',
                 body: formData
             });
+            if (response.ok) {
+                await invalidateAll();
+            }
         } catch (e) {
             console.error('Failed to save nametag settings:', e);
         }
@@ -408,6 +412,40 @@
 
     const onRoleChange = async (e) => {
         await generateNametag(selected_nametag_id, e.target.value);
+    };
+
+    // Batch nametag printing
+    let batch_nametag_modal = $state(false);
+    let batch_nametag_pdf = $state('');
+    let batch_nametag_role = $state('Participant');
+    let batch_nametag_generating = $state(false);
+
+    const generateBatchNametags = async () => {
+        if (selectedAttendees.length === 0) return;
+        batch_nametag_generating = true;
+        const attendees = selectedAttendees.map(id => {
+            const a = table_data_attendees.find(att => att.id === id);
+            return { name: a.name, institute: a.institute, id: a.attendee_nametag_id };
+        });
+        batch_nametag_pdf = await generateBatchNametagPDF({
+            attendees,
+            role: batch_nametag_role,
+            paperWidth: nametag_paper_width,
+            paperHeight: nametag_paper_height,
+            orientation: nametag_orientation
+        });
+        batch_nametag_generating = false;
+    };
+
+    const showBatchNametagModal = async () => {
+        batch_nametag_role = 'Participant';
+        batch_nametag_modal = true;
+        await generateBatchNametags();
+    };
+
+    const onBatchRoleChange = async (e) => {
+        batch_nametag_role = e.target.value;
+        await generateBatchNametags();
     };
 
     let cert_modal = $state(false);
@@ -567,6 +605,9 @@
 <div class="flex justify-end sm:flex-row flex-col">
     <div class="flex items-center gap-2 flex-wrap">
         <Button color="primary" size="sm" onclick={showSendEmailModal} disabled={selectedAttendees.length === 0}>{m.attendees_sendEmailToSelected()}</Button>
+        <Button color="primary" size="sm" onclick={showBatchNametagModal} disabled={selectedAttendees.length === 0 || batch_nametag_generating}>
+            {batch_nametag_generating ? '...' : m.attendees_printNametagsForSelected()}
+        </Button>
         <Button color="primary" size="sm" onclick={showSendCertificatesConfirm} disabled={selectedAttendees.length === 0 || bulk_cert_sending}>
             {bulk_cert_sending ? m.attendees_sendingCertificates() : m.attendees_sendCertificatesToSelected()}
         </Button>
@@ -698,7 +739,7 @@
         <input type="hidden" name="attendee_id" value={table_data_attendees[selected_idx].id} />
         {#if custom_answers.length > 0}
             {#each custom_answers as answer, idx}
-                <Card size="xl" class="mb-6">
+                <Card size="xl" class="mb-6 p-6">
                     <div class="mb-6">
                         <Label for={`answer_reference_id_${idx}`} class="block mb-2">{m.attendees_referenceQuestion()}</Label>
                         <Select id={`answer_reference_id_${idx}`} name="answer_reference_id[]" items={data.questions.map(q => ({
@@ -709,6 +750,7 @@
                             const q = data.questions.find(q => q.id === q_id);
                             custom_answers[idx].reference = q;
                             custom_answers[idx].question = q.question.question;
+                            custom_answers[idx].answer = '';
                         }} value={answer.reference.id} />
                     </div>
                     <div class="mb-6">
@@ -717,7 +759,38 @@
                     </div>
                     <div class="mb-6">
                         <Label for={`answer_answer_${idx}`} class="block mb-2">{m.attendees_answer()}</Label>
-                        <Textarea id={`answer_answer_${idx}`} name="answer_answer[]" bind:value={answer.answer} class="w-full" />
+                        {#if answer.reference?.question?.type === 'checkbox' && answer.reference?.question?.options}
+                            {@const options = Array.isArray(answer.reference.question.options) ? answer.reference.question.options : answer.reference.question.options.split('\n').filter(o => o.trim())}
+                            {@const parsedAnswers = answer.answer.split(/\r?\n/).reduce((acc, line) => {
+                                const match = line.trim().match(/^-\s*(.+?):\s*(.+)$/);
+                                if (match) acc[match[1].trim()] = match[2].trim() === 'on' || match[2].trim() === 'true' || match[2].trim() === 'checked';
+                                return acc;
+                            }, {})}
+                            <div class="space-y-2">
+                                {#each options as option, oidx}
+                                    <Checkbox
+                                        id={`answer_checkbox_${idx}_${oidx}`}
+                                        checked={parsedAnswers[option] ?? false}
+                                        onchange={(e) => {
+                                            const currentParsed = answer.answer.split(/\r?\n/).reduce((acc, line) => {
+                                                const match = line.trim().match(/^-\s*(.+?):\s*(.+)$/);
+                                                if (match) acc[match[1].trim()] = match[2].trim();
+                                                return acc;
+                                            }, {});
+                                            currentParsed[option] = e.target.checked ? 'on' : 'off';
+                                            custom_answers[idx].answer = options.map(o => `- ${o}: ${currentParsed[o] || 'off'}`).join('\n');
+                                        }}
+                                    >{option}</Checkbox>
+                                {/each}
+                            </div>
+                            <input type="hidden" name="answer_answer[]" value={answer.answer} />
+                        {:else if answer.reference?.question?.type === 'select' && answer.reference?.question?.options}
+                            {@const options = Array.isArray(answer.reference.question.options) ? answer.reference.question.options : answer.reference.question.options.split('\n').filter(o => o.trim())}
+                            <Select id={`answer_answer_${idx}`} bind:value={custom_answers[idx].answer} items={options.map(o => ({ value: o, name: o }))} />
+                            <input type="hidden" name="answer_answer[]" value={answer.answer} />
+                        {:else}
+                            <Textarea id={`answer_answer_${idx}`} name="answer_answer[]" bind:value={answer.answer} class="w-full" />
+                        {/if}
                     </div>
                     <div class="flex justify-center gap-2">
                         <Button color="red" onclick={
@@ -787,6 +860,7 @@
             <Select id="role" bind:value={selected_role} onchange={onRoleChange} items={[
                 { value: 'Participant', name: 'Participant' },
                 { value: 'Speaker', name: 'Speaker' },
+                { value: 'Chair', name: 'Chair' },
                 { value: 'Organizer', name: 'Organizer' },
                 { value: 'Staff', name: 'Staff' },
                 { value: 'Volunteer', name: 'Volunteer' }
@@ -823,6 +897,59 @@
             }
         }}>{m.attendees_print()}</Button>
         <Button color="dark" onclick={() => nametag_modal = false}>{m.attendees_close()}</Button>
+    </div>
+</Modal>
+
+<Modal id="batch_nametag_modal" size="lg" title={m.attendees_batchNametag()} bind:open={batch_nametag_modal} outsideclose>
+    <div class="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="flex gap-2 items-center">
+            <Label for="batch_role" class="whitespace-nowrap">{m.nametag_role()}:</Label>
+            <Select id="batch_role" bind:value={batch_nametag_role} onchange={onBatchRoleChange} items={[
+                { value: 'Participant', name: 'Participant' },
+                { value: 'Speaker', name: 'Speaker' },
+                { value: 'Chair', name: 'Chair' },
+                { value: 'Organizer', name: 'Organizer' },
+                { value: 'Staff', name: 'Staff' },
+                { value: 'Volunteer', name: 'Volunteer' }
+            ]} class="flex-1" />
+        </div>
+        <div class="flex gap-2 items-center">
+            <Label for="batch_orientation" class="whitespace-nowrap">{m.nametag_orientation()}:</Label>
+            <Select id="batch_orientation" value={nametag_orientation} onchange={async (e) => { nametag_orientation = e.target.value; await saveNametagSettings(); await generateBatchNametags(); }} items={[
+                { value: 'portrait', name: m.nametag_portrait() },
+                { value: 'landscape', name: m.nametag_landscape() }
+            ]} class="flex-1" />
+        </div>
+    </div>
+    <div class="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="flex gap-2 items-center">
+            <Label for="batch_width" class="whitespace-nowrap">{m.nametag_width()}:</Label>
+            <Input type="number" id="batch_width" bind:value={nametag_paper_width} onchange={async () => { await saveNametagSettings(); await generateBatchNametags(); }} min="30" max="300" step="1" class="w-24" />
+            <span class="text-sm text-gray-500">mm</span>
+        </div>
+        <div class="flex gap-2 items-center">
+            <Label for="batch_height" class="whitespace-nowrap">{m.nametag_height()}:</Label>
+            <Input type="number" id="batch_height" bind:value={nametag_paper_height} onchange={async () => { await saveNametagSettings(); await generateBatchNametags(); }} min="30" max="300" step="1" class="w-24" />
+            <span class="text-sm text-gray-500">mm</span>
+        </div>
+    </div>
+    {#if batch_nametag_generating}
+        <div class="flex justify-center items-center h-[500px]">
+            <p class="text-gray-500">...</p>
+        </div>
+    {:else}
+        <iframe id="batch_nametag" class="w-full h-[500px]" src={batch_nametag_pdf} title={m.attendees_batchNametag()}>
+            {m.attendees_iframeNotSupported()}
+        </iframe>
+    {/if}
+    <div class="flex justify-center mt-6 gap-2">
+        <Button color="primary" onclick={() => {
+            const iframe = document.getElementById('batch_nametag');
+            if (iframe) {
+                iframe.contentWindow.print();
+            }
+        }}>{m.attendees_print()}</Button>
+        <Button color="dark" onclick={() => batch_nametag_modal = false}>{m.attendees_close()}</Button>
     </div>
 </Modal>
 

@@ -120,46 +120,26 @@ function createAddLineHelper(doc, { centerX, maxWidth }) {
  * @param {string} [options.orientation='portrait'] - Paper orientation ('portrait' or 'landscape')
  * @returns {Promise<string>} - Blob URI of the generated PDF
  */
-export async function generateNametagPDF({ name, institute, role, id, paperWidth = 90, paperHeight = 100, orientation = 'portrait' }) {
-    await loadKoreanFonts();
-
-    let pdf_orientation = orientation;
-    if (orientation === 'portrait' && paperWidth > paperHeight) {
-        pdf_orientation = 'landscape';
-    } else if (orientation === 'landscape' && paperWidth > paperHeight) {
-        pdf_orientation = 'portrait';
-    }
-
-    const doc = new jsPDF({
-        orientation: pdf_orientation,
-        unit: 'mm',
-        format: [paperWidth, paperHeight]
-    });
-
-    addFontsToDoc(doc);
+/**
+ * Render a single nametag page onto an existing jsPDF document
+ * @param {jsPDF} doc - The jsPDF document instance
+ * @param {Object} options - Nametag options
+ */
+function renderNametagPage(doc, { name, institute, role, id, paperWidth, paperHeight, orientation }) {
     const fontFamily = getFontFamily();
-
-    // Use dimensions as provided
     const contentWidth = paperWidth;
     const contentHeight = paperHeight;
 
-    // Scale factors based on default 90x100mm content size
     const scaleX = contentWidth / 90;
     const scaleY = contentHeight / 100;
     const scale = Math.min(scaleX, scaleY) * ((Math.sin((contentWidth - contentHeight) / Math.max(contentWidth, contentHeight) * (Math.PI/4)) + 1));
 
     const centerX = contentWidth / 2;
-    const centerY = contentHeight / 2;
     const maxWidth = contentWidth - 10 * scaleX;
 
-    // Helper to draw centered text with rotation
-    // In landscape: x,y are "logical" positions that get swapped for the rotated layout
     const drawCenteredText = (text, logicalX, logicalY) => {
         if (orientation === 'landscape') {
-            // For 90° rotated text: swap x/y, use text width for centering
             const textWidth = doc.getTextWidth(text);
-            // logicalY becomes paperX (horizontal position)
-            // logicalX becomes paperY (vertical position, centered)
             const paperX = logicalY;
             const paperY = logicalX + textWidth / 2;
             doc.text(text, paperX, paperY, { angle: 90 });
@@ -168,19 +148,16 @@ export async function generateNametagPDF({ name, institute, role, id, paperWidth
         }
     };
 
-    // ID at top (if provided)
     if (id !== undefined) {
         doc.setFont(fontFamily, 'bold');
         doc.setFontSize(10 * scale);
         drawCenteredText(`${id}`, centerX, 10 * scaleY);
     }
 
-    // Font sizes scaled
     const nameFontSize = Math.round(30 * scale);
     const instituteFontSize = Math.round(20 * scale);
     const roleFontSize = Math.round(23 * scale);
 
-    // Calculate wrapped text for name and institute
     doc.setFont(fontFamily, 'bold');
     doc.setFontSize(nameFontSize);
     const nameLines = doc.splitTextToSize(name || '', maxWidth);
@@ -191,21 +168,16 @@ export async function generateNametagPDF({ name, institute, role, id, paperWidth
     const instituteLines = doc.splitTextToSize(institute || '', maxWidth);
     const instituteLineHeight = 7 * scale;
 
-    // Calculate total content height
     const nameHeight = nameLines.length * nameLineHeight;
     const instituteHeight = instituteLines.length * instituteLineHeight;
     const gap = 5 * scale;
     const totalHeight = nameHeight + gap + instituteHeight;
 
-    // Available vertical space (between ID area and divider line)
     const topBound = 18 * scaleY;
     const bottomBound = contentHeight - 22 * scaleY;
     const availableHeight = bottomBound - topBound;
-
-    // Calculate starting Y to vertically center the content
     const startY = topBound + (availableHeight - totalHeight) / 2;
 
-    // Draw name (bold, centered)
     doc.setFont(fontFamily, 'bold');
     doc.setFontSize(nameFontSize);
     let currentY = startY + nameLineHeight * 0.7;
@@ -213,7 +185,6 @@ export async function generateNametagPDF({ name, institute, role, id, paperWidth
         drawCenteredText(line, centerX, currentY + index * nameLineHeight);
     });
 
-    // Draw institute (normal, centered)
     doc.setFont(fontFamily, 'normal');
     doc.setFontSize(instituteFontSize);
     currentY = startY + nameHeight + gap + instituteLineHeight * 0.7;
@@ -221,21 +192,83 @@ export async function generateNametagPDF({ name, institute, role, id, paperWidth
         drawCenteredText(line, centerX, currentY + index * instituteLineHeight);
     });
 
-    // Divider line (rotated for landscape)
     const dividerY = contentHeight - 18 * scaleY;
     doc.setLineWidth(1 * scale);
     if (orientation === 'landscape') {
-        // Vertical line for landscape - positioned to separate content from role
-        const dividerX = dividerY; // Same logical position as portrait, but as X coordinate
+        const dividerX = dividerY;
         doc.line(dividerX, 5 * scaleX, dividerX, contentWidth - 5 * scaleX);
     } else {
         doc.line(5 * scaleX, dividerY, contentWidth - 5 * scaleX, dividerY);
     }
 
-    // Role (bold, fixed at bottom)
     doc.setFont(fontFamily, 'bold');
     doc.setFontSize(roleFontSize);
     drawCenteredText(role || 'Participant', centerX, contentHeight - 7 * scaleY);
+}
+
+/**
+ * Compute jsPDF orientation from user orientation and paper dimensions
+ */
+function computePdfOrientation(orientation, paperWidth, paperHeight) {
+    let pdf_orientation = orientation;
+    if (orientation === 'portrait' && paperWidth > paperHeight) {
+        pdf_orientation = 'landscape';
+    } else if (orientation === 'landscape' && paperWidth > paperHeight) {
+        pdf_orientation = 'portrait';
+    }
+    return pdf_orientation;
+}
+
+export async function generateNametagPDF({ name, institute, role, id, paperWidth = 90, paperHeight = 100, orientation = 'portrait' }) {
+    await loadKoreanFonts();
+
+    const doc = new jsPDF({
+        orientation: computePdfOrientation(orientation, paperWidth, paperHeight),
+        unit: 'mm',
+        format: [paperWidth, paperHeight]
+    });
+
+    addFontsToDoc(doc);
+    renderNametagPage(doc, { name, institute, role, id, paperWidth, paperHeight, orientation });
+
+    return doc.output('bloburi');
+}
+
+/**
+ * Generate a batch nametag PDF with one nametag per page
+ * @param {Object} options
+ * @param {Array<{name: string, institute: string, id?: number}>} options.attendees - List of attendees
+ * @param {string} options.role - Role to display on all nametags
+ * @param {number} [options.paperWidth=90] - Paper width in mm
+ * @param {number} [options.paperHeight=100] - Paper height in mm
+ * @param {string} [options.orientation='portrait'] - Paper orientation
+ * @returns {Promise<string>} - Blob URI of the generated PDF
+ */
+export async function generateBatchNametagPDF({ attendees, role, paperWidth = 90, paperHeight = 100, orientation = 'portrait' }) {
+    await loadKoreanFonts();
+
+    const doc = new jsPDF({
+        orientation: computePdfOrientation(orientation, paperWidth, paperHeight),
+        unit: 'mm',
+        format: [paperWidth, paperHeight]
+    });
+
+    addFontsToDoc(doc);
+
+    attendees.forEach((attendee, index) => {
+        if (index > 0) {
+            doc.addPage([paperWidth, paperHeight], computePdfOrientation(orientation, paperWidth, paperHeight));
+        }
+        renderNametagPage(doc, {
+            name: attendee.name,
+            institute: attendee.institute,
+            role,
+            id: attendee.id,
+            paperWidth,
+            paperHeight,
+            orientation
+        });
+    });
 
     return doc.output('bloburi');
 }

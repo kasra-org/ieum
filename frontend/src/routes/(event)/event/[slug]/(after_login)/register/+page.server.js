@@ -65,6 +65,17 @@ export const actions = {
             throw error(response.status, response.data);
         }
     },
+    verify_invitation_code: async ({ cookies, params, request }) => {
+        let formdata = await request.formData();
+        const response = await post(`api/event/${params.slug}/verify_invitation_code`, {
+            invitation_code: formdata.get('invitation_code') || '',
+        }, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            throw error(response.status, response.data);
+        }
+    },
     register: async ({ cookies, params, request }) => {
         let formdata = await request.formData()
         const response = await post(`api/event/${params.slug}/register`, formdata, cookies);
