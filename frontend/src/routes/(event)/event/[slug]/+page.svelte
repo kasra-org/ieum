@@ -28,6 +28,13 @@
         gfm: true
     });
 
+    const renderer = new marked.Renderer();
+    const originalTable = renderer.table.bind(renderer);
+    renderer.table = function (token) {
+        return `<div class="overflow-x-auto">${originalTable(token)}</div>`;
+    };
+    marked.use({ renderer });
+
     let { data } = $props();
     let event = $derived(data.event);
     let user = $derived(data.user);
