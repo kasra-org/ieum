@@ -460,6 +460,14 @@
     let bulk_cert_message = $state({});
     let bulk_cert_confirm_modal = $state(false);
 
+    let certEligibleCount = $derived(
+        selectedAttendees.filter(id => {
+            const p = table_data_attendees.find(a => a.id === id);
+            return p && p.email && p.is_attended;
+        }).length
+    );
+    let certSkippedCount = $derived(selectedAttendees.length - certEligibleCount);
+
     const showSendCertificatesConfirm = () => {
         if (selectedAttendees.length === 0) return;
         bulk_cert_confirm_modal = true;
@@ -970,7 +978,9 @@
 <ConfirmModal
     bind:open={bulk_cert_confirm_modal}
     title={m.attendees_sendCertificatesConfirmTitle()}
-    message={m.attendees_sendCertificatesConfirmMessage()}
+    message={certSkippedCount > 0
+        ? m.attendees_sendCertificatesConfirmWithSkip({ eligible: certEligibleCount, skipped: certSkippedCount })
+        : m.attendees_sendCertificatesConfirmCount({ count: certEligibleCount })}
     confirmLabel={m.attendees_sendCertificatesConfirmButton()}
     onConfirm={sendCertificatesToSelected}
     loading={bulk_cert_sending}

@@ -430,6 +430,8 @@
 	"attendees_sendCertificatesConfirmTitle": "참석 증명서 전송",
 	"attendees_sendCertificatesConfirmMessage": "선택한 참가자에게 참석 증명서를 전송하시겠습니까?",
 	"attendees_sendCertificatesConfirmButton": "전송",
+	"attendees_sendCertificatesConfirmCount": "{count}명의 참가자에게 증명서가 전송됩니다.",
+	"attendees_sendCertificatesConfirmWithSkip": "{eligible}명의 참가자에게 증명서가 전송됩니다. {skipped}명은 건너뜁니다 (미참석 또는 이메일 없음).",
 	"attendees_sendingCertificates": "참석 증명서 보내는 중...",
 	"attendees_sendCertificatesComplete": "참석 증명서가 성공적으로 전송되었습니다!",
 	"attendees_sendEmailError": "이메일 전송에 실패했습니다.",

@@ -430,6 +430,8 @@
 	"attendees_sendCertificatesConfirmTitle": "Send Certificates",
 	"attendees_sendCertificatesConfirmMessage": "Are you sure you want to send certificates to the selected attendees?",
 	"attendees_sendCertificatesConfirmButton": "Send",
+	"attendees_sendCertificatesConfirmCount": "Certificates will be sent to {count} attendees.",
+	"attendees_sendCertificatesConfirmWithSkip": "Certificates will be sent to {eligible} attendees. {skipped} will be skipped (not attended or no email).",
 	"attendees_sendingCertificates": "Sending certificates...",
 	"attendees_sendCertificatesComplete": "Certificates sent successfully!",
 	"attendees_sendEmailError": "Failed to send email.",
