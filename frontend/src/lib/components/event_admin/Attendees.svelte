@@ -12,6 +12,8 @@
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ConfirmModal from '$lib/components/ConfirmModal.svelte';
+    import ActionTooltip from '$lib/components/ActionTooltip.svelte';
+    import SendEmailModal from '$lib/components/SendEmailModal.svelte';
 
     let { data } = $props();
 
@@ -328,22 +330,20 @@
     };
 
     let send_email_modal = $state(false);
+    let send_email_to_all = $state(false);
     const showSendEmailModal = () => {
+        send_email_to_all = false;
         send_email_modal = true;
     };
-
-    let message_send_email = $state({});
-    const afterSuccessfulSendEmails = () => {
-        return async ({ result, action, update }) => {
-            if (result.type === 'success') {
-                await update({ reset: false });
-                send_email_modal = false;
-                message_send_email = {}
-            } else {
-                message_send_email = { type: 'error', message: m.attendees_sendEmailError() };
-            }
-        };
+    const showSendEmailToAllModal = () => {
+        send_email_to_all = true;
+        send_email_modal = true;
     };
+    let emailRecipients = $derived(
+        send_email_to_all
+            ? table_data_attendees.map(a => a.email).filter(Boolean).join("; ")
+            : selectedAttendees.map(id => table_data_attendees.find(a => a.id === id)?.email).filter(Boolean).join("; ")
+    );
 
     let nametag_modal = $state(false);
     let selected_nametag = $state('');
@@ -604,6 +604,7 @@
 <p class="font-light mb-6">{m.attendees_description()}</p>
 <div class="flex justify-end sm:flex-row flex-col">
     <div class="flex items-center gap-2 flex-wrap">
+        <Button color="primary" size="sm" onclick={showSendEmailToAllModal}>{m.attendees_sendEmailToAll()}</Button>
         <Button color="primary" size="sm" onclick={showSendEmailModal} disabled={selectedAttendees.length === 0}>{m.attendees_sendEmailToSelected()}</Button>
         <Button color="primary" size="sm" onclick={showBatchNametagModal} disabled={selectedAttendees.length === 0 || batch_nametag_generating}>
             {batch_nametag_generating ? '...' : m.attendees_printNametagsForSelected()}
@@ -688,18 +689,26 @@
                 {/if}
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
-                        <Button color="none" size="none" onclick={() => showNametagModal(row.id)}>
-                            <TagOutline class="w-5 h-5" />
-                        </Button>
-                        <Button color="none" size="none" onclick={() => showCertificateModal(row.id)} disabled={!row.is_attended}>
-                            <AwardOutline class="w-5 h-5 {row.is_attended ? '' : 'opacity-30'}" />
-                        </Button>
-                        <Button color="none" size="none" onclick={() => showAttenteeModal(row.id)}>
-                            <UserEditSolid class="w-5 h-5" />
-                        </Button>
-                        <Button color="none" size="none" onclick={() => showRemoveAttenteeModal(row.id)}>
-                            <UserRemoveSolid class="w-5 h-5" />
-                        </Button>
+                        <ActionTooltip text={m.attendees_nametag()}>
+                            <Button color="none" size="none" onclick={() => showNametagModal(row.id)}>
+                                <TagOutline class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.attendees_certificate()}>
+                            <Button color="none" size="none" onclick={() => showCertificateModal(row.id)} disabled={!row.is_attended}>
+                                <AwardOutline class="w-5 h-5 {row.is_attended ? '' : 'opacity-30'}" />
+                            </Button>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.attendees_detailsTitle()}>
+                            <Button color="none" size="none" onclick={() => showAttenteeModal(row.id)}>
+                                <UserEditSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.attendees_removeTitle()}>
+                            <Button color="none" size="none" onclick={() => showRemoveAttenteeModal(row.id)}>
+                                <UserRemoveSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
                     </div>
                 </TableBodyCell>
             </TableBodyRow>
@@ -830,28 +839,7 @@
     </form>
 </Modal>
 
-<Modal id="send_email_modal" size="lg" title={m.attendees_sendEmails()} bind:open={send_email_modal} outsideclose>
-    <form method="post" action="?/send_emails" use:enhance={afterSuccessfulSendEmails}>
-        <div class="mb-6">
-            <Label for="to" class="block mb-2 text-black">{m.attendees_to()}</Label>
-            <Input id="to" name="to" type="text" value={selectedAttendees.map(id => table_data_attendees.find(a => a.id === id).email).join("; ")} readonly />
-        </div>
-        <div class="mb-6">
-            <Label for="subject" class="block mb-2">{m.attendees_subject()}</Label>
-            <Input id="subject" name="subject" type="text" />
-        </div>
-        <div class="mb-6">
-            <Label for="body" class="block mb-2">{m.attendees_message()}</Label>
-            <Textarea id="body" name="body" rows="10" class="w-full" />
-        </div>
-        {#if message_send_email.type === 'error'}
-            <Alert type="error" color="red" class="mb-6">{message_send_email.message}</Alert>
-        {/if}
-        <div class="flex justify-center gap-2">
-            <Button color="primary" type="submit">{m.attendees_sendEmails()}</Button>
-        </div>
-    </form>
-</Modal>
+<SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
 
 <Modal id="nametag_modal" size="lg" title={m.attendees_nametag()} bind:open={nametag_modal} outsideclose>
     <div class="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">

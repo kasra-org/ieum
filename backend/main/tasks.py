@@ -11,16 +11,24 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 @shared_task
-def send_mail(subject, body, to):
+def send_mail(subject, body, to, reply_to=None, cc=None):
     print(f"Sending email to {to}...")
     try:
-        django_send_mail(subject, body, settings.EMAIL_FROM, [to], fail_silently=False)
+        email = EmailMessage(
+            subject=subject,
+            body=body,
+            from_email=settings.EMAIL_FROM,
+            to=[to],
+            reply_to=[reply_to] if reply_to else [],
+            cc=cc or [],
+        )
+        email.send(fail_silently=False)
         print(f"Mail sent to {to}!")
     except Exception as e:
         print(f"Error sending email to {to}: {e}")
 
 @shared_task
-def send_mail_with_attachment(subject, body, to, attachment_name, attachment_base64, attachment_mimetype='application/pdf'):
+def send_mail_with_attachment(subject, body, to, attachment_name, attachment_base64, attachment_mimetype='application/pdf', reply_to=None):
     """Send an email with a file attachment."""
     print(f"Sending email with attachment to {to}...")
     try:
@@ -28,7 +36,8 @@ def send_mail_with_attachment(subject, body, to, attachment_name, attachment_bas
             subject=subject,
             body=body,
             from_email=settings.EMAIL_FROM,
-            to=[to]
+            to=[to],
+            reply_to=[reply_to] if reply_to else [],
         )
         attachment_data = base64.b64decode(attachment_base64)
         email.attach(attachment_name, attachment_data, attachment_mimetype)

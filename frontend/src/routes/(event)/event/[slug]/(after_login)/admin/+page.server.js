@@ -247,6 +247,7 @@ export const actions = {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/send_emails`, {
             to: formdata.get('to'),
+            cc: formdata.get('cc') || '',
             subject: formdata.get('subject'),
             body: formdata.get('body'),
         }, cookies);
@@ -328,6 +329,16 @@ export const actions = {
     delete_eventadmin: async ({ cookies, params, request }) => {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/eventadmin/${formdata.get('id')}/delete`, {}, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            error(response.status, response.data);
+        }
+        return;
+    },
+    set_main_eventadmin: async ({ cookies, params, request }) => {
+        let formdata = await request.formData();
+        const response = await post(`api/event/${params.slug}/eventadmin/${formdata.get('id')}/set_main`, {}, cookies);
         if (response.ok && response.status === 200) {
             return response.data;
         } else {

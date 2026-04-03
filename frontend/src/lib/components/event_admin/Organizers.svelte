@@ -8,6 +8,7 @@
     import { languageTag } from '$lib/paraglide/runtime.js';
     import SearchableUserList from '$lib/components/SearchableUserList.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import ActionTooltip from '$lib/components/ActionTooltip.svelte';
 
     let { data } = $props();
 
@@ -194,12 +195,16 @@
                 <TableBodyCell>{languageTag() === 'ko' ? (row.affiliation_ko || row.affiliation) : row.affiliation}</TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
-                        <Button color="none" size="none" onclick={() => modifyOrganizerModal(row.id)}>
-                            <UserEditSolid class="w-5 h-5" />
-                        </Button>
-                        <Button color="none" size="none" onclick={() => deleteOrganizerModal(row.id)}>
-                            <UserRemoveSolid class="w-5 h-5" />
-                        </Button>
+                        <ActionTooltip text={m.organizers_updateOrganizer()}>
+                            <Button color="none" size="none" onclick={() => modifyOrganizerModal(row.id)}>
+                                <UserEditSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.organizers_deleteOrganizer()}>
+                            <Button color="none" size="none" onclick={() => deleteOrganizerModal(row.id)}>
+                                <UserRemoveSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
                     </div>
                 </TableBodyCell>
             </TableBodyRow>

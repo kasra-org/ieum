@@ -10,6 +10,8 @@
     import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
     import UserSelectionModal from '$lib/components/UserSelectionModal.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import ActionTooltip from '$lib/components/ActionTooltip.svelte';
+    import SendEmailModal from '$lib/components/SendEmailModal.svelte';
 
     let { data } = $props();
 
@@ -114,19 +116,9 @@
     const showSendEmailModal = () => {
         send_email_modal = true;
     };
-
-    let message_send_email = $state({});
-    const afterSuccessfulSendEmails = () => {
-        return async ({ result, action, update }) => {
-            if (result.type === 'success') {
-                await update({ reset: false });
-                send_email_modal = false;
-                message_send_email = {}
-            } else {
-                message_send_email = { type: 'error', message: m.abstracts_sendEmailError() };
-            }
-        };
-    };
+    let emailRecipients = $derived(
+        selectedReviewers.map(id => { const r = data.reviewers.find(a => a.id === id); return r?.user?.email || r?.user_email; }).filter(Boolean).join("; ")
+    );
 
     let abstract_modal = $state(false);
     let abstract_delete_modal = $state(false);
@@ -221,9 +213,11 @@
                 <TableBodyCell>{getDisplayInstitute(row)}</TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
-                        <Button color="none" size="none" onclick={() => deleteReviewerModal(row.id)}>
-                            <UserRemoveSolid class="w-5 h-5" />
-                        </Button>
+                        <ActionTooltip text={m.abstracts_removeReviewer()}>
+                            <Button color="none" size="none" onclick={() => deleteReviewerModal(row.id)}>
+                                <UserRemoveSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
                     </div>
                 </TableBodyCell>
             </TableBodyRow>
@@ -261,15 +255,21 @@
                 <TableBodyCell>{row.votes}</TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
-                        <Button color="none" size="none" href={row.link}>
-                            <DownloadSolid class="w-5 h-5" />
-                        </Button>
-                        <Button color="none" size="none" onclick={() => showAbstractEditModal(row.id)}>
-                            <EditSolid class="w-5 h-5" />
-                        </Button>
-                        <Button color="none" size="none" onclick={() => showAbstractDeleteModal(row.id)}>
-                            <TrashBinSolid class="w-5 h-5" />
-                        </Button>
+                        <ActionTooltip text={m.abstracts_download()}>
+                            <Button color="none" size="none" href={row.link}>
+                                <DownloadSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.abstracts_editAbstract()}>
+                            <Button color="none" size="none" onclick={() => showAbstractEditModal(row.id)}>
+                                <EditSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.abstracts_removeAbstract()}>
+                            <Button color="none" size="none" onclick={() => showAbstractDeleteModal(row.id)}>
+                                <TrashBinSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
                     </div>
                 </TableBodyCell>
             </TableBodyRow>
@@ -308,28 +308,7 @@
     </form>
 </Modal>
 
-<Modal id="send_email_modal" size="lg" title={m.abstracts_sendEmails()} bind:open={send_email_modal} outsideclose>
-    <form method="post" action="?/send_emails" use:enhance={afterSuccessfulSendEmails}>
-        <div class="mb-6">
-            <Label for="to" class="block mb-2 text-black">{m.abstracts_to()}</Label>
-            <Input id="to" name="to" type="text" value={selectedReviewers.map(id => { const r = data.reviewers.find(a => a.id === id); return r?.user?.email || r?.user_email; }).filter(Boolean).join("; ")} readonly />
-        </div>
-        <div class="mb-6">
-            <Label for="subject" class="block mb-2">{m.abstracts_subject()}</Label>
-            <Input id="subject" name="subject" type="text" />
-        </div>
-        <div class="mb-6">
-            <Label for="body" class="block mb-2">{m.abstracts_message()}</Label>
-            <Textarea id="body" name="body" rows="10" class="w-full" />
-        </div>
-        {#if message_send_email.type === 'error'}
-            <Alert type="error" color="red" class="mb-6">{message_send_email.message}</Alert>
-        {/if}
-        <div class="flex justify-center gap-2">
-            <Button color="primary" type="submit">{m.abstracts_sendEmails()}</Button>
-        </div>
-    </form>
-</Modal>
+<SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
 
 <Modal id="abstract_modal" size="lg" title={m.abstracts_detailsTitle()} bind:open={abstract_modal} outsideclose>
     <form method="post" action="?/update_abstract" use:enhance={afterUpdateAbstract}>

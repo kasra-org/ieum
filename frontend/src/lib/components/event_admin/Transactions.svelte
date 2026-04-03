@@ -8,6 +8,7 @@
 
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ConfirmModal from '$lib/components/ConfirmModal.svelte';
+    import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SearchableUserList from '$lib/components/SearchableUserList.svelte';
     import { calculateVat, calculateSuppliedAmount } from '$lib/cardPayment.js';
 
@@ -467,13 +468,17 @@
                 </TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
-                        <Button color="none" size="none" onclick={() => showNoteModal(payment)} title={m.transactions_editNote()}>
-                            <EditOutline class="w-5 h-5" />
-                        </Button>
-                        {#if payment.status !== 'cancelled'}
-                            <Button color="none" size="none" onclick={() => showCancelModal(payment)} title={m.transactions_cancelPayment()}>
-                                <CloseCircleSolid class="w-5 h-5 text-red-500" />
+                        <ActionTooltip text={m.transactions_editNote()}>
+                            <Button color="none" size="none" onclick={() => showNoteModal(payment)}>
+                                <EditOutline class="w-5 h-5" />
                             </Button>
+                        </ActionTooltip>
+                        {#if payment.status !== 'cancelled'}
+                            <ActionTooltip text={m.transactions_cancelPayment()}>
+                                <Button color="none" size="none" onclick={() => showCancelModal(payment)}>
+                                    <CloseCircleSolid class="w-5 h-5 text-red-500" />
+                                </Button>
+                            </ActionTooltip>
                         {/if}
                     </div>
                 </TableBodyCell>

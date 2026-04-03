@@ -10,6 +10,8 @@
     import { languageTag } from '$lib/paraglide/runtime.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import SearchableUserList from '$lib/components/SearchableUserList.svelte';
+    import ActionTooltip from '$lib/components/ActionTooltip.svelte';
+    import SendEmailModal from '$lib/components/SendEmailModal.svelte';
 
     let { data } = $props();
 
@@ -151,19 +153,9 @@
     const showSendEmailModal = () => {
         send_email_modal = true;
     };
-
-    let message_send_email = $state({});
-    const afterSuccessfulSendEmails = () => {
-        return async ({ result, action, update }) => {
-            if (result.type === 'success') {
-                await update({ reset: false });
-                send_email_modal = false;
-                message_send_email = {}
-            } else {
-                message_send_email = { type: 'error', message: m.speakers_sendEmailError() };
-            }
-        };
-    };
+    let emailRecipients = $derived(
+        selectedSpeakers.map(id => data.speakers.find(a => a.id === id)?.email).filter(Boolean).join("; ")
+    );
 </script>
 
 <Heading tag="h2" class="text-xl font-bold mb-3">{m.speakers_title()}</Heading>
@@ -217,12 +209,16 @@
                 <TableBodyCell>{format_type(row.type)}</TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
-                        <Button color="none" size="none" onclick={() => modifySpeakerModal(row.id)}>
-                            <UserEditSolid class="w-5 h-5" />
-                        </Button>
-                        <Button color="none" size="none" onclick={() => removeSpeakerModal(row.id)}>
-                            <UserRemoveSolid class="w-5 h-5" />
-                        </Button>
+                        <ActionTooltip text={m.speakers_updateSpeaker()}>
+                            <Button color="none" size="none" onclick={() => modifySpeakerModal(row.id)}>
+                                <UserEditSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.speakers_removeSpeaker()}>
+                            <Button color="none" size="none" onclick={() => removeSpeakerModal(row.id)}>
+                                <UserRemoveSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
                     </div>
                 </TableBodyCell>
             </TableBodyRow>
@@ -318,25 +314,4 @@
     </form>
 </Modal>
 
-<Modal id="send_email_modal" size="lg" title={m.speakers_sendEmails()} bind:open={send_email_modal} outsideclose>
-    <form method="post" action="?/send_emails" use:enhance={afterSuccessfulSendEmails}>
-        <div class="mb-6">
-            <Label for="to" class="block mb-2 text-black">{m.speakers_to()}</Label>
-            <Input id="to" name="to" type="text" value={selectedSpeakers.map(id => data.speakers.find(a => a.id === id).email).join("; ")} readonly />
-        </div>
-        <div class="mb-6">
-            <Label for="subject" class="block mb-2">{m.speakers_subject()}</Label>
-            <Input id="subject" name="subject" type="text" />
-        </div>
-        <div class="mb-6">
-            <Label for="body" class="block mb-2">{m.speakers_message()}</Label>
-            <Textarea id="body" name="body" rows="10" class="w-full" />
-        </div>
-        {#if message_send_email.type === 'error'}
-            <Alert type="error" color="red" class="mb-6">{message_send_email.message}</Alert>
-        {/if}
-        <div class="flex justify-center gap-2">
-            <Button color="primary" type="submit">{m.speakers_sendEmails()}</Button>
-        </div>
-    </form>
-</Modal>
+<SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />

@@ -2,13 +2,14 @@
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from 'flowbite-svelte';
     import { Button, Modal, Label, Input, Select, Textarea, Alert } from 'flowbite-svelte';
     import { Tabs, TabItem } from 'flowbite-svelte';
-    import { UserRemoveSolid } from 'flowbite-svelte-icons';
+    import { UserRemoveSolid, StarSolid, StarOutline } from 'flowbite-svelte-icons';
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import * as m from '$lib/paraglide/messages.js';
     import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
     import UserSelectionModal from '$lib/components/UserSelectionModal.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import ActionTooltip from '$lib/components/ActionTooltip.svelte';
 
     let { data } = $props();
 
@@ -81,6 +82,14 @@
             }
         }
     };
+
+    const afterToggleMainAdmin = () => {
+        return async ({ result, update }) => {
+            if (result.type === "success") {
+                await update({ reset: false });
+            }
+        }
+    };
 </script>
 
 <Heading tag="h2" class="text-xl font-bold mb-3">{m.eventAdmins_title()}</Heading>
@@ -103,9 +112,23 @@
                 <TableBodyCell>{getDisplayInstitute(row)}</TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
-                        <Button color="none" size="none" onclick={() => deleteEventAdminModal(row.id)}>
-                            <UserRemoveSolid class="w-5 h-5" />
-                        </Button>
+                        <ActionTooltip text={m.eventAdmins_toggleMainAdmin()}>
+                            <form method="POST" action="?/set_main_eventadmin" use:enhance={afterToggleMainAdmin}>
+                                <input type="hidden" name="id" value={row.id} />
+                                <Button color="none" size="none" type="submit">
+                                    {#if data.event.main_admin_id === row.id}
+                                        <StarSolid class="w-5 h-5 text-yellow-400" />
+                                    {:else}
+                                        <StarOutline class="w-5 h-5 text-gray-400 hover:text-yellow-400" />
+                                    {/if}
+                                </Button>
+                            </form>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.eventAdmins_deleteAdmin()}>
+                            <Button color="none" size="none" onclick={() => deleteEventAdminModal(row.id)}>
+                                <UserRemoveSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
                     </div>
                 </TableBodyCell>
             </TableBodyRow>

@@ -1064,10 +1064,12 @@ def register_event(request, event_id: int):
 
     event.attendees.add(attendee)
 
+    reply_to = event.main_admin.email if event.main_admin else None
     send_mail.delay(
         Template(event.email_template_registration.subject).render(Context({"event": event, "attendee": attendee}, autoescape=False)),
         Template(event.email_template_registration.body).render(Context({"event": event, "attendee": attendee}, autoescape=False)),
-        user.email
+        user.email,
+        reply_to=reply_to
     )
 
     return {"code": "success", "message": "Successfully registered."}
@@ -1216,10 +1218,12 @@ def submit_abstract(request, event_id: int):
         file_path=file_path,
     )
 
+    reply_to = event.main_admin.email if event.main_admin else None
     send_mail.delay(
         Template(event.email_template_abstract_submission.subject).render(Context({"event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)}, autoescape=False)),
         Template(event.email_template_abstract_submission.body).render(Context({"attendee": attendee, "event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)}, autoescape=False)),
-        attendee.user.email
+        attendee.user.email,
+        reply_to=reply_to
     )
 
     return {"code": "success", "message": "Successfully submitted!"}
@@ -1280,6 +1284,7 @@ def delete_speaker(request, event_id: int, speaker_id: int):
 @api.post("/event/{event_id}/send_emails", response=MessageSchema)
 @ensure_event_staff
 def send_emails(request, event_id: int):
+    event = Event.objects.get(id=event_id)
     data = json.loads(request.body)
 
     # Sanitize subject to prevent email header injection
@@ -1308,8 +1313,18 @@ def send_emails(request, event_id: int):
             status=400,
         )
 
+    # Parse CC recipients
+    cc_raw = data.get('cc', '')
+    valid_cc = []
+    if cc_raw:
+        for cc in cc_raw.split("; "):
+            cc = cc.strip()
+            if validate_email_format(cc):
+                valid_cc.append(cc)
+
+    reply_to = event.main_admin.email if event.main_admin else None
     for recipient in valid_recipients:
-        send_mail.delay(subject, body, recipient)
+        send_mail.delay(subject, body, recipient, reply_to=reply_to, cc=valid_cc if valid_cc else None)
 
     return {"code": "success", "message": f"Emails sent to {len(valid_recipients)} recipients."}
 
@@ -1357,12 +1372,14 @@ def send_certificate(request, event_id: int):
     subject = Template(event.email_template_certificate.subject).render(context)
     body = Template(event.email_template_certificate.body).render(context)
 
+    reply_to = event.main_admin.email if event.main_admin else None
     send_mail_with_attachment.delay(
         subject,
         body,
         email,
         f"Certificate_{attendee.first_name.replace(' ', '_')}.pdf",
-        pdf_base64
+        pdf_base64,
+        reply_to=reply_to
     )
     return {"code": "success", "message": "Certificate sent."}
 
@@ -1755,6 +1772,10 @@ def add_event_admin(request, event_id: int):
             status=400,
         )
     event.admins.add(user)
+    # Auto-set as main admin if this is the first admin
+    if event.main_admin is None:
+        event.main_admin = user
+        event.save(update_fields=['main_admin'])
     return {"code": "success", "message": "Admin added."}
 
 @api.post("/event/{event_id}/eventadmin/{admin_id}/delete", response=MessageSchema)
@@ -1763,7 +1784,31 @@ def delete_event_admin(request, event_id: int, admin_id: int):
     event = Event.objects.get(id=event_id)
     user = User.objects.get(id=admin_id)
     event.admins.remove(user)
+    # If the deleted admin was the main admin, reassign to next available or clear
+    if event.main_admin_id == admin_id:
+        next_admin = event.admins.first()
+        event.main_admin = next_admin
+        event.save(update_fields=['main_admin'])
     return {"code": "success", "message": "Admin deleted."}
+
+@api.post("/event/{event_id}/eventadmin/{admin_id}/set_main", response=MessageSchema)
+@ensure_event_staff
+def set_main_admin(request, event_id: int, admin_id: int):
+    event = Event.objects.get(id=event_id)
+    user = User.objects.get(id=admin_id)
+    if user not in event.admins.all():
+        return api.create_response(
+            request,
+            {"code": "not_admin", "message": "User is not an admin of this event."},
+            status=400,
+        )
+    # Toggle: unset if already main admin, otherwise set
+    if event.main_admin_id == admin_id:
+        event.main_admin = None
+    else:
+        event.main_admin = user
+    event.save(update_fields=['main_admin'])
+    return {"code": "success", "message": "Main admin updated."}
 
 @api.get("/event/{event_id}/organizers", response=List[OrganizerSchema])
 @ensure_event_staff

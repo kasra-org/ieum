@@ -11,6 +11,8 @@
     import OnSiteRegistrationForm from '$lib/components/OnSiteRegistrationForm.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ConfirmModal from '$lib/components/ConfirmModal.svelte';
+    import ActionTooltip from '$lib/components/ActionTooltip.svelte';
+    import SendEmailModal from '$lib/components/SendEmailModal.svelte';
     import QRCode from 'qrcode';
 
     let { data } = $props();
@@ -446,12 +448,30 @@
             cert_sending = false;
         }
     };
+
+    let send_email_modal = $state(false);
+    let send_email_to_all = $state(false);
+    const showSendEmailModal = () => {
+        send_email_to_all = false;
+        send_email_modal = true;
+    };
+    const showSendEmailToAllModal = () => {
+        send_email_to_all = true;
+        send_email_modal = true;
+    };
+    let emailRecipients = $derived(
+        send_email_to_all
+            ? sortedAttendees.map(a => a.email).filter(Boolean).join("; ")
+            : selectedAttendees.map(id => sortedAttendees.find(a => a.id === id)?.email).filter(Boolean).join("; ")
+    );
 </script>
 
 <Heading tag="h2" class="text-xl font-bold mb-3">{m.onsiteAttendees_title()}</Heading>
 <p class="font-light mb-6">{m.onsiteAttendees_description()}</p>
 
 <div class="flex justify-end items-center gap-2 flex-wrap mb-4">
+    <Button color="primary" size="sm" onclick={showSendEmailToAllModal}>{m.attendees_sendEmailToAll()}</Button>
+    <Button color="primary" size="sm" onclick={showSendEmailModal} disabled={selectedAttendees.length === 0}>{m.attendees_sendEmailToSelected()}</Button>
     <Button color="primary" size="sm" onclick={showBatchNametagModal} disabled={selectedAttendees.length === 0 || batch_nametag_generating}>
         {batch_nametag_generating ? '...' : m.attendees_printNametagsForSelected()}
     </Button>
@@ -518,18 +538,26 @@
                 <TableBodyCell>{row.job_title}</TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
-                        <Button color="none" size="none" onclick={() => showNametagModal(row.id)}>
-                            <TagOutline class="w-5 h-5" />
-                        </Button>
-                        <Button color="none" size="none" onclick={() => showCertificateModal(row.id)} disabled={!row.is_confirmed}>
-                            <AwardOutline class="w-5 h-5 {row.is_confirmed ? '' : 'opacity-30'}" />
-                        </Button>
-                        <Button color="none" size="none" onclick={() => showAttenteeModal(row.id)}>
-                            <UserEditSolid class="w-5 h-5" />
-                        </Button>
-                        <Button color="none" size="none" onclick={() => showRemoveAttenteeModal(row.id)}>
-                            <UserRemoveSolid class="w-5 h-5" />
-                        </Button>
+                        <ActionTooltip text={m.onsiteAttendees_nametag()}>
+                            <Button color="none" size="none" onclick={() => showNametagModal(row.id)}>
+                                <TagOutline class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.onsiteAttendees_certificate()}>
+                            <Button color="none" size="none" onclick={() => showCertificateModal(row.id)} disabled={!row.is_confirmed}>
+                                <AwardOutline class="w-5 h-5 {row.is_confirmed ? '' : 'opacity-30'}" />
+                            </Button>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.onsiteAttendees_detailsTitle()}>
+                            <Button color="none" size="none" onclick={() => showAttenteeModal(row.id)}>
+                                <UserEditSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.onsiteAttendees_remove()}>
+                            <Button color="none" size="none" onclick={() => showRemoveAttenteeModal(row.id)}>
+                                <UserRemoveSolid class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
                     </div>
                 </TableBodyCell>
             </TableBodyRow>
@@ -708,6 +736,8 @@
         <Button color="dark" onclick={() => qr_modal = false}>{m.onsiteAttendees_close()}</Button>
     </div>
 </Modal>
+
+<SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
 
 <ConfirmModal
     bind:open={bulk_cert_confirm_modal}

@@ -183,6 +183,7 @@ class Event(models.Model):
     attendees = models.ManyToManyField('Attendee', related_name='events', blank=True)
     reviewers = models.ManyToManyField('Attendee', related_name='reviewed_events', blank=True)
     admins = models.ManyToManyField('User', related_name='admins', blank=True)
+    main_admin = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='main_admin_events')
     published = models.BooleanField(default=False)
     is_archived = models.BooleanField(default=False)
 
