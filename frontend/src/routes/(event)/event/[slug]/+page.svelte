@@ -31,7 +31,7 @@
     marked.use({
         hooks: {
             postprocess(html) {
-                return html.replace(/<table>/g, '<div class="overflow-x-auto"><table>').replace(/<\/table>/g, '</table></div>');
+                return html.replace(/<table>/g, '<div class="table-scroll-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
             }
         }
     });
@@ -208,7 +208,7 @@
                 </div>
 
                 {#if descriptionHtml}
-                    <div class="prose prose-gray max-w-none mt-6 pt-6 border-t border-gray-200">
+                    <div class="prose prose-gray max-w-none mt-6 pt-6 border-t border-gray-200 break-words">
                         {@html descriptionHtml}
                     </div>
                 {/if}
@@ -326,3 +326,18 @@
         </div>
     </div>
 </div>
+
+<style>
+    :global(.table-scroll-wrapper) {
+        overflow-x: auto;
+        background:
+            linear-gradient(to right, white 30%, transparent),
+            linear-gradient(to left, white 30%, transparent),
+            linear-gradient(to right, rgba(0,0,0,0.15), transparent 70%),
+            linear-gradient(to left, rgba(0,0,0,0.15), transparent 70%);
+        background-position: left center, right center, left center, right center;
+        background-size: 20px 100%, 20px 100%, 10px 100%, 10px 100%;
+        background-repeat: no-repeat;
+        background-attachment: local, local, scroll, scroll;
+    }
+</style>
