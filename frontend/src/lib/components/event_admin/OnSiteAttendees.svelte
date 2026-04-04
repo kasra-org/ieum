@@ -1,7 +1,8 @@
 <script>
-    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Button } from 'flowbite-svelte';
+    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Button, Dropdown, DropdownItem } from 'flowbite-svelte';
     import { Modal, Heading, Textarea, Select, Label, Card, Input } from 'flowbite-svelte';
     import { Alert } from 'flowbite-svelte';
+    import { ChevronDownOutline } from 'flowbite-svelte-icons';
     import { enhance } from '$app/forms';
     import { invalidateAll } from '$app/navigation';
     import { UserEditSolid, UserRemoveSolid, TagOutline, AwardOutline, CheckCircleSolid } from 'flowbite-svelte-icons';
@@ -270,27 +271,36 @@
     let bulk_cert_sending = $state(false);
     let bulk_cert_message = $state({});
     let bulk_cert_confirm_modal = $state(false);
+    let cert_send_all = $state(false);
 
+    let certTargetIds = $derived(cert_send_all ? sortedAttendees.map(a => a.id) : selectedAttendees);
     let certEligibleCount = $derived(
-        selectedAttendees.filter(id => {
+        certTargetIds.filter(id => {
             const p = sortedAttendees.find(a => a.id === id);
             return p && p.email && p.is_confirmed;
         }).length
     );
-    let certSkippedCount = $derived(selectedAttendees.length - certEligibleCount);
+    let certSkippedCount = $derived(certTargetIds.length - certEligibleCount);
 
     const showSendCertificatesConfirm = () => {
         if (selectedAttendees.length === 0) return;
+        cert_send_all = false;
+        bulk_cert_confirm_modal = true;
+    };
+
+    const showSendCertificatesToAllConfirm = () => {
+        cert_send_all = true;
         bulk_cert_confirm_modal = true;
     };
 
     const sendCertificatesToSelected = async () => {
         bulk_cert_confirm_modal = false;
-        if (selectedAttendees.length === 0 || bulk_cert_sending) return;
+        const targetIds = cert_send_all ? sortedAttendees.map(a => a.id) : selectedAttendees;
+        if (targetIds.length === 0 || bulk_cert_sending) return;
         bulk_cert_sending = true;
         bulk_cert_message = {};
         try {
-            for (const id of selectedAttendees) {
+            for (const id of targetIds) {
                 const p = sortedAttendees.find(a => a.id === id);
                 if (!p.email || !p.is_confirmed) continue;
                 const pdfDataUri = await generateCertificatePDF({
@@ -478,20 +488,23 @@
 <p class="font-light mb-6">{m.onsiteAttendees_description()}</p>
 
 <div class="flex justify-end items-center gap-2 flex-wrap mb-4">
-    <Button color="primary" size="sm" onclick={showSendEmailToAllModal}>{m.attendees_sendEmailToAll()}</Button>
-    <Button color="primary" size="sm" onclick={showSendEmailModal} disabled={selectedAttendees.length === 0}>{m.attendees_sendEmailToSelected()}</Button>
+    <Button color="primary" size="sm">{m.attendees_emailActions()}<ChevronDownOutline class="w-3 h-3 ms-1" /></Button>
+    <Dropdown class="w-auto list-none p-1">
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendEmailToAllModal}>{m.attendees_sendEmailToAll()}</DropdownItem>
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendEmailModal} disabled={selectedAttendees.length === 0}>{m.attendees_sendEmailToSelected()}</DropdownItem>
+    </Dropdown>
+
+    <Button color="primary" size="sm" disabled={bulk_cert_sending}>{bulk_cert_sending ? m.attendees_sendingCertificates() : m.attendees_certificateActions()}<ChevronDownOutline class="w-3 h-3 ms-1" /></Button>
+    <Dropdown class="w-auto list-none p-1">
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendCertificatesToAllConfirm} disabled={bulk_cert_sending}>{m.attendees_sendCertificatesToAll()}</DropdownItem>
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendCertificatesConfirm} disabled={selectedAttendees.length === 0 || bulk_cert_sending}>{m.attendees_sendCertificatesToSelected()}</DropdownItem>
+    </Dropdown>
+
     <Button color="primary" size="sm" onclick={showBatchNametagModal} disabled={selectedAttendees.length === 0 || batch_nametag_generating}>
         {batch_nametag_generating ? '...' : m.attendees_printNametagsForSelected()}
     </Button>
-    <Button color="primary" size="sm" onclick={showSendCertificatesConfirm} disabled={selectedAttendees.length === 0 || bulk_cert_sending}>
-        {bulk_cert_sending ? m.attendees_sendingCertificates() : m.attendees_sendCertificatesToSelected()}
-    </Button>
-    <Button color="primary" size="sm" onclick={showQRCodeModal}>
-        {m.onsiteRegistration_qrCode()}
-    </Button>
-    <Button color="primary" size="sm" onclick={exportAttendeesAsCSV}>
-        {m.onsiteAttendees_exportCSV()}
-    </Button>
+    <Button color="primary" size="sm" onclick={showQRCodeModal}>{m.onsiteRegistration_qrCode()}</Button>
+    <Button color="primary" size="sm" onclick={exportAttendeesAsCSV}>{m.onsiteAttendees_exportCSV()}</Button>
 </div>
 {#if bulk_cert_message.type === 'success'}
     <Alert type="success" color="green" class="mt-3">{bulk_cert_message.message}</Alert>
