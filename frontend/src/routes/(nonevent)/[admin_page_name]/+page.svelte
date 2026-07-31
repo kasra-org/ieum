@@ -1,7 +1,7 @@
 <script>
     import { Card, Button } from 'flowbite-svelte';
     import { Sidebar, SidebarGroup, SidebarItem, SidebarWrapper } from 'flowbite-svelte';
-    import { CalendarMonthSolid, UsersGroupSolid, BuildingSolid, CogSolid, ClockSolid, FileLinesSolid, ClipboardListSolid, GlobeSolid, KeySolid } from 'flowbite-svelte-icons';
+    import { CalendarMonthSolid, UsersGroupSolid, BuildingSolid, CogSolid, ClockSolid, FileLinesSolid, ClipboardListSolid, GlobeSolid, ApiKeyOutline } from 'flowbite-svelte-icons';
     import { onMount } from 'svelte';
     import { fly } from 'svelte/transition';
     import * as m from '$lib/paraglide/messages.js';
@@ -152,7 +152,7 @@
                         {#if data.admin.apiKeys}
                         <SidebarItem label={m.admin_sidebar_apiKeys()} active={sidebar_selected === 'api_keys'} href="#api_keys">
                             {#snippet icon()}
-                                <KeySolid class="w-6 h-6" />
+                                <ApiKeyOutline class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
                         {/if}
