@@ -26,6 +26,11 @@ export async function load({ parent, params, cookies }) {
         institutions: await get_data_or_404('institutions')
     };
 
+    // API keys are superuser-only; a non-superuser admin simply sees no panel.
+    const apiKeysResponse = await get('api/admin/apikeys', cookies);
+    data.admin.apiKeys = (apiKeysResponse.ok && apiKeysResponse.status === 200)
+        ? apiKeysResponse.data : null;
+
     // Load site settings (public endpoint, doesn't require admin auth)
     const siteSettingsResponse = await get('api/site-settings', cookies);
     if (siteSettingsResponse.ok && siteSettingsResponse.status === 200) {
@@ -94,6 +99,36 @@ export async function load({ parent, params, cookies }) {
 
 /** @type {import('./$types').PageServerActions} */
 export const actions = {
+    'create_api_key': async ({ cookies, request }) => {
+        const formdata = await request.formData();
+        const response = await post('api/admin/apikey/add', {
+            name: formdata.get('name'),
+            user_id: parseInt(formdata.get('user_id'))
+        }, cookies);
+        // On success the backend returns the plaintext secret in `message`;
+        // it is shown once and never retrievable again.
+        return response.ok
+            ? { success: true, secret: response.data.message }
+            : { success: false, error: response.data?.message || 'Failed to create key' };
+    },
+    'rotate_api_key': async ({ cookies, request }) => {
+        const formdata = await request.formData();
+        const response = await post(`api/admin/apikey/${formdata.get('key_id')}/rotate`, {}, cookies);
+        return response.ok
+            ? { success: true, secret: response.data.message }
+            : { success: false, error: response.data?.message || 'Failed to rotate key' };
+    },
+    'revoke_api_key': async ({ cookies, request }) => {
+        const formdata = await request.formData();
+        const response = await post(`api/admin/apikey/${formdata.get('key_id')}/revoke`,
+            { revoked: formdata.get('revoked') === 'true' }, cookies);
+        return { success: response.ok };
+    },
+    'delete_api_key': async ({ cookies, request }) => {
+        const formdata = await request.formData();
+        const response = await post(`api/admin/apikey/${formdata.get('key_id')}/delete`, {}, cookies);
+        return { success: response.ok };
+    },
     'search_institutions': async ({ cookies, request }) => {
         let formdata = await request.formData();
         const search = formdata.get('search') || '';

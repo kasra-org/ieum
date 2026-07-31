@@ -23,7 +23,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from main.models import Event, EmailTemplate, Attendee, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction
+from main.models import ApiKey, User, Event, EmailTemplate, Attendee, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction
 from main.schema import *
 from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id
 from main import nicepay
@@ -41,6 +41,24 @@ def ensure_staff(func):
             return api.create_response(
                 request,
                 {"code": "permission_denied", "message": "Permission denied"},
+                status=403,
+            )
+        return func(*args, **kwargs)
+    return wrapper
+
+def ensure_superuser(func):
+    """Stricter than ensure_staff: for operations that can grant access.
+
+    Issuing an API key binds it to an arbitrary account, so the ability to
+    create one is the ability to act as that account — staff is not enough.
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        request = args[0]
+        if not request.user.is_superuser:
+            return api.create_response(
+                request,
+                {"code": "permission_denied", "message": "Superuser required"},
                 status=403,
             )
         return func(*args, **kwargs)
@@ -3206,3 +3224,65 @@ def upload_editor_file(request):
         "url": file_url,
         "filename": safe_filename,
     }
+
+# ── API keys ────────────────────────────────────────────────────────────────
+# Superuser-only: a key acts as the user it is bound to. The secret is returned
+# exactly once, by add/rotate; only its hash is stored.
+
+@api.get("/admin/apikeys", response=List[ApiKeySchema])
+@ensure_superuser
+def list_api_keys(request):
+    return ApiKey.objects.select_related("user").all()
+
+
+@api.post("/admin/apikey/add", response=MessageSchema)
+@ensure_superuser
+def add_api_key(request):
+    data = json.loads(request.body)
+    name = (data.get("name") or "").strip()
+    user_id = data.get("user_id")
+    if not name or not user_id:
+        return api.create_response(
+            request, {"code": "missing_fields", "message": "name and user_id are required."},
+            status=400)
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return api.create_response(
+            request, {"code": "not_found", "message": "User not found."}, status=404)
+    _, raw = ApiKey.generate(name=name, user=user)
+    # The only time the plaintext exists outside the caller's hands.
+    return {"code": "success", "message": raw}
+
+
+@api.post("/admin/apikey/{key_id}/rotate", response=MessageSchema)
+@ensure_superuser
+def rotate_api_key(request, key_id: int):
+    try:
+        key = ApiKey.objects.get(id=key_id)
+    except ApiKey.DoesNotExist:
+        return api.create_response(
+            request, {"code": "not_found", "message": "Key not found."}, status=404)
+    return {"code": "success", "message": key.rotate()}
+
+
+@api.post("/admin/apikey/{key_id}/revoke", response=MessageSchema)
+@ensure_superuser
+def revoke_api_key(request, key_id: int):
+    data = json.loads(request.body) if request.body else {}
+    revoked = data.get("revoked", True)
+    try:
+        key = ApiKey.objects.get(id=key_id)
+    except ApiKey.DoesNotExist:
+        return api.create_response(
+            request, {"code": "not_found", "message": "Key not found."}, status=404)
+    key.revoked_at = timezone.now() if revoked else None
+    key.save(update_fields=["revoked_at"])
+    return {"code": "success", "message": "Key revoked." if revoked else "Key re-enabled."}
+
+
+@api.post("/admin/apikey/{key_id}/delete", response=MessageSchema)
+@ensure_superuser
+def delete_api_key(request, key_id: int):
+    ApiKey.objects.filter(id=key_id).delete()
+    return {"code": "success", "message": "Key deleted."}

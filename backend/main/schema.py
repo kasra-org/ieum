@@ -2,7 +2,7 @@
 from ninja import Schema
 
 from typing import List, Union, Optional
-from datetime import date
+from datetime import date, datetime
 
 from main.models import User, Attendee, Abstract, OnSiteAttendee, Institution
 from main.utils import docx_to_html, odt_to_html
@@ -622,3 +622,13 @@ class TermsOfServiceUpdateSchema(Schema):
     """Schema for updating terms of service"""
     content_en: str
     content_ko: str
+
+class ApiKeySchema(Schema):
+    """API key metadata. The secret itself is never returned — only its prefix."""
+    id: int
+    name: str
+    prefix: str
+    user_id: int
+    created_at: datetime
+    last_used_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None

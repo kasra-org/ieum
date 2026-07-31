@@ -1,7 +1,7 @@
 <script>
     import { Card, Button } from 'flowbite-svelte';
     import { Sidebar, SidebarGroup, SidebarItem, SidebarWrapper } from 'flowbite-svelte';
-    import { CalendarMonthSolid, UsersGroupSolid, BuildingSolid, CogSolid, ClockSolid, FileLinesSolid, ClipboardListSolid, GlobeSolid } from 'flowbite-svelte-icons';
+    import { CalendarMonthSolid, UsersGroupSolid, BuildingSolid, CogSolid, ClockSolid, FileLinesSolid, ClipboardListSolid, GlobeSolid, KeySolid } from 'flowbite-svelte-icons';
     import { onMount } from 'svelte';
     import { fly } from 'svelte/transition';
     import * as m from '$lib/paraglide/messages.js';
@@ -14,6 +14,7 @@
     import PrivacyPolicy from '$lib/components/admin/PrivacyPolicy.svelte';
     import TermsOfService from '$lib/components/admin/TermsOfService.svelte';
     import SiteSettings from '$lib/components/admin/SiteSettings.svelte';
+    import ApiKeys from '$lib/components/admin/ApiKeys.svelte';
 
     let { data } = $props();
 
@@ -148,6 +149,13 @@
                                 <ClipboardListSolid class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
+                        {#if data.admin.apiKeys}
+                        <SidebarItem label={m.admin_sidebar_apiKeys()} active={sidebar_selected === 'api_keys'} href="#api_keys">
+                            {#snippet icon()}
+                                <KeySolid class="w-6 h-6" />
+                            {/snippet}
+                        </SidebarItem>
+                        {/if}
                     </SidebarGroup>
                     </div>
                 </Sidebar>
@@ -164,6 +172,10 @@
         <div class="p-6 sm:p-8 overflow-auto w-full">
             {#if sidebar_selected === 'events'}
             <Events {data} />
+            {/if}
+
+            {#if sidebar_selected === 'api_keys' && data.admin.apiKeys}
+            <ApiKeys {data} />
             {/if}
 
             {#if sidebar_selected === 'users'}
