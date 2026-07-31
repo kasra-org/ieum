@@ -19,24 +19,28 @@
     let { data } = $props();
 
     let sidebar_selected = $state('events');
+
+    // One list rather than a chain of !== comparisons: a panel added without a
+    // matching entry here silently redirects to #events, which is easy to miss.
+    const ADMIN_PAGES = [
+        'events', 'users', 'institutions', 'site_settings', 'business_settings',
+        'account_settings', 'privacy_policy', 'terms_of_service', 'api_keys'
+    ];
+
     const setAdminPage = () => {
         if (!location.hash) {
             sidebar_selected = 'events';
             return;
         }
-        if (location.hash !== '#events' &&
-            location.hash !== '#users' &&
-            location.hash !== '#institutions' &&
-            location.hash !== '#site_settings' &&
-            location.hash !== '#business_settings' &&
-            location.hash !== '#account_settings' &&
-            location.hash !== '#privacy_policy' &&
-            location.hash !== '#terms_of_service'
-        ) {
+        const page = location.hash.slice(1);
+        // api_keys is superuser-only; the loader leaves apiKeys null otherwise,
+        // so fall back rather than showing an empty panel.
+        const allowed = ADMIN_PAGES.includes(page) && (page !== 'api_keys' || !!data.admin.apiKeys);
+        if (!allowed) {
             location.hash = '#events';
             return;
         }
-        sidebar_selected = location.hash.slice(1);
+        sidebar_selected = page;
         const el = document.getElementById('scroll_here');
         if (el) {
             el.scrollIntoView({ behavior: 'smooth' });
