@@ -819,3 +819,63 @@ class ExchangeRate(models.Model):
 
     def __str__(self):
         return f"{self.currency_from}/{self.currency_to}: {self.rate}"
+
+class ApiKey(models.Model):
+    """
+    A named API key that authenticates machine clients (integrations, agents,
+    MCP servers) as a specific user.
+
+    Only a SHA-256 hash of the key is stored; the plaintext is shown once, at
+    creation. Requests present it as `X-API-Key: <key>`; ApiKeyAuthMiddleware
+    resolves it to `user`, so every existing permission check that reads
+    `request.user` keeps working unchanged.
+    """
+    PREFIX = "ieum_"
+
+    name = models.CharField(max_length=200, help_text="What this key is for, e.g. 'events MCP'")
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='api_keys',
+                             help_text="Requests using this key act as this user")
+    # First few plaintext chars, stored to let admins tell keys apart in lists.
+    prefix = models.CharField(max_length=16, editable=False, db_index=True)
+    key_hash = models.CharField(max_length=64, unique=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True, editable=False)
+    revoked_at = models.DateTimeField(null=True, blank=True,
+                                      help_text="Set to disable this key without deleting it")
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        state = "revoked" if self.revoked_at else "active"
+        return f"{self.name} ({self.prefix}…, {state})"
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None
+
+    @staticmethod
+    def hash_key(raw: str) -> str:
+        import hashlib
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    @classmethod
+    def generate(cls, name: str, user) -> tuple["ApiKey", str]:
+        """Create a key. Returns (instance, plaintext) — plaintext is not recoverable."""
+        import secrets
+        raw = cls.PREFIX + secrets.token_urlsafe(32)
+        obj = cls.objects.create(
+            name=name, user=user,
+            prefix=raw[:12], key_hash=cls.hash_key(raw),
+        )
+        return obj, raw
+
+    def rotate(self) -> str:
+        """Issue a new secret for this key, invalidating the old one immediately."""
+        import secrets
+        raw = self.PREFIX + secrets.token_urlsafe(32)
+        self.prefix = raw[:12]
+        self.key_hash = self.hash_key(raw)
+        self.revoked_at = None
+        self.save(update_fields=['prefix', 'key_hash', 'revoked_at'])
+        return raw
