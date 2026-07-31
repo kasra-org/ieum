@@ -411,12 +411,17 @@ def get_events(request, offset: int = 0, limit: int = 20, year: str = None, sear
         events = events.filter(start_date__year=int(year))
 
     if search:
+        # organizers_en / organizers_ko are Event properties, not columns —
+        # filtering on them raises FieldError. Organizers live in Organizer.
         events = events.filter(
             Q(name__icontains=search) |
             Q(venue__icontains=search) |
-            Q(organizers_en__icontains=search) |
-            Q(organizers_ko__icontains=search)
-        )
+            Q(venue_ko__icontains=search) |
+            Q(organizer_set__name__icontains=search) |
+            Q(organizer_set__korean_name__icontains=search) |
+            Q(organizer_set__affiliation__icontains=search) |
+            Q(organizer_set__affiliation_ko__icontains=search)
+        ).distinct()
 
     if showOnlyOpen:
         from datetime import datetime
@@ -445,6 +450,30 @@ def add_event(request):
         return api.create_response(
             request,
             {"code": "missing_fields", "message": "Please fill all required fields."},
+            status=400,
+        )
+
+    # Parse organizers BEFORE creating anything. This used to run after the
+    # Event row (and three EmailTemplates) were already written, so malformed
+    # input raised a 500 and left a half-built event behind.
+    organizers_data = data.get("organizers", []) or []
+    if isinstance(organizers_data, str):
+        try:
+            organizers_data = json.loads(organizers_data) if organizers_data.strip() else []
+        except json.JSONDecodeError:
+            return api.create_response(
+                request,
+                {"code": "invalid_organizers",
+                 "message": "organizers must be a list of objects "
+                            "(name, korean_name, email, affiliation, affiliation_ko, order)."},
+                status=400,
+            )
+    if not isinstance(organizers_data, list) or any(not isinstance(o, dict) for o in organizers_data):
+        return api.create_response(
+            request,
+            {"code": "invalid_organizers",
+             "message": "organizers must be a list of objects "
+                        "(name, korean_name, email, affiliation, affiliation_ko, order)."},
             status=400,
         )
 
@@ -528,10 +557,7 @@ def add_event(request):
         onsite_code=generate_onsite_code(),
     )
 
-    # Add organizers from provided data
-    organizers_data = data.get("organizers", [])
-    if isinstance(organizers_data, str):
-        organizers_data = json.loads(organizers_data) if organizers_data else []
+    # Add organizers (already validated above)
     for org in organizers_data:
         Organizer.objects.create(
             event=event,
@@ -613,50 +639,71 @@ def get_admin_event(request, event_id: int):
 @api.post("/event/{event_id}/update", response=MessageSchema)
 @ensure_event_staff
 def update_event(request, event_id: int):
+    """Partial update: only the keys present in the body are touched.
+
+    This used to read data["name"], data["start_date"], data["capacity"] etc.
+    unconditionally — so any caller sending a subset got a KeyError 500 — and
+    defaulted every absent optional field ("" / None / ['en']), silently wiping
+    values the caller never mentioned. Clients that send the whole object are
+    unaffected; clients that send a subset now behave as expected.
+    """
     data = json.loads(request.body)
     event = Event.objects.get(id=event_id)
-    event.name = data["name"]
-    event.description = data.get("description", "")
-    event.category = data.get("category", "conference")
-    # Set default link_info if not provided or empty
-    link_info = data.get("link_info", "").strip()
-    event.link_info = link_info if link_info else f"{settings.HEADLESS_URL_ROOT}/event/{event.id}"
-    event.start_date = data["start_date"]
-    event.end_date = data["end_date"]
-    event.venue = data["venue"]
-    event.venue_ko = data.get("venue_ko", "")
-    event.venue_address = data.get("venue_address", "")
-    event.venue_address_ko = data.get("venue_address_ko", "")
-    event.venue_latitude = float(data["venue_latitude"]) if data.get("venue_latitude") else None
-    event.venue_longitude = float(data["venue_longitude"]) if data.get("venue_longitude") else None
-    # Parse main_languages if it's a JSON string, otherwise use the array directly
-    main_languages_value = data.get("main_languages", [])
-    if isinstance(main_languages_value, str):
-        main_languages = json.loads(main_languages_value) if main_languages_value else []
-    else:
-        main_languages = main_languages_value
-    # Set default to English if empty
-    event.main_languages = main_languages if main_languages else ['en']
-        # Default registration_deadline to day before start_date if not provided
-    if data.get("registration_deadline"):
-        event.registration_deadline = data["registration_deadline"]
-    else:
-        from datetime import timedelta
-        start_date = datetime.strptime(data["start_date"], "%Y-%m-%d").date()
-        event.registration_deadline = start_date - timedelta(days=1)
-    event.capacity = data["capacity"]
-    event.registration_fee = int(data["registration_fee"]) if data.get("registration_fee") not in [None, ""] else None
-    event.accepts_abstract = data["accepts_abstract"] == "true"
-    event.abstract_submission_type = data.get("abstract_submission_type", "internal")
-    event.external_abstract_url = data.get("external_abstract_url", "")
+
+    def as_bool(v):
+        # Accepts a real JSON boolean or the legacy "true"/"false" strings.
+        return v is True or (isinstance(v, str) and v.strip().lower() == "true")
+
+    for field in ("name", "description", "category", "start_date", "end_date",
+                  "venue", "venue_ko", "venue_address", "venue_address_ko",
+                  "abstract_submission_type", "external_abstract_url"):
+        if field in data:
+            setattr(event, field, data[field])
+
+    if "link_info" in data:
+        link_info = (data.get("link_info") or "").strip()
+        event.link_info = link_info if link_info else f"{settings.HEADLESS_URL_ROOT}/event/{event.id}"
+
+    for field in ("venue_latitude", "venue_longitude"):
+        if field in data:
+            setattr(event, field, float(data[field]) if data[field] not in (None, "") else None)
+
+    if "main_languages" in data:
+        value = data["main_languages"]
+        if isinstance(value, str):
+            value = json.loads(value) if value else []
+        event.main_languages = value if value else ['en']
+
+    if "registration_deadline" in data:
+        if data["registration_deadline"]:
+            event.registration_deadline = data["registration_deadline"]
+        else:
+            from datetime import timedelta
+            start = event.start_date
+            if isinstance(start, str):
+                start = datetime.strptime(start, "%Y-%m-%d").date()
+            event.registration_deadline = start - timedelta(days=1)
+
+    if "capacity" in data:
+        event.capacity = data["capacity"]
+    if "registration_fee" in data:
+        event.registration_fee = int(data["registration_fee"]) if data["registration_fee"] not in (None, "") else None
+    if "accepts_abstract" in data:
+        event.accepts_abstract = as_bool(data["accepts_abstract"])
     if "published" in data:
-        event.published = data["published"] == "true"
-    event.invitation_code = data.get("invitation_code", "").strip().upper()
+        event.published = as_bool(data["published"])
+    if "invitation_code" in data:
+        event.invitation_code = (data.get("invitation_code") or "").strip().upper()
+
     event.save()
+
     if event.accepts_abstract and event.abstract_submission_type == "internal":
-        event.abstract_deadline = data["abstract_deadline"] if data["abstract_deadline"] else None
-        event.capacity_abstract = int(data["capacity_abstract"]) if data.get("capacity_abstract") not in [None, ""] else 0
-        event.max_votes = int(data["max_votes"]) if data.get("max_votes") not in [None, ""] else 2
+        if "abstract_deadline" in data:
+            event.abstract_deadline = data["abstract_deadline"] or None
+        if "capacity_abstract" in data:
+            event.capacity_abstract = int(data["capacity_abstract"]) if data["capacity_abstract"] not in (None, "") else 0
+        if "max_votes" in data:
+            event.max_votes = int(data["max_votes"]) if data["max_votes"] not in (None, "") else 2
         event.save()
 
     return {"code": "success", "message": "Event updated."}
