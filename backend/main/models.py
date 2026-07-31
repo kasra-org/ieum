@@ -350,13 +350,24 @@ class PaymentHistory(models.Model):
         ('pending', 'Pending'),
     ]
 
+    # Which payment gateway produced this record. Cancellation dispatches on
+    # this, so it must be set whenever a PG-backed payment is created.
+    PROVIDER_CHOICES = [
+        ('toss', 'Toss Payments'),
+        ('paypal', 'PayPal'),
+        ('nicepay', 'NicePay'),
+        ('manual', 'Manual'),
+    ]
+
     attendee = models.ForeignKey(Attendee, on_delete=models.SET_NULL, null=True, blank=True, related_name='payments')
     event = models.ForeignKey('Event', on_delete=models.SET_NULL, null=True, related_name='payments')
     amount = models.IntegerField(default=0)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed')
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='toss')
     payment_type = models.CharField(max_length=50, blank=True)  # Payment method from Toss (e.g., 카드, 계좌이체)
     note = models.TextField(blank=True)  # Admin notes for the transaction
-    # Toss Payments fields
+    # Gateway identifiers. Historically named after Toss; also reused for the
+    # PayPal order/capture pair and the NicePay Moid/TID pair.
     toss_payment_key = models.CharField(max_length=200, blank=True, null=True)
     toss_order_id = models.CharField(max_length=64, blank=True, null=True)  # Our generated order ID
     created_at = models.DateTimeField(auto_now_add=True)
@@ -423,6 +434,58 @@ class PaymentHistory(models.Model):
         return f"Payment #{self.id} - {email} - {event_name}"
 
 
+class NicePayTransaction(models.Model):
+    """
+    In-flight NicePay authenticated payment (인증결제).
+
+    NicePay posts the authentication result back to the server from the payer's
+    browser as a cross-site POST, which means our session cookie is not sent.
+    This record is created before the payment window opens so the callback can
+    recover who is paying, and how much they are expected to pay, from the order
+    number alone - never from the untrusted POST body.
+
+    A PaymentHistory row is only created once approval succeeds, matching how
+    the Toss and PayPal flows behave.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),            # window opened, no result yet
+        ('authenticated', 'Authenticated'),  # auth ok, approval in progress
+        ('approved', 'Approved'),
+        ('failed', 'Failed'),
+    ]
+
+    order_id = models.CharField(max_length=64, unique=True)  # Moid
+    attendee = models.ForeignKey(Attendee, on_delete=models.CASCADE, related_name='nicepay_transactions')
+    event = models.ForeignKey('Event', on_delete=models.CASCADE, related_name='nicepay_transactions')
+    amount = models.IntegerField()
+    pay_method = models.CharField(max_length=20, default='CARD')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    tid = models.CharField(max_length=30, blank=True)  # TxTid / TID
+    # Holds either a NicePay ResultCode (4 bytes) or an internal failure code
+    # such as 'amount_mismatch', so it needs more room than the PG codes alone.
+    result_code = models.CharField(max_length=50, blank=True)
+    result_message = models.TextField(blank=True)
+
+    payment = models.OneToOneField(
+        PaymentHistory, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='nicepay_transaction',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['order_id']),
+            models.Index(fields=['tid']),
+        ]
+
+    def __str__(self):
+        return f"NicePay {self.order_id} ({self.status})"
+
+
 class BusinessSettings(models.Model):
     """
     Singleton model for business settings used in receipts (영수증용 사업자 정보)
@@ -432,6 +495,12 @@ class BusinessSettings(models.Model):
     address = models.CharField(max_length=500, blank=True)  # 주소
     representative = models.CharField(max_length=100, blank=True)  # 대표자
     phone = models.CharField(max_length=20, blank=True)  # 연락처
+    # English variants shown to English-language visitors. The registration
+    # number and phone are language-neutral, so they are not duplicated.
+    # Blank means "no translation supplied" and falls back to the field above.
+    business_name_en = models.CharField(max_length=200, blank=True)
+    address_en = models.CharField(max_length=500, blank=True)
+    representative_en = models.CharField(max_length=100, blank=True)
     email = models.EmailField(blank=True)  # 이메일
     timezone = models.CharField(max_length=50, default='Asia/Seoul')  # 시간대
 

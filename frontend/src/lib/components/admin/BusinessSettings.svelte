@@ -12,7 +12,10 @@
         representative: '',
         phone: '',
         email: '',
-        timezone: 'Asia/Seoul'
+        timezone: 'Asia/Seoul',
+        business_name_en: '',
+        address_en: '',
+        representative_en: ''
     };
 
     const timezoneOptions = [
@@ -63,12 +66,20 @@
             <input type="text" id="business_name" name="business_name" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" bind:value={businessSettings.business_name} />
         </div>
         <div>
-            <label for="business_registration_number" class="block mb-2 text-sm font-medium">{m.admin_businessSettings_businessRegistrationNumber()}</label>
-            <input type="text" id="business_registration_number" name="business_registration_number" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" bind:value={businessSettings.business_registration_number} />
+            <label for="business_name_en" class="block mb-2 text-sm font-medium">{m.admin_businessSettings_businessNameEn()}</label>
+            <input type="text" id="business_name_en" name="business_name_en" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" bind:value={businessSettings.business_name_en} />
         </div>
         <div>
             <label for="representative" class="block mb-2 text-sm font-medium">{m.admin_businessSettings_representative()}</label>
             <input type="text" id="representative" name="representative" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" bind:value={businessSettings.representative} />
+        </div>
+        <div>
+            <label for="representative_en" class="block mb-2 text-sm font-medium">{m.admin_businessSettings_representativeEn()}</label>
+            <input type="text" id="representative_en" name="representative_en" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" bind:value={businessSettings.representative_en} />
+        </div>
+        <div>
+            <label for="business_registration_number" class="block mb-2 text-sm font-medium">{m.admin_businessSettings_businessRegistrationNumber()}</label>
+            <input type="text" id="business_registration_number" name="business_registration_number" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" bind:value={businessSettings.business_registration_number} />
         </div>
         <div>
             <label for="phone" class="block mb-2 text-sm font-medium">{m.admin_businessSettings_phone()}</label>
@@ -81,6 +92,10 @@
         <div class="md:col-span-2">
             <label for="address" class="block mb-2 text-sm font-medium">{m.admin_businessSettings_address()}</label>
             <input type="text" id="address" name="address" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" bind:value={businessSettings.address} />
+        </div>
+        <div class="md:col-span-2">
+            <label for="address_en" class="block mb-2 text-sm font-medium">{m.admin_businessSettings_addressEn()}</label>
+            <input type="text" id="address_en" name="address_en" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" bind:value={businessSettings.address_en} />
         </div>
         <div>
             <label for="timezone" class="block mb-2 text-sm font-medium">{m.admin_businessSettings_timezone()}</label>

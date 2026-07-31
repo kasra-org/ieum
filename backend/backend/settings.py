@@ -231,6 +231,19 @@ PAYPAL_CLIENT_ID = os.environ.get('PAYPAL_CLIENT_ID', '')
 PAYPAL_SECRET_KEY = os.environ.get('PAYPAL_SECRET_KEY', '')
 PAYPAL_API_URL = os.environ.get('PAYPAL_API_URL', 'https://api-m.sandbox.paypal.com')  # Use 'https://api-m.paypal.com' for production
 
+# NicePay Configuration (인증결제 / authenticated payment)
+# Reference: https://developers.nicepay.co.kr/manual-auth.php
+NICEPAY_MID = os.environ.get('NICEPAY_MID', '')
+NICEPAY_MERCHANT_KEY = os.environ.get('NICEPAY_MERCHANT_KEY', '')
+NICEPAY_CANCEL_API_URL = os.environ.get(
+    'NICEPAY_CANCEL_API_URL', 'https://pg-api.nicepay.co.kr/webapi/cancel_process.jsp'
+)
+# Absolute URL NicePay POSTs the authentication result back to. Must be
+# reachable from the public internet and routed to the backend (see Caddyfile).
+NICEPAY_RETURN_URL = os.environ.get('NICEPAY_RETURN_URL', '')
+# Site origin used to build the post-payment redirect back into the frontend.
+NICEPAY_SITE_URL = os.environ.get('NICEPAY_SITE_URL', '')
+
 # Open Exchange Rates API (for currency conversion)
 OPENEXCHANGERATES_APP_ID = os.environ.get('OPENEXCHANGERATES_APP_ID', '')
 

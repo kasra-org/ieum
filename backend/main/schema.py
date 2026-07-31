@@ -428,6 +428,9 @@ class BusinessSettingsSchema(Schema):
     phone: str
     email: str
     timezone: str
+    business_name_en: str = ""
+    address_en: str = ""
+    representative_en: str = ""
 
 
 class BusinessSettingsUpdateSchema(Schema):
@@ -438,6 +441,9 @@ class BusinessSettingsUpdateSchema(Schema):
     phone: str = ""
     email: str = ""
     timezone: str = "Asia/Seoul"
+    business_name_en: str = ""
+    address_en: str = ""
+    representative_en: str = ""
 
 
 class AccountSettingsSchema(Schema):
@@ -562,6 +568,20 @@ class PayPalCaptureOrderSchema(Schema):
     """Schema for capturing PayPal order"""
     orderId: str  # PayPal order ID
     eventId: int
+
+
+class NicePayPrepareSchema(Schema):
+    """Schema for preparing a NicePay authenticated payment"""
+    eventId: int
+    payMethod: str = "CARD"  # CARD / BANK / VBANK / CELLPHONE
+
+
+class NicePayPrepareResponseSchema(Schema):
+    """Payment window parameters returned to the client for goPay()"""
+    code: str
+    jsSdkUrl: str
+    returnUrl: str
+    params: dict
 
 
 class PrivacyPolicySchema(Schema):

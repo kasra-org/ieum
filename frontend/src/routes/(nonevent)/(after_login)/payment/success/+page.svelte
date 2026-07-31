@@ -33,6 +33,20 @@
     });
 
     onMount(() => {
+        // NicePay: the backend approved the payment before redirecting here, so
+        // the record was already loaded server-side.
+        if (data.provider === 'nicepay') {
+            sessionStorage.removeItem('pendingPayment');
+            if (data.nicepayResult) {
+                paymentResult = data.nicepayResult;
+                status = 'success';
+            } else {
+                status = 'error';
+                errorMessage = data.nicepayError || 'Payment not found';
+            }
+            return;
+        }
+
         // Check if this is a PayPal payment result (stored directly in sessionStorage)
         const storedPayPalResult = sessionStorage.getItem('paymentResult');
         if (storedPayPalResult) {

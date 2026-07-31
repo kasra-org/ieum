@@ -1,3 +1,263 @@
-from django.test import TestCase
+from datetime import date
+from unittest.mock import patch
 
-# Create your tests here.
+from django.contrib.auth import get_user_model
+from django.test import TestCase, override_settings
+
+from main import nicepay
+from main.models import Attendee, Event, NicePayTransaction, PaymentHistory
+
+User = get_user_model()
+
+# Merchant key and signature vector published in the NicePay manual
+# (https://developers.nicepay.co.kr/manual-auth.php).
+TEST_MID = 'nicepay00m'
+TEST_MERCHANT_KEY = 'EYzu8jGGMfqaDEp76gSckuvnaHHu+bC4opsSN6lHv3b2lurNYkVXrZ7Z1AoqQnXI3eLuaUFyoRNC6FkrzVjceg=='
+
+nicepay_settings = override_settings(
+    NICEPAY_MID=TEST_MID,
+    NICEPAY_MERCHANT_KEY=TEST_MERCHANT_KEY,
+    NICEPAY_RETURN_URL='https://example.com/nicepay/callback',
+    NICEPAY_SITE_URL='https://example.com',
+)
+
+
+@nicepay_settings
+class NicePaySignatureTests(TestCase):
+    """The hash field order differs per message; verify each against the manual."""
+
+    def test_approval_sign_data_matches_documented_vector(self):
+        self.assertEqual(
+            nicepay.approval_sign_data(
+                'NICETOKNF435F661A2D54ED799BFB9F4B3F7E369', '1004', '20191114011808'
+            ),
+            '599644cf3295920f3199f5f151f7abda5a85e3777fbeefe5738e265101435a65',
+        )
+
+    def test_auth_signature_excludes_edi_date(self):
+        # sha256(AuthToken + MID + Amt + MerchantKey) - no EdiDate, unlike approval.
+        expected = nicepay._sha256_hex('TOKEN', TEST_MID, '1004', TEST_MERCHANT_KEY)
+        self.assertEqual(nicepay.auth_signature('TOKEN', '1004'), expected)
+
+    def test_verify_auth_response_rejects_tampered_amount(self):
+        params = {'AuthToken': 'TOKEN', 'MID': TEST_MID, 'Amt': '1004'}
+        params['Signature'] = nicepay.auth_signature('TOKEN', '1004')
+        self.assertTrue(nicepay.verify_auth_response(params))
+
+        params['Amt'] = '10'  # payer tampered with the amount
+        self.assertFalse(nicepay.verify_auth_response(params))
+
+    def test_window_params_are_signed_and_complete(self):
+        params = nicepay.build_payment_window_params(
+            order_id='order123', amount=1004, goods_name='Test Event',
+            return_url='https://example.com/nicepay/callback',
+        )
+        self.assertEqual(params['MID'], TEST_MID)
+        self.assertEqual(params['Amt'], '1004')
+        self.assertEqual(params['Moid'], 'order123')
+        self.assertEqual(params['PayMethod'], 'CARD')
+        self.assertEqual(params['CharSet'], 'utf-8')
+        self.assertEqual(
+            params['SignData'],
+            nicepay.window_sign_data(params['EdiDate'], '1004'),
+        )
+
+    def test_untrusted_approval_url_is_rejected(self):
+        # NextAppURL arrives in an unauthenticated POST body.
+        nicepay._assert_allowed_url('https://dc1-api.nicepay.co.kr/webapi/pay_process.jsp', 'NextAppURL')
+        with self.assertRaises(nicepay.NicePayError):
+            nicepay._assert_allowed_url('https://evil.example.com/steal', 'NextAppURL')
+
+
+@nicepay_settings
+class NicePayCallbackTests(TestCase):
+    """The callback POST is cross-site and unauthenticated - nothing in it is trusted."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='payer', email='payer@example.com', password='pw12345!'
+        )
+        self.event = Event.objects.create(
+            name='Test Conference', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, registration_fee=1004,
+        )
+        self.attendee = Attendee.objects.create(
+            user=self.user, event=self.event, first_name='Test', last_name='Payer',
+            nationality=410, institute='KASRA',
+        )
+        self.transaction = NicePayTransaction.objects.create(
+            order_id='order123', attendee=self.attendee, event=self.event,
+            amount=1004, pay_method='CARD', status='pending',
+        )
+
+    def callback_params(self, **overrides):
+        params = {
+            'AuthResultCode': '0000',
+            'AuthResultMsg': '인증성공',
+            'AuthToken': 'NICETOKEN123',
+            'PayMethod': 'CARD',
+            'MID': TEST_MID,
+            'Moid': 'order123',
+            'Amt': '1004',
+            'TxTid': 'nicepay00m0301191114091921',
+            'NextAppURL': 'https://dc1-api.nicepay.co.kr/webapi/pay_process.jsp',
+            'NetCancelURL': 'https://dc1-api.nicepay.co.kr/webapi/pay_process.jsp',
+        }
+        params['Signature'] = nicepay.auth_signature(params['AuthToken'], params['Amt'])
+        params.update(overrides)
+        return params
+
+    def approval_response(self, tid='nicepay00m0301191114091921', amt='1004'):
+        return {
+            'ResultCode': '3001', 'ResultMsg': '정상 승인되었습니다',
+            'TID': tid, 'MID': TEST_MID, 'Amt': amt, 'Moid': 'order123',
+            'PayMethod': 'CARD', 'CardName': '비씨',
+            'Signature': nicepay.approval_signature(tid, amt),
+        }
+
+    @patch('main.nicepay._post_form')
+    def test_successful_payment_creates_payment_history(self, mock_post):
+        mock_post.return_value = self.approval_response()
+
+        response = self.client.post('/nicepay/callback', self.callback_params())
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('payment/success', response['Location'])
+        self.assertIn('orderId=order123', response['Location'])
+
+        self.transaction.refresh_from_db()
+        self.assertEqual(self.transaction.status, 'approved')
+
+        payment = PaymentHistory.objects.get(attendee=self.attendee)
+        self.assertEqual(payment.status, 'completed')
+        self.assertEqual(payment.provider, 'nicepay')
+        self.assertEqual(payment.amount, 1004)
+        self.assertEqual(payment.payment_type, '카드')
+        self.assertEqual(payment.toss_order_id, 'order123')
+        self.assertEqual(payment.toss_payment_key, 'nicepay00m0301191114091921')
+        # Receipt fields are snapshotted at payment time.
+        self.assertEqual(payment.event_name, 'Test Conference')
+        self.assertEqual(payment.attendee_email, 'payer@example.com')
+
+    @patch('main.nicepay._post_form')
+    def test_tampered_amount_is_rejected_without_approval(self, mock_post):
+        # A payer who rewrites Amt also has to forge Signature; they cannot.
+        response = self.client.post('/nicepay/callback', self.callback_params(Amt='10'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('payment/fail', response['Location'])
+        mock_post.assert_not_called()
+        self.assertFalse(PaymentHistory.objects.exists())
+        self.transaction.refresh_from_db()
+        self.assertEqual(self.transaction.status, 'failed')
+
+    @patch('main.nicepay._post_form')
+    def test_amount_must_match_the_prepared_transaction(self, mock_post):
+        # Correctly signed for 10 KRW, but we asked the payer for 1004.
+        params = self.callback_params(Amt='10')
+        params['Signature'] = nicepay.auth_signature(params['AuthToken'], '10')
+
+        response = self.client.post('/nicepay/callback', params)
+
+        self.assertIn('amount_mismatch', response['Location'])
+        mock_post.assert_not_called()
+        self.assertFalse(PaymentHistory.objects.exists())
+
+    @patch('main.nicepay._post_form')
+    def test_failed_authentication_does_not_approve(self, mock_post):
+        response = self.client.post(
+            '/nicepay/callback',
+            self.callback_params(AuthResultCode='9999', AuthResultMsg='사용자 취소'),
+        )
+
+        self.assertIn('payment/fail', response['Location'])
+        mock_post.assert_not_called()
+        self.assertFalse(PaymentHistory.objects.exists())
+        self.transaction.refresh_from_db()
+        self.assertEqual(self.transaction.status, 'failed')
+
+    @patch('main.nicepay._post_form')
+    def test_replayed_callback_does_not_charge_twice(self, mock_post):
+        mock_post.return_value = self.approval_response()
+
+        first = self.client.post('/nicepay/callback', self.callback_params())
+        second = self.client.post('/nicepay/callback', self.callback_params())
+
+        self.assertIn('payment/success', first['Location'])
+        self.assertIn('payment/success', second['Location'])
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertEqual(PaymentHistory.objects.count(), 1)
+
+    @patch('main.nicepay._post_form')
+    def test_rejected_approval_records_the_failure(self, mock_post):
+        mock_post.return_value = {
+            'ResultCode': '3F', 'ResultMsg': '한도초과', 'TID': 'nicepay00m0301191114091921',
+            'MID': TEST_MID, 'Amt': '1004', 'PayMethod': 'CARD',
+        }
+
+        response = self.client.post('/nicepay/callback', self.callback_params())
+
+        self.assertIn('payment/fail', response['Location'])
+        self.assertFalse(PaymentHistory.objects.exists())
+        self.transaction.refresh_from_db()
+        self.assertEqual(self.transaction.status, 'failed')
+        self.assertEqual(self.transaction.result_code, '3F')
+
+    @patch('main.nicepay._post_form')
+    def test_unreachable_approval_triggers_net_cancel(self, mock_post):
+        import requests
+
+        # First call (approval) fails at the network level, second is the net-cancel.
+        mock_post.side_effect = [
+            requests.ConnectionError('boom'),
+            {'ResultCode': '2001', 'ResultMsg': '취소성공'},
+        ]
+
+        response = self.client.post('/nicepay/callback', self.callback_params())
+
+        self.assertIn('payment/fail', response['Location'])
+        self.assertEqual(mock_post.call_count, 2)
+        net_cancel_payload = mock_post.call_args_list[1][0][1]
+        self.assertEqual(net_cancel_payload['NetCancel'], '1')
+        self.assertFalse(PaymentHistory.objects.exists())
+
+    def test_unknown_order_is_rejected(self):
+        response = self.client.post('/nicepay/callback', self.callback_params(Moid='nope'))
+        self.assertIn('unknown_order', response['Location'])
+
+    @patch('main.nicepay._post_form')
+    def test_approval_response_signature_is_verified(self, mock_post):
+        result = self.approval_response()
+        result['Signature'] = 'forged'
+        mock_post.return_value = result
+
+        response = self.client.post('/nicepay/callback', self.callback_params())
+
+        self.assertIn('signature_mismatch', response['Location'])
+        self.assertFalse(PaymentHistory.objects.exists())
+
+
+@nicepay_settings
+class NicePayCancelTests(TestCase):
+    @patch('main.nicepay._post_form')
+    def test_cancel_success(self, mock_post):
+        mock_post.return_value = {
+            'ResultCode': '2001', 'ResultMsg': '취소成功', 'TID': 'TID1',
+            'MID': TEST_MID, 'CancelAmt': '1004',
+        }
+        result = nicepay.cancel(tid='TID1', cancel_amount=1004, reason='관리자 취소')
+        self.assertEqual(result['ResultCode'], '2001')
+
+        payload = mock_post.call_args[0][1]
+        self.assertEqual(payload['PartialCancelCode'], '0')
+        self.assertEqual(payload['CancelAmt'], '1004')
+        self.assertEqual(
+            payload['SignData'], nicepay.cancel_sign_data('1004', payload['EdiDate'])
+        )
+
+    @patch('main.nicepay._post_form')
+    def test_cancel_rejection_raises(self, mock_post):
+        mock_post.return_value = {'ResultCode': '4000', 'ResultMsg': '취소 불가'}
+        with self.assertRaises(nicepay.NicePayError) as ctx:
+            nicepay.cancel(tid='TID1', cancel_amount=1004)
+        self.assertEqual(ctx.exception.code, '4000')

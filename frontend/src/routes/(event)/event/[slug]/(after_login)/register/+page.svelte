@@ -14,6 +14,7 @@
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
     import { requestCardPayment } from '$lib/tossPayments.js';
     import { renderPayPalButtons } from '$lib/paypalPayments.js';
+    import { requestNicePayPayment } from '$lib/nicepayPayments.js';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { formatDateRange, onlyLatinChars, generateOrderId } from '$lib/utils.js';
@@ -125,7 +126,7 @@
     let instituteDisplayName = $state('');
 
     // Payment method selection (for paid events)
-    let paymentMethod = $state('toss'); // 'toss' or 'paypal'
+    let paymentMethod = $state('toss'); // 'toss', 'nicepay' or 'paypal'
     let paypalButtonsRendered = $state(false);
     let paypalContainerRef = $state(null);
 
@@ -308,6 +309,29 @@
             isSubmittingFinal = false;
             // Clear stored data on error
             sessionStorage.removeItem('pendingPayment');
+        }
+    }
+
+    // Handle NicePay payment initiation (step 3)
+    async function handleNicePayPayment() {
+        error_message = '';
+        isSubmittingFinal = true;
+
+        try {
+            // The NicePay flow is completed server-side: the backend approves
+            // the payment and redirects to /payment/success, so nothing needs
+            // to be stashed in sessionStorage here.
+            await requestNicePayPayment({
+                eventId: event.id,
+                payMethod: 'CARD',
+                onClose: () => {
+                    isSubmittingFinal = false;
+                },
+            });
+        } catch (err) {
+            console.error('NicePay payment initiation failed:', err);
+            error_message = err.message || m.eventRegister_paymentError?.() || 'Payment failed';
+            isSubmittingFinal = false;
         }
     }
 
@@ -705,7 +729,7 @@
                             <!-- Payment Method Selection -->
                             <div class="mb-6">
                                 <h3 class="text-lg font-semibold text-gray-900 mb-4">{m.eventRegister_selectPaymentMethod()}</h3>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <!-- Toss Payments Option -->
                                     <label class="relative flex items-center p-4 border-2 rounded-lg cursor-pointer transition-colors {paymentMethod === 'toss' ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
                                         <input
@@ -725,6 +749,29 @@
                                             </div>
                                         </div>
                                         {#if paymentMethod === 'toss'}
+                                            <CheckCircleSolid class="absolute top-2 right-2 w-5 h-5 text-primary-500" />
+                                        {/if}
+                                    </label>
+
+                                    <!-- NicePay Option -->
+                                    <label class="relative flex items-center p-4 border-2 rounded-lg cursor-pointer transition-colors {paymentMethod === 'nicepay' ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
+                                        <input
+                                            type="radio"
+                                            name="payment_method"
+                                            value="nicepay"
+                                            bind:group={paymentMethod}
+                                            class="sr-only"
+                                        />
+                                        <div class="flex items-center gap-3 w-full">
+                                            <div class="flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-lg bg-green-100">
+                                                <CreditCardSolid class="w-6 h-6 text-green-600" />
+                                            </div>
+                                            <div>
+                                                <p class="font-semibold text-gray-900">{m.eventRegister_payWithNicePay()}</p>
+                                                <p class="text-sm text-gray-500">{m.eventRegister_nicepayDescription()}</p>
+                                            </div>
+                                        </div>
+                                        {#if paymentMethod === 'nicepay'}
                                             <CheckCircleSolid class="absolute top-2 right-2 w-5 h-5 text-primary-500" />
                                         {/if}
                                     </label>
@@ -771,6 +818,16 @@
                                         {m.eventRegister_payLater()}
                                     </Button>
                                     <Button color="primary" type="button" size="lg" onclick={handlePayment} disabled={isSubmittingFinal}>
+                                        {m.eventRegister_payNow()}
+                                    </Button>
+                                </div>
+                            {:else if paymentMethod === 'nicepay'}
+                                <!-- NicePay Payment Button -->
+                                <div class="flex flex-col md:flex-row justify-center gap-4">
+                                    <Button color="alternative" type="button" size="lg" href="/event/{event.id}" disabled={isSubmittingFinal}>
+                                        {m.eventRegister_payLater()}
+                                    </Button>
+                                    <Button color="primary" type="button" size="lg" onclick={handleNicePayPayment} disabled={isSubmittingFinal}>
                                         {m.eventRegister_payNow()}
                                     </Button>
                                 </div>

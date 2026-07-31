@@ -71,5 +71,13 @@ export async function load({ cookies, url }) {
         };
     }
 
+    // Load business settings (public endpoint). Card issuers require the
+    // business details to be shown as text in the site footer, so these are
+    // needed on every page.
+    const businessSettingsResponse = await get('api/business-settings');
+    rtn.business_settings = (businessSettingsResponse.ok && businessSettingsResponse.status === 200)
+        ? businessSettingsResponse.data
+        : null;
+
     return rtn;
 }

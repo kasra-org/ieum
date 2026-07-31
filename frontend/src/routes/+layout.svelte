@@ -77,6 +77,25 @@
 
 	// Check if current page is a receipt page (hide header/footer for printing)
 	let isReceiptPage = $derived($page.url.pathname.startsWith('/receipt/'));
+
+	// Business details card issuers require to be published as text in the
+	// footer (상호명 / 사업자등록번호 / 대표자명 / 사업장주소 / 전화번호).
+	// English visitors get the translated value when one has been entered,
+	// falling back to the default so the details are never missing. Fields left
+	// blank in the admin settings are omitted rather than shown empty.
+	let businessInfo = $derived.by(() => {
+		const b = data.business_settings;
+		if (!b) return [];
+		const localized = (value, valueEn) =>
+			(currentLanguage === 'en' && valueEn) ? valueEn : value;
+		return [
+			[m.footer_businessName(), localized(b.business_name, b.business_name_en)],
+			[m.footer_representative(), localized(b.representative, b.representative_en)],
+			[m.footer_businessRegistrationNumber(), b.business_registration_number],
+			[m.footer_businessAddress(), localized(b.address, b.address_en)],
+			[m.footer_businessPhone(), b.phone],
+		].filter(([, value]) => value);
+	});
 </script>
 
 <svelte:head>
@@ -171,31 +190,65 @@
 <CookieConsent />
 
 {#if !isReceiptPage}
-<footer class="bg-gray-50 border-t border-gray-200 mt-20">
-	<div class="container mx-auto py-8 px-3 sm:px-7">
-		<div class="flex flex-col md:flex-row justify-between items-center gap-6">
-			<!-- Logo Section -->
-			<div class="flex items-center md:w-1/3">
-				<a href="/">
-					<img src="/logo.webp" class="h-12" alt="Logo" />
+<footer class="mt-16 bg-white">
+	<div class="container mx-auto px-4 py-10 sm:px-7">
+		<div class="grid gap-x-8 gap-y-10 md:grid-cols-12">
+			<!-- Brand: carries the copyright so the column reads as a block, not a gap -->
+			<div class="md:col-span-4">
+				<a href="/" class="inline-block">
+					<img
+						src="/logo.webp"
+						class="h-10 w-auto opacity-90 transition-opacity hover:opacity-100"
+						alt="Logo"
+					/>
 				</a>
+				<p class="mt-4 text-xs leading-relaxed text-gray-400">
+					© {new Date().getFullYear()} {m.footer_copyright()}<br />
+					Powered by
+					<a
+						href="https://github.com/pjb7687/ieum"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="underline-offset-4 transition-colors hover:text-gray-700 hover:underline"
+					>IEUM</a>
+				</p>
 			</div>
 
-			<!-- Copyright and Credits (centered) -->
-			<div class="text-center md:w-1/3">
-				<p class="text-sm text-gray-600">
-					© {new Date().getFullYear()} {m.footer_copyright()}
-				</p>
-				<p class="text-xs text-gray-500 mt-1">
-					Powered by <a href="https://github.com/pjb7687/ieum" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">IEUM</a>
-				</p>
+			<!-- Legal -->
+			<div class="md:col-span-3">
+				<h2 class="text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-gray-400">
+					{m.footer_legal()}
+				</h2>
+				<ul class="mt-3 space-y-2 text-sm">
+					<li>
+						<a href="/privacy-policy" class="text-gray-600 transition-colors hover:text-gray-900">
+							{m.footer_privacyPolicy()}
+						</a>
+					</li>
+					<li>
+						<a href="/terms-of-service" class="text-gray-600 transition-colors hover:text-gray-900">
+							{m.footer_termsOfService()}
+						</a>
+					</li>
+				</ul>
 			</div>
 
-			<!-- Legal Links (right-aligned) -->
-			<div class="flex gap-6 text-sm text-gray-600 md:w-1/3 md:justify-end">
-				<a href="/privacy-policy" class="hover:text-gray-900 hover:underline">{m.footer_privacyPolicy()}</a>
-				<a href="/terms-of-service" class="hover:text-gray-900 hover:underline">{m.footer_termsOfService()}</a>
-			</div>
+			<!-- Business registration details (published as text for card issuer review) -->
+			{#if businessInfo.length > 0}
+				<div class="md:col-span-5">
+					<h2 class="text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-gray-400">
+						{m.footer_businessInfo()}
+					</h2>
+					<address class="mt-3 not-italic">
+						<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
+							{#each businessInfo as [label, value]}
+								<dt class="text-gray-400">{label}</dt>
+								<dd class="text-gray-700">{value}</dd>
+							{/each}
+						</dl>
+					</address>
+				</div>
+			{/if}
 		</div>
 	</div>
 </footer>

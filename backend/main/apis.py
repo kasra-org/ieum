@@ -23,9 +23,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from main.models import Event, EmailTemplate, Attendee, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings
+from main.models import Event, EmailTemplate, Attendee, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction
 from main.schema import *
-from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code
+from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id
+from main import nicepay
 
 from .tasks import send_mail, send_mail_with_attachment
 
@@ -2000,6 +2001,9 @@ def get_business_settings(request):
         'phone': settings.phone,
         'email': settings.email,
         'timezone': settings.timezone,
+        'business_name_en': settings.business_name_en,
+        'address_en': settings.address_en,
+        'representative_en': settings.representative_en,
     }
 
 @api.post("/admin/business-settings", response=BusinessSettingsSchema)
@@ -2014,6 +2018,9 @@ def update_business_settings(request, data: BusinessSettingsUpdateSchema):
     settings.phone = data.phone
     settings.email = data.email
     settings.timezone = data.timezone
+    settings.business_name_en = data.business_name_en
+    settings.address_en = data.address_en
+    settings.representative_en = data.representative_en
     settings.save()
     return {
         'business_name': settings.business_name,
@@ -2023,6 +2030,9 @@ def update_business_settings(request, data: BusinessSettingsUpdateSchema):
         'phone': settings.phone,
         'email': settings.email,
         'timezone': settings.timezone,
+        'business_name_en': settings.business_name_en,
+        'address_en': settings.address_en,
+        'representative_en': settings.representative_en,
     }
 
 
@@ -2191,6 +2201,7 @@ def create_event_payment(request, event_id: int, data: PaymentCreateSchema):
         event=event,
         amount=data.amount,
         status='completed',
+        provider='manual',
         payment_type='직접입력',
         note=data.note,
         toss_order_id=data.order_id,
@@ -2242,8 +2253,30 @@ def cancel_event_payment(request, event_id: int, payment_id: int, data: PaymentC
             status=400,
         )
 
-    # If payment was made via Toss, call Toss API to cancel
-    if payment.toss_payment_key:
+    # Cancel with the gateway that took the money. Records created before the
+    # provider field existed default to 'toss', which matches how they were
+    # handled previously.
+    if payment.provider == 'nicepay' and payment.toss_payment_key:
+        try:
+            nicepay.cancel(
+                tid=payment.toss_payment_key,
+                cancel_amount=payment.amount,
+                reason=data.cancel_reason,
+            )
+        except nicepay.NicePayError as e:
+            return api.create_response(
+                request,
+                {"code": e.code, "message": e.message},
+                status=500 if e.code in ('config_error', 'api_error') else 400,
+            )
+    elif payment.provider == 'paypal':
+        # PayPal refunds are not automated; the record is marked cancelled here
+        # and the refund must be issued from the PayPal dashboard.
+        logger.warning(
+            f"PayPal payment {payment.id} marked cancelled locally; "
+            f"refund must be issued in PayPal (capture={payment.toss_payment_key})"
+        )
+    elif payment.provider == 'toss' and payment.toss_payment_key:
         if not settings.TOSS_SECRET_KEY:
             return api.create_response(
                 request,
@@ -2416,6 +2449,7 @@ def confirm_toss_payment(request, data: TossPaymentConfirmSchema):
         event=event,
         amount=data.amount,
         status='completed',
+        provider='toss',
         payment_type=toss_payment.get('method', 'card'),
         toss_order_id=data.orderId,
         toss_payment_key=data.paymentKey,
@@ -2834,6 +2868,7 @@ def capture_paypal_order(request, data: PayPalCaptureOrderSchema):
         event=event,
         amount=amount,
         status='completed',
+        provider='paypal',
         payment_type='PayPal',
         toss_order_id=data.orderId,  # Store PayPal order ID in toss_order_id field
         toss_payment_key=capture_data.get("id", ""),  # Store PayPal capture ID
@@ -2851,6 +2886,134 @@ def capture_paypal_order(request, data: PayPalCaptureOrderSchema):
         "amount": payment.amount,
         "event_id": event.id,
         "event_name": event.name,
+    }
+
+
+# ===== NicePay =====
+
+@api.post("/payment/nicepay/prepare", response=NicePayPrepareResponseSchema)
+def prepare_nicepay_payment(request, data: NicePayPrepareSchema):
+    """
+    Prepare a NicePay authenticated payment (인증결제).
+
+    Records the pending transaction server-side and returns the signed payment
+    window parameters for goPay(). The amount and the paying attendee are fixed
+    here so the callback - which arrives without our session cookie - can
+    validate the result against a trusted record instead of the POST body.
+    """
+    if not nicepay.is_configured():
+        logger.error("NicePay is not configured (NICEPAY_MID / NICEPAY_MERCHANT_KEY)")
+        return api.create_response(
+            request,
+            {"code": "config_error", "message": "Payment service is not configured."},
+            status=500,
+        )
+
+    if not settings.NICEPAY_RETURN_URL:
+        logger.error("NICEPAY_RETURN_URL is not configured")
+        return api.create_response(
+            request,
+            {"code": "config_error", "message": "Payment service is not configured."},
+            status=500,
+        )
+
+    if data.payMethod not in nicepay.PAY_METHODS:
+        return api.create_response(
+            request,
+            {"code": "invalid_pay_method", "message": "Unsupported payment method."},
+            status=400,
+        )
+
+    try:
+        event = Event.objects.get(id=data.eventId)
+    except Event.DoesNotExist:
+        return api.create_response(
+            request,
+            {"code": "event_not_found", "message": "Event not found."},
+            status=404,
+        )
+
+    user = request.user
+
+    try:
+        attendee = Attendee.objects.get(event=event, user=user)
+    except Attendee.DoesNotExist:
+        return api.create_response(
+            request,
+            {"code": "not_registered", "message": "You are not registered for this event."},
+            status=400,
+        )
+
+    if PaymentHistory.objects.filter(attendee=attendee, status='completed').exists():
+        return api.create_response(
+            request,
+            {"code": "already_paid", "message": "Payment already completed."},
+            status=400,
+        )
+
+    amount = event.registration_fee or 0
+    if amount <= 0:
+        return api.create_response(
+            request,
+            {"code": "no_fee", "message": "This event has no registration fee."},
+            status=400,
+        )
+
+    # Moid must be unique; retry on the (unlikely) collision.
+    order_id = generate_order_id()
+    for _ in range(5):
+        if not NicePayTransaction.objects.filter(order_id=order_id).exists():
+            break
+        order_id = generate_order_id()
+    else:
+        logger.error("Could not allocate a unique NicePay order id")
+        return api.create_response(
+            request,
+            {"code": "order_id_error", "message": "Could not start the payment. Please try again."},
+            status=500,
+        )
+
+    transaction = NicePayTransaction.objects.create(
+        order_id=order_id,
+        attendee=attendee,
+        event=event,
+        amount=amount,
+        pay_method=data.payMethod,
+        status='pending',
+    )
+
+    buyer_name = attendee.korean_name or f"{attendee.first_name} {attendee.last_name}".strip()
+
+    try:
+        params = nicepay.build_payment_window_params(
+            order_id=transaction.order_id,
+            amount=amount,
+            goods_name=event.name,
+            return_url=settings.NICEPAY_RETURN_URL,
+            pay_method=data.payMethod,
+            buyer_name=buyer_name,
+            buyer_email=user.email or '',
+        )
+    except nicepay.NicePayError as e:
+        transaction.status = 'failed'
+        transaction.result_message = e.message
+        transaction.save()
+        return api.create_response(
+            request,
+            {"code": e.code, "message": e.message},
+            status=500,
+        )
+
+    logger.info(
+        f"NicePay payment prepared: user={user.id}, event={event.id}, "
+        f"order_id={transaction.order_id}, amount={amount}"
+    )
+
+    return {
+        "code": "success",
+        "jsSdkUrl": nicepay.JS_SDK_URL,
+        "returnUrl": settings.NICEPAY_RETURN_URL,
+        "params": params,
     }
 
 

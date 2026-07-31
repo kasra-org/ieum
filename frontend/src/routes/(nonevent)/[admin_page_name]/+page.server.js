@@ -223,7 +223,10 @@ export const actions = {
             representative: formdata.get('representative') || '',
             phone: formdata.get('phone') || '',
             email: formdata.get('email') || '',
-            timezone: formdata.get('timezone') || 'Asia/Seoul'
+            timezone: formdata.get('timezone') || 'Asia/Seoul',
+            business_name_en: formdata.get('business_name_en') || '',
+            address_en: formdata.get('address_en') || '',
+            representative_en: formdata.get('representative_en') || ''
         };
         const response = await post('api/admin/business-settings', data, cookies);
         if (response.ok && response.status === 200) {
