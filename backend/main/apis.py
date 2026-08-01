@@ -460,6 +460,11 @@ def get_events(request, offset: int = 0, limit: int = 20, year: str = None, sear
         "limit": limit
     }
 
+def _as_bool(v):
+    """Accept a real JSON boolean or the legacy "true"/"false" strings."""
+    return v is True or (isinstance(v, str) and v.strip().lower() == "true")
+
+
 @api.post("/admin/event/add", response=MessageSchema)
 @ensure_staff
 def add_event(request):
@@ -576,7 +581,7 @@ def add_event(request):
         main_languages=main_languages,
         registration_deadline=registration_deadline,
         capacity=int(data["capacity"]),
-        accepts_abstract=data["accepts_abstract"] == "true",
+        accepts_abstract=_as_bool(data.get("accepts_abstract")),
         abstract_submission_type=data.get("abstract_submission_type", "internal"),
         external_abstract_url=data.get("external_abstract_url", ""),
         email_template_registration=email_template_registration,
@@ -602,10 +607,10 @@ def add_event(request):
         event.link_info = f"{settings.HEADLESS_URL_ROOT}/event/{event.id}"
         event.save()
 
-    if data["accepts_abstract"] == "true" and data.get("abstract_submission_type", "internal") == "internal":
-        event.abstract_deadline = data["abstract_deadline"]
-        event.capacity_abstract = data["capacity_abstract"]
-        event.max_votes = data["max_votes"]
+    if _as_bool(data.get("accepts_abstract")) and data.get("abstract_submission_type", "internal") == "internal":
+        event.abstract_deadline = data.get("abstract_deadline") or None
+        event.capacity_abstract = int(data.get("capacity_abstract") or 0)
+        event.max_votes = int(data.get("max_votes") or 0)
         event.save()
 
     return {"code": "success", "message": "Event added."}
@@ -678,9 +683,7 @@ def update_event(request, event_id: int):
     data = json.loads(request.body)
     event = Event.objects.get(id=event_id)
 
-    def as_bool(v):
-        # Accepts a real JSON boolean or the legacy "true"/"false" strings.
-        return v is True or (isinstance(v, str) and v.strip().lower() == "true")
+    as_bool = _as_bool
 
     for field in ("name", "description", "category", "start_date", "end_date",
                   "venue", "venue_ko", "venue_address", "venue_address_ko",

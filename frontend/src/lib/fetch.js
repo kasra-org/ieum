@@ -2,12 +2,13 @@ import { env } from '$env/dynamic/private';
 
 const BASE_URL = env.API_BASE_URL || 'http://backend:8080/';
 
-async function send({ method, path, data, cookies }) {
+async function send({ method, path, data, cookies, extraHeaders }) {
     const url = new URL(path, BASE_URL);
 
     let headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
+        ...(extraHeaders ?? {}),
     }
 
     if (cookies) {
@@ -67,16 +68,16 @@ async function send({ method, path, data, cookies }) {
     }
 }
 
-export function get(path, cookies) {
-    return send({ method: 'GET', path, cookies });
+export function get(path, cookies, extraHeaders) {
+    return send({ method: 'GET', path, cookies, extraHeaders });
 }
 
 export function del(path, cookies) {
     return send({ method: 'DELETE', path, cookies });
 }
 
-export function post(path, data, cookies) {
-    return send({ method: 'POST', path, data, cookies });
+export function post(path, data, cookies, extraHeaders) {
+    return send({ method: 'POST', path, data, cookies, extraHeaders });
 }
 
 export function put(path, data, cookies) {
