@@ -32,13 +32,13 @@
     const steps = $derived(
         isFreeEvent
             ? [
-                { id: 1, label: m.eventRegister_stepRegistration(), icon: ClipboardListSolid },
-                { id: 2, label: m.eventRegister_stepConfirm(), icon: CheckCircleSolid }
+                { id: 1, label: m.eventRegister_stepRegistration(), icon: ClipboardList },
+                { id: 2, label: m.eventRegister_stepConfirm(), icon: CircleCheck }
             ]
             : [
-                { id: 1, label: m.eventRegister_stepRegistration(), icon: ClipboardListSolid },
-                { id: 2, label: m.eventRegister_stepConfirmRegister(), icon: CheckCircleSolid },
-                { id: 3, label: m.eventRegister_stepPayment(), icon: CreditCardSolid }
+                { id: 1, label: m.eventRegister_stepRegistration(), icon: ClipboardList },
+                { id: 2, label: m.eventRegister_stepConfirmRegister(), icon: CircleCheck },
+                { id: 3, label: m.eventRegister_stepPayment(), icon: CreditCard }
             ]
     );
     let deadline = event.registration_deadline ? new Date(event.registration_deadline) : new Date(event.start_date);
