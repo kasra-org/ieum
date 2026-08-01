@@ -12,6 +12,9 @@ from ninja import NinjaAPI
 from ninja.security import django_auth
 
 from django.middleware.csrf import get_token
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from allauth.account.models import EmailAddress
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.template import Template, Context
@@ -1636,6 +1639,89 @@ def vote_abstract(request, event_id: int):
 @ensure_staff
 def get_all_users(request):
     return User.objects.all().order_by('-date_joined')
+
+@api.post("/admin/user/guest/add", response=UserSchema)
+@ensure_staff
+def add_guest_user(request, data: GuestUserCreateSchema):
+    """
+    Create a guest account for testing (staff only).
+
+    The account is a normal, login-capable user, so it is deliberately never
+    granted staff or superuser rights no matter what is posted. Its email is
+    marked verified up front because the point is to exercise the app without
+    round-tripping a real inbox.
+    """
+    email = (data.email or '').strip().lower()
+
+    if not email or not validate_email_format(email):
+        return api.create_response(
+            request,
+            {"code": "invalid_email", "message": "A valid email address is required."},
+            status=400,
+        )
+
+    if not data.first_name.strip() or not data.last_name.strip():
+        return api.create_response(
+            request,
+            {"code": "missing_name", "message": "First and last name are required."},
+            status=400,
+        )
+
+    if User.objects.filter(email__iexact=email).exists() or User.objects.filter(username__iexact=email).exists():
+        return api.create_response(
+            request,
+            {"code": "email_taken", "message": "An account with this email already exists."},
+            status=400,
+        )
+
+    # A guest can log in like anyone else, so hold it to the same password rules.
+    try:
+        validate_password(data.password)
+    except DjangoValidationError as e:
+        return api.create_response(
+            request,
+            {"code": "weak_password", "message": " ".join(e.messages)},
+            status=400,
+        )
+
+    institute = None
+    if data.institute:
+        try:
+            institute = Institution.objects.get(id=data.institute)
+        except Institution.DoesNotExist:
+            return api.create_response(
+                request,
+                {"code": "institution_not_found", "message": "Institution not found."},
+                status=400,
+            )
+
+    user = User.objects.create_user(
+        username=email,
+        email=email,
+        password=data.password,
+        first_name=data.first_name.strip(),
+        last_name=data.last_name.strip(),
+        korean_name=data.korean_name.strip(),
+        nationality=data.nationality or 1,
+        job_title=data.job_title.strip() or 'Guest',
+        department=data.department.strip(),
+        institute=institute,
+        is_guest=True,
+    )
+    # Explicit rather than implied: a guest never gains elevated rights.
+    user.is_staff = False
+    user.is_superuser = False
+    user.is_active = True
+    user.save()
+
+    EmailAddress.objects.update_or_create(
+        user=user, email=email,
+        defaults={'primary': True, 'verified': True},
+    )
+
+    logger.info(f"Guest user created by {request.user.id}: {email}")
+    return user
+
 
 @api.post("/admin/user/{user_id}/toggle-active", response=MessageSchema)
 @ensure_staff

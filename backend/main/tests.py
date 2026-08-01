@@ -364,3 +364,87 @@ class PaymentProviderSelectionTests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(PaymentSettings.get_instance().domestic_provider, 'toss')
+
+
+class GuestUserTests(TestCase):
+    """Admin-created test accounts: real logins, never elevated."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username='admin@example.com', email='admin@example.com',
+            password='pw12345!aA', is_staff=True,
+        )
+        self.plain = User.objects.create_user(
+            username='joe@example.com', email='joe@example.com', password='pw12345!aA',
+        )
+
+    def payload(self, **over):
+        data = {
+            'email': 'guest1@example.com', 'password': 'Str0ngGuestPw!23',
+            'first_name': 'Guest', 'last_name': 'Tester',
+        }
+        data.update(over)
+        return data
+
+    def post(self, data):
+        return self.client.post(
+            '/api/admin/user/guest/add', data=data, content_type='application/json'
+        )
+
+    def test_staff_can_create_a_usable_guest(self):
+        from allauth.account.models import EmailAddress
+        self.client.force_login(self.staff)
+
+        response = self.post(self.payload())
+        self.assertEqual(response.status_code, 200)
+
+        guest = User.objects.get(email='guest1@example.com')
+        self.assertTrue(guest.is_guest)
+        self.assertTrue(guest.is_active)
+        self.assertEqual(guest.username, guest.email)
+        # Verified up front, so the account works without an inbox round-trip.
+        self.assertTrue(EmailAddress.objects.get(user=guest, primary=True).verified)
+        # And it really can log in.
+        self.client.logout()
+        self.assertTrue(self.client.login(username='guest1@example.com', password='Str0ngGuestPw!23'))
+
+    def test_guest_never_gets_admin_rights(self):
+        self.client.force_login(self.staff)
+        # Even if the caller tries to smuggle them in.
+        self.post(self.payload(is_staff=True, is_superuser=True))
+        guest = User.objects.get(email='guest1@example.com')
+        self.assertFalse(guest.is_staff)
+        self.assertFalse(guest.is_superuser)
+
+    def test_non_staff_cannot_create_guests(self):
+        self.client.force_login(self.plain)
+        response = self.post(self.payload())
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(User.objects.filter(email='guest1@example.com').exists())
+
+    def test_anonymous_cannot_create_guests(self):
+        response = self.post(self.payload())
+        self.assertIn(response.status_code, (401, 403))
+        self.assertFalse(User.objects.filter(email='guest1@example.com').exists())
+
+    def test_duplicate_email_is_rejected(self):
+        self.client.force_login(self.staff)
+        response = self.post(self.payload(email='JOE@example.com'))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'email_taken')
+
+    def test_weak_password_is_rejected(self):
+        self.client.force_login(self.staff)
+        response = self.post(self.payload(password='123'))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'weak_password')
+        self.assertFalse(User.objects.filter(email='guest1@example.com').exists())
+
+    def test_invalid_email_is_rejected(self):
+        self.client.force_login(self.staff)
+        response = self.post(self.payload(email='not-an-email'))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'invalid_email')
+
+    def test_regular_users_are_not_marked_as_guests(self):
+        self.assertFalse(self.plain.is_guest)

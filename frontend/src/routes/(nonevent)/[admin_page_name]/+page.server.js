@@ -255,6 +255,24 @@ export const actions = {
             throw error(response.status, response.data);
         }
     },
+    'add_guest_user': async ({ cookies, request }) => {
+        let formdata = await request.formData();
+        const institute = formdata.get('institute');
+        const response = await post('api/admin/user/guest/add', {
+            email: formdata.get('email'),
+            password: formdata.get('password'),
+            first_name: formdata.get('first_name'),
+            last_name: formdata.get('last_name'),
+            korean_name: formdata.get('korean_name') || '',
+            job_title: formdata.get('job_title') || 'Guest',
+            institute: institute ? parseInt(institute, 10) : null,
+        }, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            throw error(response.status, response.data);
+        }
+    },
     'update_payment_settings': async ({ cookies, request }) => {
         let formdata = await request.formData();
         const data = {

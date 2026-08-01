@@ -47,6 +47,9 @@ class User(AbstractUser):
     disability = models.TextField(blank=True)
     dietary = models.TextField(blank=True)
     deletion_warning_sent = models.BooleanField(default=False)  # True if 1-week warning email was sent
+    # Test account created by an admin rather than by someone signing up. Marked
+    # so real registrations stay distinguishable from throwaway ones.
+    is_guest = models.BooleanField(default=False)
 
     @property
     def name(self):

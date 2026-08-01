@@ -30,6 +30,19 @@ class InstitutionSchema(Schema):
     name_en: str
     name_ko: str
 
+class GuestUserCreateSchema(Schema):
+    """Admin-created test account"""
+    email: str
+    password: str
+    first_name: str
+    last_name: str
+    korean_name: str = ""
+    nationality: int = 1
+    job_title: str = "Guest"
+    department: str = ""
+    institute: Optional[int] = None
+
+
 class InstitutionCreateSchema(Schema):
     name_en: str
     name_ko: str = ""
@@ -55,6 +68,7 @@ class UserSchema(Schema):
     dietary: str
     is_staff: bool
     is_active: bool
+    is_guest: bool
     date_joined: str
     email_verified: bool
 
