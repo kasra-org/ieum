@@ -20,12 +20,21 @@ export default defineConfig({
 			ignored: ['!**/messages/**']
 		}
 	},
-	define: {
-		// Expose environment variables to the client
-		'import.meta.env.GOOGLE_MAPS_API_KEY': JSON.stringify(process.env.GOOGLE_MAPS_API_KEY),
-		'import.meta.env.TOSS_CLIENT_KEY': JSON.stringify(process.env.TOSS_CLIENT_KEY),
-		'import.meta.env.PAYPAL_CLIENT_ID': JSON.stringify(process.env.PAYPAL_CLIENT_ID)
-	},
+	// These three are browser-side keys and must reach the client. `define` only
+	// substituted them during `vite build`; under `vite dev` import.meta.env is a
+	// live object that define does not touch, so the map fell back to its
+	// 'YOUR_GOOGLE_MAPS_API_KEY' placeholder and Google served a watermarked
+	// "development purposes only" map. envPrefix applies in both modes.
+	//
+	// Listed as exact names, NOT as 'TOSS_'/'PAYPAL_' prefixes: TOSS_SECRET_KEY
+	// and PAYPAL_SECRET_KEY exist, and a broad prefix would inline those secrets
+	// into the public bundle.
+	envPrefix: [
+		'VITE_',
+		'GOOGLE_MAPS_API_KEY',
+		'TOSS_CLIENT_KEY',
+		'PAYPAL_CLIENT_ID'
+	],
 	plugins: [
 		paraglide({
 			project: './project.inlang',
