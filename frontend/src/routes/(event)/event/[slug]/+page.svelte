@@ -11,7 +11,11 @@
     import { browser } from '$app/environment';
     import VenueMapWidget from '$lib/components/VenueMapWidget.svelte';
 
-    let DOMPurify;
+    // Must be reactive state: the dynamic import below resolves after the first
+    // render, and descriptionHtml has to recompute once it lands. A plain `let`
+    // leaves the derived stuck on its initial empty value and the description
+    // never appears.
+    let DOMPurify = $state(null);
 
     // Configure marked options for consistent rendering
     marked.setOptions({
