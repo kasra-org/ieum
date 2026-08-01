@@ -9,6 +9,6 @@
     };
 </script>
 
-<span class="inline-flex items-center rounded font-medium {large ? 'px-3 py-1 text-sm' : 'px-2.5 py-0.5 text-xs'} {COLORS[color] ?? COLORS.primary} {className}" {...rest}>
+<span class="inline-flex items-center whitespace-nowrap rounded font-medium {large ? 'px-3 py-1 text-sm' : 'px-2.5 py-0.5 text-xs'} {COLORS[color] ?? COLORS.primary} {className}" {...rest}>
     {@render children?.()}
 </span>
