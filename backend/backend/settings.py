@@ -44,14 +44,12 @@ CSRF_TRUSTED_ORIGINS = [os.environ.get('HEADLESS_URL_ROOT', 'http://127.0.0.1')]
 # forwarded scheme or it will consider every request insecure.
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-# The site is served over TLS in production, so these default on there and off
-# under DEBUG, where the dev stack is plain HTTP on localhost and Secure
-# cookies would stop login working. Override with HTTPS_ENABLED if a particular
-# deployment differs.
-#
-# SECURE_SSL_REDIRECT relies on the proxy forwarding X-Forwarded-Proto (Caddy's
-# reverse_proxy does). Set HTTPS_ENABLED=False if a front-end ever strips it,
-# otherwise Django will not see the request as secure and will redirect-loop.
+# This stack is served over plain HTTP; an external reverse proxy terminates
+# TLS in front of it. Nothing here may therefore force HTTPS on the wire. The
+# browser's own leg of the connection is still HTTPS, which is exactly what
+# Secure cookies protect, so those remain correct in production — off under
+# DEBUG, where the dev stack is HTTP end to end and Secure cookies would stop
+# login working.
 HTTPS_ENABLED = os.environ.get('HTTPS_ENABLED', 'False' if DEBUG else 'True') == 'True'
 
 SESSION_COOKIE_HTTPONLY = True
@@ -59,7 +57,17 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_SECURE = HTTPS_ENABLED
 CSRF_COOKIE_SECURE = HTTPS_ENABLED
-SECURE_SSL_REDIRECT = HTTPS_ENABLED
+
+# Off by default, and not tied to HTTPS_ENABLED. The SvelteKit server calls this
+# service directly at http://backend:8080 over the internal network, with no
+# X-Forwarded-Proto to mark it secure, so Django would 301 those internal calls
+# to https://backend:8080 — a plaintext port — and Node fails the handshake with
+# ERR_SSL_WRONG_VERSION_NUMBER. The http->https redirect belongs at the edge
+# proxy, which sees the real client connection.
+SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'False') == 'True'
+
+# Emitted only on requests Django considers secure, i.e. browser traffic arriving
+# through the proxy with X-Forwarded-Proto: https, not the internal API hop.
 SECURE_HSTS_SECONDS = 31536000 if HTTPS_ENABLED else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = HTTPS_ENABLED
 SECURE_HSTS_PRELOAD = HTTPS_ENABLED
