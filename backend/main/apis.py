@@ -464,10 +464,20 @@ def get_events(request, offset: int = 0, limit: int = 20, year: str = None, sear
 @ensure_staff
 def add_event(request):
     data = json.loads(request.body)
-    if not data["name"] or not data["venue"] or not data["start_date"] or not data["end_date"] or not data["capacity"]:
+
+    # Presence, not truthiness: capacity 0 means "no attendance limit" (the
+    # registration check below only enforces capacity > 0), so `not capacity`
+    # rejected exactly the value that expresses it. Missing keys are reported
+    # rather than raising KeyError, which used to surface as a 500.
+    missing = [f for f in ("name", "venue", "start_date", "end_date")
+               if not str(data.get(f) or "").strip()]
+    if data.get("capacity") is None or str(data.get("capacity")).strip() == "":
+        missing.append("capacity")
+    if missing:
         return api.create_response(
             request,
-            {"code": "missing_fields", "message": "Please fill all required fields."},
+            {"code": "missing_fields",
+             "message": f"Please fill all required fields: {', '.join(missing)}."},
             status=400,
         )
 
@@ -565,7 +575,7 @@ def add_event(request):
         venue_longitude=float(data["venue_longitude"]) if data.get("venue_longitude") else None,
         main_languages=main_languages,
         registration_deadline=registration_deadline,
-        capacity=data["capacity"],
+        capacity=int(data["capacity"]),
         accepts_abstract=data["accepts_abstract"] == "true",
         abstract_submission_type=data.get("abstract_submission_type", "internal"),
         external_abstract_url=data.get("external_abstract_url", ""),
