@@ -1,7 +1,8 @@
 <script>
     import { Button, Card, Heading } from '$lib/components/ui';
-    import { Calendar, Clock, CreditCard, FileText, Globe, Mail, MapPin, Users, X } from '@lucide/svelte';
+    import { Calendar, Clock, CreditCard, FileText, Globe, Mail, MapPin, Users } from '@lucide/svelte';
     import FacebookIcon from '$lib/components/icons/FacebookIcon.svelte';
+    import XIcon from '$lib/components/icons/XIcon.svelte';
     import LinkedinIcon from '$lib/components/icons/LinkedinIcon.svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
@@ -90,6 +91,12 @@
             pageUrl = window.location.href;
         }
     });
+
+    // Shared styling for the share buttons: hand cursor, visible keyboard focus
+    // and a consistent hit area. Brand colours are applied per button.
+    const shareButtonClass =
+        'flex h-10 w-10 cursor-pointer items-center justify-center rounded-full text-white ' +
+        'transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2';
 
     // Share text
     const shareText = `${event.name} - ${formatDateRange(event.start_date, event.end_date)} at ${getDisplayVenue(event)}`;
@@ -288,17 +295,17 @@
                     </div>
                 {/if}
                 <hr class="my-6 border-gray-200" />
-                <div class="flex gap-3">
-                    <button onclick={shareOnFacebook} class="p-2 rounded-full bg-blue-600 text-white hover:bg-blue-700" aria-label={m.eventDetail_shareOnFacebook()}>
+                <div class="flex justify-center gap-3">
+                    <button type="button" onclick={shareOnFacebook} class="{shareButtonClass} bg-[#1877F2] hover:bg-[#166FE5]" aria-label={m.eventDetail_shareOnFacebook()}>
                         <FacebookIcon class="w-5 h-5" />
                     </button>
-                    <button onclick={shareOnX} class="p-2 rounded-full bg-black text-white hover:bg-gray-800" aria-label={m.eventDetail_shareOnX()}>
-                        <X class="w-5 h-5" />
+                    <button type="button" onclick={shareOnX} class="{shareButtonClass} bg-black hover:bg-gray-800" aria-label={m.eventDetail_shareOnX()}>
+                        <XIcon class="w-5 h-5" />
                     </button>
-                    <button onclick={shareOnLinkedIn} class="p-2 rounded-full bg-blue-700 text-white hover:bg-blue-800" aria-label={m.eventDetail_shareOnLinkedIn()}>
+                    <button type="button" onclick={shareOnLinkedIn} class="{shareButtonClass} bg-[#0A66C2] hover:bg-[#095BB0]" aria-label={m.eventDetail_shareOnLinkedIn()}>
                         <LinkedinIcon class="w-5 h-5" />
                     </button>
-                    <button onclick={shareViaEmail} class="p-2 rounded-full bg-gray-600 text-white hover:bg-gray-700" aria-label={m.eventDetail_shareViaEmail()}>
+                    <button type="button" onclick={shareViaEmail} class="{shareButtonClass} bg-gray-600 hover:bg-gray-700" aria-label={m.eventDetail_shareViaEmail()}>
                         <Mail class="w-5 h-5" />
                     </button>
                 </div>
