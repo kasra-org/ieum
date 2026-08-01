@@ -177,7 +177,6 @@
 	"form_searchAddress": "주소 검색",
 	"form_searchAddressPlaceholder": "장소나 주소를 검색하세요...",
 	"form_searchAddressHint": "장소, 주소 또는 랜드마크를 검색하세요",
-	"form_dragMarkerHint": "마커를 드래그하여 위치를 조정할 수 있습니다",
 	"form_editVenueNames": "장소명 수정",
 	"form_pleaseSelectLocation": "먼저 지도에서 위치를 선택해주세요.",
 	"form_venueNameAddressRequired": "장소명과 주소(영문, 한글)를 모두 입력해주세요.",

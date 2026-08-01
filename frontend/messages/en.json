@@ -177,7 +177,6 @@
 	"form_searchAddress": "Search Address",
 	"form_searchAddressPlaceholder": "Search for a place or address...",
 	"form_searchAddressHint": "Type to search for venues, addresses, or landmarks",
-	"form_dragMarkerHint": "You can drag the marker to fine-tune the location",
 	"form_editVenueNames": "Edit Venue Names",
 	"form_pleaseSelectLocation": "Please select a location on the map first.",
 	"form_venueNameAddressRequired": "Venue names and addresses (English and Korean) are required.",

@@ -30,12 +30,14 @@
   let tempLongitude = $state(null);
   let formError = $state('');
 
-  const NOMINATIM = 'https://nominatim.openstreetmap.org';
-
-  // Geocoding runs against OpenStreetMap's Nominatim rather than Google Places:
-  // it needs no API key and no billing account. Its usage policy caps automated
-  // use at roughly one request a second, so this searches on an explicit action
-  // rather than on every keystroke the way the old autocomplete did.
+  // Geocoding runs against OpenStreetMap rather than Google Places: it needs no
+  // API key and no billing account. The request goes through our own
+  // /api/geocode route because Nominatim ignores clients that do not identify
+  // themselves and a browser cannot set User-Agent; that route also caches and
+  // paces calls to stay inside Nominatim's usage policy.
+  //
+  // Still searches on an explicit action rather than per keystroke, so one
+  // admin typing cannot generate a burst of upstream lookups.
   async function searchAddress() {
     const q = searchInput.trim();
     if (!q || searching) return;
@@ -44,15 +46,15 @@
     searchMessage = '';
     results = [];
     try {
-      const url = `${NOMINATIM}/search?format=jsonv2&addressdetails=1&limit=5` +
-                  `&accept-language=en&q=${encodeURIComponent(q)}`;
-      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`, {
+        headers: { Accept: 'application/json' }
+      });
       if (!res.ok) throw new Error(`status ${res.status}`);
       const data = await res.json();
-      results = Array.isArray(data) ? data : [];
+      results = Array.isArray(data?.results) ? data.results : [];
       if (results.length === 0) searchMessage = m.form_venueSearchNoResults();
     } catch (e) {
-      console.error('Nominatim search failed:', e);
+      console.error('Address search failed:', e);
       searchMessage = m.form_venueSearchFailed();
     } finally {
       searching = false;
@@ -66,12 +68,13 @@
     const prefix = String(result.osm_type ?? '').charAt(0).toUpperCase();
     if (!prefix || !result.osm_id) return null;
     try {
-      const url = `${NOMINATIM}/lookup?format=jsonv2&osm_ids=${prefix}${result.osm_id}` +
-                  `&accept-language=ko`;
-      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const res = await fetch(
+        `/api/geocode?osm_ids=${prefix}${result.osm_id}&lang=ko`,
+        { headers: { Accept: 'application/json' } }
+      );
       if (!res.ok) return null;
       const data = await res.json();
-      return Array.isArray(data) && data[0] ? data[0] : null;
+      return Array.isArray(data?.results) && data.results[0] ? data.results[0] : null;
     } catch (e) {
       console.warn('Korean lookup failed, keeping the English text:', e);
       return null;
