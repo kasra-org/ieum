@@ -5,6 +5,14 @@ import { paraglide } from '@inlang/paraglide-js-adapter-sveltekit/vite';
 const ALLOWED_HOST = process.env.ALLOWED_HOST || 'localhost'
 
 export default defineConfig({
+	// @lucide/svelte exposes its Svelte sources only through the `svelte` export
+	// condition, without the legacy top-level `svelte` field that
+	// vite-plugin-svelte keys auto-bundling off. Without this it stays external
+	// during SSR and Node is handed a raw .svelte file:
+	//   Unknown file extension ".svelte" ... @lucide/svelte/dist/Icon.svelte
+	ssr: {
+		noExternal: ['@lucide/svelte']
+	},
 	server: {
 		allowedHosts: [ALLOWED_HOST, ],
 		watch: {
