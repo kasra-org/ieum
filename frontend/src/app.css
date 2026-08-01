@@ -81,6 +81,10 @@ textarea:focus-visible,
 html, body {
     font-family: "Roboto", "Noto Sans KR", sans-serif;
     font-weight: 300;
+    /* The footer is white and sits after a min-h-screen slate block. Without a
+       background here the area past the footer — short pages, tall viewports,
+       overscroll — falls back to the browser canvas instead of matching it. */
+    background-color: #fff;
 }
 
 
