@@ -6,7 +6,12 @@
         class: className = '', children, footer, ...rest
     } = $props();
 
-    const SIZES = { xs: 'max-w-xs', sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-xl', '2xl': 'max-w-2xl', '3xl': 'max-w-3xl', '4xl': 'max-w-4xl', '5xl': 'max-w-5xl', '6xl': 'max-w-6xl', '7xl': 'max-w-7xl' };
+    // Matches the scale the call sites were written against — each step is
+    // wider than its name suggests (sm is max-w-lg, not max-w-sm).
+    const SIZES = {
+        none: '', xs: 'max-w-md', sm: 'max-w-lg', md: 'max-w-2xl',
+        lg: 'max-w-4xl', xl: 'max-w-7xl'
+    };
 
     function close() {
         open = false;
@@ -24,7 +29,7 @@
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
         class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-gray-900/50 p-4"
-        role="dialog" aria-modal="true"
+        role="dialog" aria-modal="true" tabindex="-1"
         onclick={(e) => { if ((outsideclose || dismissable) && e.target === e.currentTarget) close(); }}
     >
         <div class="relative max-h-full w-full {SIZES[size] ?? SIZES.md} rounded-lg bg-white shadow {className}" {...rest}>

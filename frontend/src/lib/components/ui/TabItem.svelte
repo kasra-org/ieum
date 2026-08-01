@@ -1,9 +1,11 @@
 <script>
-    import { getContext } from 'svelte';
+    import { getContext, untrack } from 'svelte';
     let { open = false, title = '', class: className = '', children, ...rest } = $props();
     const ctx = getContext('tabs');
     const id = Symbol('tab');
-    if (open) ctx?.select(id); else ctx?.register(id);
+    // Register once; `open` is only an initial hint, so read it untracked
+    // rather than letting it look like a reactive dependency.
+    $effect.pre(() => { untrack(() => (open ? ctx?.select(id) : ctx?.register(id))); });
     const active = $derived(ctx?.selected === id);
 </script>
 
