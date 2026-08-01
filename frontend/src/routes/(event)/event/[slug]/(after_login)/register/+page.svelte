@@ -475,18 +475,9 @@
     {:else}
         <!-- Registration Form with Stepper -->
         <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
-            <!-- ProgressStepper -->
+            <!-- ProgressStepper renders the labels itself; `current` is 0-based -->
             <div class="mb-8">
-                <ProgressStepper {steps} current={currentStep} clickable={false} showCheckmarkForCompleted={false} />
-                <div class="flex justify-between mt-4 px-0">
-                    {#each steps as step}
-                        <div class="flex-1 text-center">
-                            <p class="text-sm font-medium {currentStep === step.id ? 'text-primary-600' : 'text-gray-500'}">
-                                {step.label}
-                            </p>
-                        </div>
-                    {/each}
-                </div>
+                <ProgressStepper {steps} current={currentStep - 1} clickable={false} />
             </div>
 
             <!-- Single persistent form to preserve Felte state across steps -->

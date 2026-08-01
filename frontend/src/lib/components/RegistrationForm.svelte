@@ -200,7 +200,7 @@
   </div>
   <div class="mb-6">
     <Label for="middle_initial" class="block mb-2">{m.form_middleInitial()}</Label>
-    <Input id="middle_initial" name="middle_initial" maxlength="1" bind:value={data.middle_initial} placeholder="H" />
+    <Input id="middle_initial" name="middle_initial" maxlength="1" bind:value={data.middle_initial} />
   </div>
   <div class="mb-6">
     <Label for="last_name" class="block mb-2">{m.form_lastName()} <span class="text-red-500">*</span></Label>
