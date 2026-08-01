@@ -615,7 +615,10 @@
 </script>
 
 {#snippet process_spaces(text)}
-    {@html text.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;')}
+    <!-- Attendee-supplied text. Rendered as text with whitespace preserved by
+         CSS; it must never go through {@html}, which let any registrant run
+         script in an event admin's browser. -->
+    <span class="whitespace-pre-wrap">{text}</span>
 {/snippet}
 
 <Heading tag="h2" class="text-xl font-bold mb-3">{m.attendees_title()}</Heading>

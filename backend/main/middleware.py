@@ -16,7 +16,7 @@ from django.utils import timezone
 
 
 class ApiKeyAuthMiddleware:
-    """Authenticate `X-API-Key: <key>` as the key's owner.
+    """Authenticate `X-API-Key: <key>` as the key's owner, on the API only.
 
     A missing or unknown key is left alone — the request continues
     unauthenticated and normal session auth applies.
@@ -24,12 +24,19 @@ class ApiKeyAuthMiddleware:
 
     HEADER = "HTTP_X_API_KEY"
 
+    # API keys are issued for machine clients (the MCP server), which only ever
+    # calls /api/. Without this scope a key would also authenticate the Django
+    # admin UI and the allauth account pages as its owner, with CSRF disabled —
+    # turning a credential meant for one JSON API into a full interactive
+    # session for a staff account.
+    PATH_PREFIX = "/api/"
+
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
         raw = request.META.get(self.HEADER, "").strip()
-        if raw:
+        if raw and request.path.startswith(self.PATH_PREFIX):
             user = self._resolve(raw)
             if user is not None:
                 request.user = user

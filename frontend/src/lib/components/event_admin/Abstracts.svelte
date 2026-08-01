@@ -29,7 +29,8 @@
         if (browser && DOMPurify) {
             return DOMPurify.sanitize(html);
         }
-        return html;
+        // DOMPurify is browser-only; never hand back unsanitized markup.
+        return '';
     }
 
     // Normalize attendees list for UserSelectionModal

@@ -1132,8 +1132,8 @@ def register_event(request, event_id: int):
 
     reply_to = event.main_admin.email if event.main_admin else None
     send_mail.delay(
-        Template(event.email_template_registration.subject).render(Context({"event": event, "attendee": attendee}, autoescape=False)),
-        Template(event.email_template_registration.body).render(Context({"event": event, "attendee": attendee}, autoescape=False)),
+        Template(event.email_template_registration.subject).render(Context({"event": event, "attendee": attendee})),
+        Template(event.email_template_registration.body).render(Context({"event": event, "attendee": attendee})),
         user.email,
         reply_to=reply_to
     )
@@ -1286,8 +1286,8 @@ def submit_abstract(request, event_id: int):
 
     reply_to = event.main_admin.email if event.main_admin else None
     send_mail.delay(
-        Template(event.email_template_abstract_submission.subject).render(Context({"event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)}, autoescape=False)),
-        Template(event.email_template_abstract_submission.body).render(Context({"attendee": attendee, "event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)}, autoescape=False)),
+        Template(event.email_template_abstract_submission.subject).render(Context({"event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)})),
+        Template(event.email_template_abstract_submission.body).render(Context({"attendee": attendee, "event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)})),
         attendee.user.email,
         reply_to=reply_to
     )
@@ -1434,7 +1434,7 @@ def send_certificate(request, event_id: int):
             status=404,
         )
 
-    context = Context({"event": event, "attendee": attendee}, autoescape=False)
+    context = Context({"event": event, "attendee": attendee})
     subject = Template(event.email_template_certificate.subject).render(context)
     body = Template(event.email_template_certificate.body).render(context)
 
@@ -1713,6 +1713,7 @@ def update_user_by_admin(request, user_id: int):
         )
 
 @api.post("/generate-verification-key", response=VerificationKeyResponseSchema, auth=None)
+@rate_limit(max_requests=5, window_seconds=300)
 def generate_verification_key(request, data: GenerateVerificationKeySchema):
     import secrets
     from datetime import timedelta
@@ -1755,6 +1756,7 @@ def generate_verification_key(request, data: GenerateVerificationKeySchema):
         return {"key": ""}
 
 @api.post("/resend-verification", response=MessageSchema, auth=None)
+@rate_limit(max_requests=5, window_seconds=300)
 def resend_verification_email(request, data: ResendVerificationSchema):
     from datetime import timedelta
     from django.utils import timezone
@@ -1951,6 +1953,7 @@ def get_email_templates(request, event_id: int):
     return rtn
 
 @api.get("/event/{event_id}/onsite/verify", auth=None)
+@rate_limit(max_requests=20, window_seconds=60)
 def verify_onsite_code(request, event_id: int, code: str = ""):
     try:
         event = Event.objects.get(id=event_id)
@@ -2791,6 +2794,10 @@ def create_paypal_order(request, data: PayPalCreateOrderSchema):
                         "value": amount_str,
                     },
                     "description": f"Registration for {event.name}",
+                    # Binds the order to this event and payer. Capture refuses
+                    # anything else, so an order created for a cheap event
+                    # cannot be captured against an expensive one.
+                    "custom_id": f"{event.id}:{user.id}",
                 }],
             },
             timeout=30,
@@ -2923,9 +2930,31 @@ def capture_paypal_order(request, data: PayPalCaptureOrderSchema):
             status=400,
         )
 
-    # Extract payment amount from the capture response
-    capture_data = paypal_capture.get("purchase_units", [{}])[0].get("payments", {}).get("captures", [{}])[0]
-    amount = int(float(capture_data.get("amount", {}).get("value", 0)))
+    unit = paypal_capture.get("purchase_units", [{}])[0]
+    capture_data = unit.get("payments", {}).get("captures", [{}])[0]
+
+    # The order must be the one we created for this event and this payer.
+    # Without this, a client could approve an order for a cheap event and then
+    # capture it against an expensive one, since both orderId and eventId are
+    # client-supplied and PayPal will happily capture a valid unpaid order.
+    custom_id = capture_data.get("custom_id") or unit.get("custom_id") or ""
+    expected_custom_id = f"{event.id}:{user.id}"
+    if custom_id != expected_custom_id:
+        logger.error(
+            f"PayPal order/event mismatch: order={data.orderId} "
+            f"custom_id={custom_id!r} expected={expected_custom_id!r}"
+        )
+        return api.create_response(
+            request,
+            {"code": "order_mismatch", "message": "This payment does not belong to this registration."},
+            status=400,
+        )
+
+    # PaymentHistory.amount is KRW everywhere else (Toss, NicePay); the PayPal
+    # charge is the USD conversion of exactly this fee, so store the fee rather
+    # than a USD figure truncated to whole dollars.
+    amount = event.registration_fee
+    paid_usd = capture_data.get("amount", {}).get("value")
 
     # Create PaymentHistory record
     payment = PaymentHistory(
@@ -2942,7 +2971,7 @@ def capture_paypal_order(request, data: PayPalCaptureOrderSchema):
     payment.copy_event_info(event)
     payment.save()
 
-    logger.info(f"PayPal payment captured: user={user.id}, event={event.id}, amount={amount}")
+    logger.info(f"PayPal payment captured: user={user.id}, event={event.id}, amount={amount} KRW (charged {paid_usd} USD)")
 
     return {
         "code": "success",

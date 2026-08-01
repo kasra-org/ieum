@@ -19,7 +19,8 @@
         if (browser && DOMPurify) {
             return DOMPurify.sanitize(html);
         }
-        return html;
+        // DOMPurify is browser-only; never hand back unsanitized markup.
+        return '';
     }
 
     let max_votes = data.event.max_votes;

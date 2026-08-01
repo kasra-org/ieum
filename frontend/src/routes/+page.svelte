@@ -185,11 +185,24 @@
     }
 
     // Highlight matched text in search results
-    function highlightText(text, keyword) {
-        if (!keyword || !keyword.trim()) return text;
+    const escapeHtml = (value) =>
+        String(value ?? '').replace(/[&<>"']/g, (c) =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+        );
 
-        const regex = new RegExp(`(${keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-        return text.replace(regex, '<mark class="bg-yellow-200">$1</mark>');
+    // The result is rendered with {@html}, so everything drawn from event data
+    // has to be escaped first — previously an event name containing markup was
+    // executed for every visitor, and with an empty keyword it was returned
+    // completely raw.
+    function highlightText(text, keyword) {
+        const safe = escapeHtml(text);
+        const trimmed = keyword?.trim();
+        if (!trimmed) return safe;
+
+        // Escape for HTML before escaping for the regex, so the pattern matches
+        // the already-escaped haystack.
+        const needle = escapeHtml(trimmed).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return safe.replace(new RegExp(`(${needle})`, 'gi'), '<mark class="bg-yellow-200">$1</mark>');
     }
 </script>
 

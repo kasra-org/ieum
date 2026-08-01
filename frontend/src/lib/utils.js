@@ -136,7 +136,12 @@ export function sanitizeRedirectUrl(url) {
     }
     // Only allow relative URLs starting with /
     // Reject URLs starting with // (protocol-relative) or containing ://
+    // Backslashes and control characters are rejected too: browsers normalise
+    // `/\evil.com` to `//evil.com`, which would otherwise slip through.
     if (!url.startsWith('/') || url.startsWith('//') || url.includes('://')) {
+        return '/';
+    }
+    if (url.includes('\\') || /[\x00-\x1f\x7f]/.test(url)) {
         return '/';
     }
     return url;

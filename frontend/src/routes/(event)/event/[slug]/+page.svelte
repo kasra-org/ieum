@@ -55,11 +55,13 @@
     let descriptionHtml = $derived.by(() => {
         if (!event.description) return '';
         const html = marked.parse(event.description);
-        // Only sanitize in browser, marked already escapes dangerous content
+        // marked does not sanitize, so unsanitized output must never be
+        // rendered. DOMPurify is browser-only here; server-side we emit
+        // nothing and the description appears once hydrated.
         if (browser && DOMPurify) {
             return DOMPurify.sanitize(html);
         }
-        return html;
+        return '';
     });
 
     // Check if registration is closed

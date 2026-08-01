@@ -19,15 +19,52 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-%jev1b@szdys7yz9yn9c(67=p479dyk#g-j2#(r@3gldr&dsfi')
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+
+# SECURITY WARNING: keep the secret key used in production secret!
+# Refuse to start rather than fall back to a shipped key: a public SECRET_KEY
+# lets anyone forge session cookies and signed tokens, and a silent default
+# gives no sign that it happened.
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = 'django-insecure-development-only-do-not-deploy'
+    else:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured(
+            'SECRET_KEY must be set when DEBUG is off.'
+        )
 
 ALLOWED_HOSTS = [os.environ.get('ALLOWED_HOST', '127.0.0.1'), 'backend']
 
 CSRF_TRUSTED_ORIGINS = [os.environ.get('HEADLESS_URL_ROOT', 'http://127.0.0.1')]
+
+# TLS is terminated by the reverse proxy, so Django must be told to trust the
+# forwarded scheme or it will consider every request insecure.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# The site is served over TLS in production, so these default on there and off
+# under DEBUG, where the dev stack is plain HTTP on localhost and Secure
+# cookies would stop login working. Override with HTTPS_ENABLED if a particular
+# deployment differs.
+#
+# SECURE_SSL_REDIRECT relies on the proxy forwarding X-Forwarded-Proto (Caddy's
+# reverse_proxy does). Set HTTPS_ENABLED=False if a front-end ever strips it,
+# otherwise Django will not see the request as secure and will redirect-loop.
+HTTPS_ENABLED = os.environ.get('HTTPS_ENABLED', 'False' if DEBUG else 'True') == 'True'
+
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = HTTPS_ENABLED
+CSRF_COOKIE_SECURE = HTTPS_ENABLED
+SECURE_SSL_REDIRECT = HTTPS_ENABLED
+SECURE_HSTS_SECONDS = 31536000 if HTTPS_ENABLED else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = HTTPS_ENABLED
+SECURE_HSTS_PRELOAD = HTTPS_ENABLED
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
 
 AUTH_USER_MODEL = 'main.User'
 
