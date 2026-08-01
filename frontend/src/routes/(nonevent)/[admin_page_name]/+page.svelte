@@ -183,7 +183,7 @@
             {/if}
 
             {#if sidebar_selected === 'users'}
-            <UsersIcon {data} />
+            <Users {data} />
             {/if}
 
             {#if sidebar_selected === 'institutions'}
