@@ -17,7 +17,7 @@
 
     let anchor = $state(null);   // marker used to locate the preceding sibling
     let menu = $state(null);
-    let x = $state(0), y = $state(0), alignEnd = $state(false);
+    let x = $state(0), y = $state(0), alignEnd = $state(false), viewportWidth = $state(0);
 
     function triggerEl() {
         if (typeof document === 'undefined') return null;
@@ -30,6 +30,7 @@
         alignEnd = placement.endsWith('-end');
         x = alignEnd ? r.right : r.left;
         y = placement.startsWith('top') ? r.top : r.bottom;
+        viewportWidth = window.innerWidth;
     }
 
     $effect(() => {
@@ -58,16 +59,40 @@
         };
     });
 
-    // Keep it anchored when opened programmatically rather than by a click.
+    // Position on open (covers being opened programmatically rather than by a
+    // click) and then follow the trigger. Being position:fixed, the menu does
+    // not move with the page on its own, so without this it stays pinned to the
+    // viewport while the trigger scrolls out from under it.
     $effect(() => {
         if (!open) return;
         const trigger = triggerEl();
-        if (trigger) position(trigger);
+        if (!trigger) return;
+
+        position(trigger);
+
+        let frame = 0;
+        const track = () => {
+            if (frame) return;
+            frame = requestAnimationFrame(() => {
+                frame = 0;
+                position(trigger);
+            });
+        };
+
+        // Capture phase: scrolling happens on whichever container actually
+        // scrolls, and those events do not bubble to window.
+        window.addEventListener('scroll', track, true);
+        window.addEventListener('resize', track);
+        return () => {
+            if (frame) cancelAnimationFrame(frame);
+            window.removeEventListener('scroll', track, true);
+            window.removeEventListener('resize', track);
+        };
     });
 
     const style = $derived(
         alignEnd
-            ? `right:${(typeof window !== 'undefined' ? window.innerWidth : 0) - x}px; top:${y + 4}px`
+            ? `right:${viewportWidth - x}px; top:${y + 4}px`
             : `left:${x}px; top:${y + 4}px`
     );
 </script>
