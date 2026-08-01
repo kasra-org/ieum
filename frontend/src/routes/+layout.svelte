@@ -125,7 +125,7 @@
 	</div>
 {:else}
 	{#key currentLanguage}
-	<div class={isReceiptPage ? '' : 'min-h-screen bg-slate-50'}>
+	<div class={isReceiptPage ? '' : 'flex min-h-screen flex-col bg-slate-50'}>
 {#if !isReceiptPage}
 <Navbar class="border-b border-gray-200 bg-white py-2">
 	<div class="container mx-auto flex items-center justify-between px-4">
@@ -188,6 +188,8 @@
 {@render children()}
 
 <CookieConsent />
+
+<div class="flex-1"></div>
 
 {#if !isReceiptPage}
 <footer class="mt-16 bg-white">
