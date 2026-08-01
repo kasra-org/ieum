@@ -192,7 +192,7 @@
 <div class="flex-1"></div>
 
 {#if !isReceiptPage}
-<footer class="mt-16 bg-white">
+<footer class="mt-16 bg-white pb-12">
 	<div class="container mx-auto px-4 py-10 sm:px-7">
 		<div class="grid gap-x-8 gap-y-10 md:grid-cols-12">
 			<!-- Brand: carries the copyright so the column reads as a block, not a gap -->
