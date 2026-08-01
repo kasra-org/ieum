@@ -1,7 +1,7 @@
 <script>
     import { Table, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
     import { Modal, Button, Alert, Label, Input, Select, Badge } from '$lib/components/ui';
-    import { RefreshCw, Trash2 } from '@lucide/svelte';
+    import { RefreshCw, Trash2, ShieldOff, ShieldCheck } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { invalidateAll } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
@@ -74,7 +74,7 @@
             <TableHeadCell>{m.admin_apiKeys_created()}</TableHeadCell>
             <TableHeadCell>{m.admin_apiKeys_lastUsed()}</TableHeadCell>
             <TableHeadCell>{m.admin_apiKeys_status()}</TableHeadCell>
-            <TableHeadCell></TableHeadCell>
+            <TableHeadCell class="w-1">{m.admin_tableActions()}</TableHeadCell>
         </TableHead>
         <TableBody>
             {#each keys as key (key.id)}
@@ -92,26 +92,34 @@
                         {/if}
                     </TableBodyCell>
                     <TableBodyCell>
-                        <div class="flex gap-1">
+                        <div class="flex justify-center gap-2">
                             <form method="POST" action="?/rotate_api_key" use:enhance={afterAction}>
                                 <input type="hidden" name="key_id" value={key.id} />
-                                <Button type="submit" size="xs" color="alternative"
+                                <Button type="submit" color="none" size="none" title={m.admin_apiKeys_rotate()}
+                                        aria-label={m.admin_apiKeys_rotate()}
                                         onclick={(e) => { if (!confirm(m.admin_apiKeys_confirmRotate())) e.preventDefault(); }}>
-                                    <RefreshCw class="w-3 h-3 me-1" />{m.admin_apiKeys_rotate()}
+                                    <RefreshCw class="w-5 h-5" />
                                 </Button>
                             </form>
                             <form method="POST" action="?/revoke_api_key" use:enhance={afterAction}>
                                 <input type="hidden" name="key_id" value={key.id} />
                                 <input type="hidden" name="revoked" value={key.revoked_at ? 'false' : 'true'} />
-                                <Button type="submit" size="xs" color={key.revoked_at ? 'green' : 'yellow'}>
-                                    {key.revoked_at ? m.admin_apiKeys_unrevoke() : m.admin_apiKeys_revoke()}
+                                <Button type="submit" color="none" size="none"
+                                        title={key.revoked_at ? m.admin_apiKeys_unrevoke() : m.admin_apiKeys_revoke()}
+                                        aria-label={key.revoked_at ? m.admin_apiKeys_unrevoke() : m.admin_apiKeys_revoke()}>
+                                    {#if key.revoked_at}
+                                        <ShieldCheck class="w-5 h-5" />
+                                    {:else}
+                                        <ShieldOff class="w-5 h-5" />
+                                    {/if}
                                 </Button>
                             </form>
                             <form method="POST" action="?/delete_api_key" use:enhance={afterAction}>
                                 <input type="hidden" name="key_id" value={key.id} />
-                                <Button type="submit" size="xs" color="red"
+                                <Button type="submit" color="none" size="none" title={m.admin_apiKeys_delete()}
+                                        aria-label={m.admin_apiKeys_delete()}
                                         onclick={(e) => { if (!confirm(m.admin_apiKeys_confirmDelete())) e.preventDefault(); }}>
-                                    <Trash2 class="w-3 h-3" />
+                                    <Trash2 class="w-5 h-5" />
                                 </Button>
                             </form>
                         </div>

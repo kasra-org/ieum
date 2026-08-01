@@ -1,7 +1,7 @@
 <script>
     import { Card, Button } from '$lib/components/ui';
     import { Sidebar, SidebarGroup, SidebarItem, SidebarWrapper } from '$lib/components/ui';
-    import { Building2, Calendar, ClipboardList, Clock, FileText, Globe, Lock, Settings, Users as UsersIcon } from '@lucide/svelte';
+    import { Building2, Calendar, ClipboardList, Clock, FileText, Globe, KeyRound, Settings, Users as UsersIcon } from '@lucide/svelte';
     import { onMount } from 'svelte';
     import { fly } from 'svelte/transition';
     import * as m from '$lib/paraglide/messages.js';
@@ -156,7 +156,7 @@
                         {#if data.admin.apiKeys}
                         <SidebarItem label={m.admin_sidebar_apiKeys()} active={sidebar_selected === 'api_keys'} href="#api_keys">
                             {#snippet icon()}
-                                <Lock class="w-6 h-6" />
+                                <KeyRound class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
                         {/if}
