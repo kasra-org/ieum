@@ -1,9 +1,8 @@
 <script>
   import { Input, Label, Alert, Modal, Button, Hr } from '$lib/components/ui';
-  import { MapPin } from '@lucide/svelte';
+  import { MapPin, Search } from '@lucide/svelte';
   import * as m from '$lib/paraglide/messages.js';
-  import { onMount } from 'svelte';
-  import { browser } from '$app/environment';
+  import { languageTag } from '$lib/paraglide/runtime.js';
 
   let {
     venueName = $bindable(''),
@@ -16,14 +15,11 @@
     required = false
   } = $props();
 
-  let mapContainer;
-  let map;
-  let marker;
   let searchInput = $state('');
-  let predictions = $state([]);
-  let showPredictions = $state(false);
+  let results = $state([]);
+  let searching = $state(false);
+  let searchMessage = $state('');
   let modal_open = $state(false);
-  let loadError = $state('');
 
   // Temp values for modal editing
   let tempVenueName = $state('');
@@ -34,241 +30,89 @@
   let tempLongitude = $state(null);
   let formError = $state('');
 
-  // Load Google Maps API
-  onMount(() => {
-    if (!browser) return;
+  const NOMINATIM = 'https://nominatim.openstreetmap.org';
 
-    // Check if Google Maps is already loaded or loading
-    if (window.__GOOGLE_MAPS_LOADED__ || window.__GOOGLE_MAPS_LOADING__) {
-      return;
-    }
+  // Geocoding runs against OpenStreetMap's Nominatim rather than Google Places:
+  // it needs no API key and no billing account. Its usage policy caps automated
+  // use at roughly one request a second, so this searches on an explicit action
+  // rather than on every keystroke the way the old autocomplete did.
+  async function searchAddress() {
+    const q = searchInput.trim();
+    if (!q || searching) return;
 
-    // Check if Google Maps is already available
-    if (window.google && window.google.maps) {
-      window.__GOOGLE_MAPS_LOADED__ = true;
-      return;
-    }
-
-    // Mark as loading to prevent duplicate script injection
-    window.__GOOGLE_MAPS_LOADING__ = true;
-
-    // Load Google Maps API with Places and Marker libraries
-    const script = document.createElement('script');
-    const apiKey = import.meta.env.GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,marker&loading=async`;
-    script.async = true;
-    script.defer = true;
-
-    script.onload = () => {
-      window.__GOOGLE_MAPS_LOADED__ = true;
-      window.__GOOGLE_MAPS_LOADING__ = false;
-    };
-
-    script.onerror = () => {
-      loadError = 'Failed to load Google Maps API. Please check your API key.';
-      window.__GOOGLE_MAPS_LOADING__ = false;
-    };
-
-    document.head.appendChild(script);
-  });
-
-  function initializeMap() {
-    if (!mapContainer) return;
-
-    // Wait for Google Maps API to be fully loaded
-    if (!window.google || !window.google.maps || !window.google.maps.Map || !window.google.maps.marker?.AdvancedMarkerElement) {
-      loadError = 'Google Maps API is still loading. Please wait...';
-      // Retry after a short delay
-      setTimeout(() => {
-        loadError = '';
-        initializeMap();
-      }, 500);
-      return;
-    }
-
+    searching = true;
+    searchMessage = '';
+    results = [];
     try {
-      // Initialize map
-      const center = tempLatitude && tempLongitude
-        ? { lat: tempLatitude, lng: tempLongitude }
-        : { lat: 37.5665, lng: 126.9780 }; // Default to Seoul
-
-      map = new google.maps.Map(mapContainer, {
-        center: center,
-        zoom: 15,
-        mapId: 'VENUE_SELECTOR_MAP',
-      });
-
-      // Add marker if coordinates exist
-      if (tempLatitude && tempLongitude) {
-        marker = new google.maps.marker.AdvancedMarkerElement({
-          position: { lat: tempLatitude, lng: tempLongitude },
-          map: map,
-          gmpDraggable: true,
-        });
-
-        marker.addListener('dragend', (event) => {
-          tempLatitude = event.latLng.lat();
-          tempLongitude = event.latLng.lng();
-          reverseGeocode(tempLatitude, tempLongitude);
-        });
-      }
-    } catch (error) {
-      console.error('Error initializing map:', error);
-      loadError = 'Error initializing map. Please try again.';
+      const url = `${NOMINATIM}/search?format=jsonv2&addressdetails=1&limit=5` +
+                  `&accept-language=en&q=${encodeURIComponent(q)}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const data = await res.json();
+      results = Array.isArray(data) ? data : [];
+      if (results.length === 0) searchMessage = m.form_venueSearchNoResults();
+    } catch (e) {
+      console.error('Nominatim search failed:', e);
+      searchMessage = m.form_venueSearchFailed();
+    } finally {
+      searching = false;
     }
   }
 
-  async function handleSearchInput() {
-    if (!searchInput || searchInput.length < 3) {
-      predictions = [];
-      showPredictions = false;
-      return;
-    }
-
+  // Look the chosen object up again by its OSM id in Korean, so both language
+  // fields describe the same place. A second search by text could rank a
+  // different result first.
+  async function fetchKorean(result) {
+    const prefix = String(result.osm_type ?? '').charAt(0).toUpperCase();
+    if (!prefix || !result.osm_id) return null;
     try {
-      const request = {
-        input: searchInput,
-        includedPrimaryTypes: ['establishment'],
-      };
-
-      const { suggestions } = await google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions(request);
-
-      if (suggestions && suggestions.length > 0) {
-        predictions = suggestions;
-        showPredictions = true;
-      } else {
-        predictions = [];
-        showPredictions = false;
-      }
-    } catch (error) {
-      console.error('Error fetching autocomplete suggestions:', error);
-      predictions = [];
-      showPredictions = false;
+      const url = `${NOMINATIM}/lookup?format=jsonv2&osm_ids=${prefix}${result.osm_id}` +
+                  `&accept-language=ko`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return Array.isArray(data) && data[0] ? data[0] : null;
+    } catch (e) {
+      console.warn('Korean lookup failed, keeping the English text:', e);
+      return null;
     }
   }
 
-  async function selectPlace(suggestion) {
-    try {
-      // Get placeId for fetching in different languages
-      const placeId = suggestion.placePrediction.placeId;
+  const shortName = (r) =>
+    r?.name || String(r?.display_name ?? '').split(',')[0].trim();
 
-      // Fetch place details to get location first
-      const place = suggestion.placePrediction.toPlace();
-      await place.fetchFields({
-        fields: ['displayName', 'location'],
-      });
+  async function selectResult(result) {
+    tempLatitude = Number(result.lat);
+    tempLongitude = Number(result.lon);
+    tempVenueName = shortName(result);
+    tempVenueAddress = result.display_name || '';
 
-      const lat = place.location.lat();
-      const lng = place.location.lng();
+    // Nominatim falls back to the local name when there is no Korean one, so
+    // these can legitimately end up identical to the English fields.
+    const ko = await fetchKorean(result);
+    tempVenueNameKo = ko ? shortName(ko) : tempVenueName;
+    tempVenueAddressKo = ko?.display_name || tempVenueAddress;
 
-      // Set coordinates immediately
-      tempLatitude = lat;
-      tempLongitude = lng;
-
-      // Update map
-      map.setCenter(place.location);
-      map.setZoom(15);
-
-      // Update or create marker
-      if (marker) {
-        marker.position = place.location;
-      } else {
-        marker = new google.maps.marker.AdvancedMarkerElement({
-          position: place.location,
-          map: map,
-          gmpDraggable: true,
-        });
-
-        marker.addListener('dragend', (event) => {
-          tempLatitude = event.latLng.lat();
-          tempLongitude = event.latLng.lng();
-          reverseGeocode(tempLatitude, tempLongitude);
-        });
-      }
-
-      // Fetch place name in English using new Places API
-      // requestedLanguage is passed when constructing the Place object
-      try {
-        const placeEn = new google.maps.places.Place({
-          id: placeId,
-          requestedLanguage: 'en',
-        });
-        await placeEn.fetchFields({ fields: ['displayName'] });
-        tempVenueName = placeEn.displayName || place.displayName || '';
-      } catch (e) {
-        console.warn('Failed to fetch English name:', e);
-        tempVenueName = place.displayName || '';
-      }
-
-      // Fetch place name in Korean using new Places API
-      try {
-        const placeKo = new google.maps.places.Place({
-          id: placeId,
-          requestedLanguage: 'ko',
-        });
-        await placeKo.fetchFields({ fields: ['displayName'] });
-        tempVenueNameKo = placeKo.displayName || place.displayName || '';
-      } catch (e) {
-        console.warn('Failed to fetch Korean name:', e);
-        tempVenueNameKo = place.displayName || '';
-      }
-
-      // Use Geocoder to get bilingual addresses (Geocoder supports language parameter)
-      const geocoder = new google.maps.Geocoder();
-      const latlng = { lat, lng };
-
-      // Get English address
-      geocoder.geocode({ location: latlng, language: 'en' }, (results, status) => {
-        if (status === 'OK' && results[0]) {
-          tempVenueAddress = results[0].formatted_address;
-        }
-      });
-
-      // Get Korean address
-      geocoder.geocode({ location: latlng, language: 'ko' }, (results, status) => {
-        if (status === 'OK' && results[0]) {
-          tempVenueAddressKo = results[0].formatted_address;
-        }
-      });
-
-      // Clear search input and hide predictions
-      searchInput = '';
-      predictions = [];
-      showPredictions = false;
-      loadError = '';
-    } catch (error) {
-      console.error('Error getting place details:', error);
-      loadError = 'Failed to get place details. Please try again.';
-    }
+    results = [];
+    searchInput = '';
+    searchMessage = '';
   }
 
-  function reverseGeocode(lat, lng) {
-    const geocoder = new google.maps.Geocoder();
-    const latlng = { lat: lat, lng: lng };
+  const hasTempCoords = $derived(
+    tempLatitude !== null && tempLatitude !== '' && !Number.isNaN(Number(tempLatitude)) &&
+    tempLongitude !== null && tempLongitude !== '' && !Number.isNaN(Number(tempLongitude))
+  );
 
-    // Get address in English
-    geocoder.geocode({ location: latlng, language: 'en' }, (results, status) => {
-      if (status === 'OK') {
-        if (results[0]) {
-          tempVenueAddress = results[0].formatted_address;
-        }
-      }
-    });
-
-    // Get address in Korean
-    geocoder.geocode({ location: latlng, language: 'ko' }, (results, status) => {
-      if (status === 'OK') {
-        if (results[0]) {
-          const koreanAddress = results[0].formatted_address;
-          tempVenueAddressKo = koreanAddress !== tempVenueAddress ? koreanAddress : '';
-        }
-      }
-    });
-  }
+  // Display-only embed: no API key, so no "development purposes only" watermark.
+  const previewUrl = $derived(
+    hasTempCoords
+      ? `https://maps.google.com/maps?q=${Number(tempLatitude)},${Number(tempLongitude)}` +
+        `&z=15&hl=${languageTag()}&output=embed`
+      : ''
+  );
 
   function openModal() {
     modal_open = true;
-    // Initialize temp values from current values
     tempVenueName = venueName;
     tempVenueNameKo = venueNameKo;
     tempVenueAddress = venueAddress;
@@ -276,10 +120,9 @@
     tempLatitude = venueLatitude;
     tempLongitude = venueLongitude;
     formError = '';
-    // Initialize map when modal opens
-    setTimeout(() => {
-      initializeMap();
-    }, 100);
+    searchInput = '';
+    results = [];
+    searchMessage = '';
   }
 
   function closeModal() {
@@ -288,22 +131,33 @@
   }
 
   function confirmVenue() {
-    // Validate required fields
-    if (!tempVenueName.trim() || !tempVenueNameKo.trim() || !tempVenueAddress.trim() || !tempVenueAddressKo.trim()) {
+    if (!tempVenueName.trim() || !tempVenueNameKo.trim() ||
+        !tempVenueAddress.trim() || !tempVenueAddressKo.trim()) {
       formError = m.form_venueNameAddressRequired();
       return;
     }
+    // Coordinates stay optional, but a half-entered or out-of-range pair would
+    // put the map somewhere wrong rather than simply omitting it.
+    const lat = Number(tempLatitude);
+    const lng = Number(tempLongitude);
+    const latGiven = tempLatitude !== null && tempLatitude !== '';
+    const lngGiven = tempLongitude !== null && tempLongitude !== '';
+    if (latGiven !== lngGiven ||
+        (latGiven && (Number.isNaN(lat) || lat < -90 || lat > 90)) ||
+        (lngGiven && (Number.isNaN(lng) || lng < -180 || lng > 180))) {
+      formError = m.form_venueCoordsInvalid();
+      return;
+    }
+
     formError = '';
-    // Set the actual values from temp values
     venueName = tempVenueName;
     venueNameKo = tempVenueNameKo;
     venueAddress = tempVenueAddress;
     venueAddressKo = tempVenueAddressKo;
-    venueLatitude = tempLatitude;
-    venueLongitude = tempLongitude;
+    venueLatitude = latGiven ? lat : null;
+    venueLongitude = lngGiven ? lng : null;
     closeModal();
   }
-
 </script>
 
 <div class="space-y-4">
@@ -387,60 +241,75 @@
 
 <Modal title={m.form_selectVenueLocation()} bind:open={modal_open} size="xl" outsideclose={false}>
   <div class="space-y-4">
-    {#if loadError || formError}
-      <Alert color="red">{loadError || formError}</Alert>
+    {#if formError}
+      <Alert color="red">{formError}</Alert>
     {/if}
 
-    <!-- Map Selection Section -->
-    <div class="relative">
+    <!-- Address lookup -->
+    <div>
       <Label for="search_address" class="block mb-2">{m.form_searchAddress()}</Label>
-      <div class="relative">
-        <div class="absolute inset-y-0 start-0 flex items-center ps-3.5 pointer-events-none">
-          <MapPin class="h-5 w-5 text-gray-500" />
-        </div>
-        <Input
-          id="search_address"
-          type="text"
-          bind:value={searchInput}
-          oninput={handleSearchInput}
-          onfocus={() => { if (predictions.length > 0) showPredictions = true; }}
-          onkeydown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              if (predictions.length > 0) {
-                selectPlace(predictions[0]);
+      <div class="flex gap-2">
+        <div class="relative flex-1">
+          <div class="absolute inset-y-0 start-0 flex items-center ps-3.5 pointer-events-none">
+            <MapPin class="h-5 w-5 text-gray-500" />
+          </div>
+          <Input
+            id="search_address"
+            type="text"
+            bind:value={searchInput}
+            onkeydown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                searchAddress();
               }
-            }
-          }}
-          placeholder={m.form_searchAddressPlaceholder()}
-          class="ps-10"
-          size="md"
-        />
+            }}
+            placeholder={m.form_searchAddressPlaceholder()}
+            class="ps-10"
+            size="md"
+          />
+        </div>
+        <Button color="primary" onclick={searchAddress} disabled={searching || !searchInput.trim()}>
+          <Search class="w-4 h-4 me-1.5" />
+          {searching ? m.common_loading() : m.form_venueSearchButton()}
+        </Button>
       </div>
 
-      {#if showPredictions && predictions.length > 0}
-        <div class="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-          {#each predictions as suggestion}
+      {#if results.length > 0}
+        <div class="mt-2 bg-white border border-gray-300 rounded-lg shadow-sm max-h-60 overflow-y-auto">
+          {#each results as result}
             <button
               type="button"
               class="w-full text-left px-4 py-2 hover:bg-gray-100 border-b border-gray-200 last:border-b-0"
-              onclick={() => selectPlace(suggestion)}
+              onclick={() => selectResult(result)}
             >
-              <div class="font-medium text-sm">{suggestion.placePrediction.mainText?.text || suggestion.placePrediction.text?.text || ''}</div>
-              <div class="text-xs text-gray-600">{suggestion.placePrediction.secondaryText?.text || ''}</div>
+              <div class="font-medium text-sm">{shortName(result)}</div>
+              <div class="text-xs text-gray-600">{result.display_name}</div>
             </button>
           {/each}
         </div>
       {/if}
 
+      {#if searchMessage}
+        <p class="text-sm text-red-600 mt-2">{searchMessage}</p>
+      {/if}
+
       <p class="text-sm text-gray-500 mt-2">{m.form_searchAddressHint()}</p>
+      <p class="text-xs text-gray-400 mt-1">{m.form_venueSearchAttribution()}</p>
     </div>
 
-    <div bind:this={mapContainer} class="w-full h-72 rounded-lg border border-gray-300"></div>
-
-    <p class="text-sm text-gray-600">
-      {m.form_dragMarkerHint()}
-    </p>
+    {#if previewUrl}
+      <iframe
+        src={previewUrl}
+        title={tempVenueName || m.form_selectVenueLocation()}
+        class="w-full h-72 rounded-lg border border-gray-300"
+        loading="lazy"
+        referrerpolicy="no-referrer-when-downgrade"
+      ></iframe>
+    {:else}
+      <div class="w-full h-72 rounded-lg border border-dashed border-gray-300 flex items-center justify-center text-sm text-gray-500">
+        {m.form_venueCoordsHint()}
+      </div>
+    {/if}
 
     <Hr class="my-4" />
 
@@ -488,6 +357,30 @@
             bind:value={tempVenueNameKo}
             placeholder={m.form_venueNameKo()}
             required
+          />
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <Label for="edit_venue_latitude" class="block mb-2">{m.form_venueLatitude()}</Label>
+          <Input
+            id="edit_venue_latitude"
+            type="number"
+            step="any"
+            bind:value={tempLatitude}
+            placeholder="37.5665"
+          />
+        </div>
+
+        <div>
+          <Label for="edit_venue_longitude" class="block mb-2">{m.form_venueLongitude()}</Label>
+          <Input
+            id="edit_venue_longitude"
+            type="number"
+            step="any"
+            bind:value={tempLongitude}
+            placeholder="126.9780"
           />
         </div>
       </div>
