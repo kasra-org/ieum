@@ -126,7 +126,13 @@
     let instituteDisplayName = $state('');
 
     // Payment method selection (for paid events)
-    let paymentMethod = $state('toss'); // 'toss', 'nicepay' or 'paypal'
+    // One gateway per category, chosen by the admin. 'none' disables a category,
+    // so an attendee is only ever offered what is actually configured.
+    const domesticProvider = data.payment_settings?.domestic_provider ?? 'toss';
+    const internationalProvider = data.payment_settings?.international_provider ?? 'paypal';
+    const availableMethods = [domesticProvider, internationalProvider].filter((p) => p && p !== 'none');
+
+    let paymentMethod = $state(availableMethods[0] ?? 'none');
     let paypalButtonsRendered = $state(false);
     let paypalContainerRef = $state(null);
 
@@ -717,10 +723,13 @@
 
                             <hr class="my-6 border-gray-200" />
 
-                            <!-- Payment Method Selection -->
+                            <!-- Payment Method Selection: only rendered when the
+                                 admin has enabled more than one provider. -->
+                            {#if availableMethods.length > 1}
                             <div class="mb-6">
                                 <h3 class="text-lg font-semibold text-gray-900 mb-4">{m.eventRegister_selectPaymentMethod()}</h3>
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {#if domesticProvider === 'toss'}
                                     <!-- Toss Payments Option -->
                                     <label class="relative flex items-center p-4 border-2 rounded-lg cursor-pointer transition-colors {paymentMethod === 'toss' ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
                                         <input
@@ -743,7 +752,9 @@
                                             <CircleCheck class="absolute top-2 right-2 w-5 h-5 text-primary-500" />
                                         {/if}
                                     </label>
+                                    {/if}
 
+                                    {#if domesticProvider === 'nicepay'}
                                     <!-- NicePay Option -->
                                     <label class="relative flex items-center p-4 border-2 rounded-lg cursor-pointer transition-colors {paymentMethod === 'nicepay' ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
                                         <input
@@ -766,7 +777,9 @@
                                             <CircleCheck class="absolute top-2 right-2 w-5 h-5 text-primary-500" />
                                         {/if}
                                     </label>
+                                    {/if}
 
+                                    {#if internationalProvider === 'paypal'}
                                     <!-- PayPal Option -->
                                     <label class="relative flex items-center p-4 border-2 rounded-lg cursor-pointer transition-colors {paymentMethod === 'paypal' ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
                                         <input
@@ -792,8 +805,10 @@
                                             <CircleCheck class="absolute top-2 right-2 w-5 h-5 text-primary-500" />
                                         {/if}
                                     </label>
+                                    {/if}
                                 </div>
                             </div>
+                            {/if}
                         </div>
 
                         {#if error_message}
@@ -822,11 +837,19 @@
                                         {m.eventRegister_payNow()}
                                     </Button>
                                 </div>
-                            {:else}
+                            {:else if paymentMethod === 'paypal'}
                                 <!-- PayPal Buttons -->
                                 <div class="max-w-md mx-auto w-full">
                                     <div id="paypal-button-container" class="min-h-[150px]"></div>
                                 </div>
+                                <div class="flex justify-center">
+                                    <Button color="alternative" type="button" size="lg" href="/event/{event.id}">
+                                        {m.eventRegister_payLater()}
+                                    </Button>
+                                </div>
+                            {:else}
+                                <!-- No provider configured: don't strand the attendee on a dead step -->
+                                <Alert color="yellow">{m.eventRegister_noPaymentMethod()}</Alert>
                                 <div class="flex justify-center">
                                     <Button color="alternative" type="button" size="lg" href="/event/{event.id}">
                                         {m.eventRegister_payLater()}

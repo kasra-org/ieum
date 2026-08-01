@@ -1,7 +1,7 @@
 <script>
     import { Card, Button } from '$lib/components/ui';
     import { Sidebar, SidebarGroup, SidebarItem, SidebarWrapper } from '$lib/components/ui';
-    import { Building2, Calendar, ClipboardList, Clock, FileText, Globe, KeyRound, Settings, Users as UsersIcon } from '@lucide/svelte';
+    import { Building2, Calendar, ClipboardList, Clock, CreditCard, FileText, Globe, KeyRound, Settings, Users as UsersIcon } from '@lucide/svelte';
     import { onMount } from 'svelte';
     import { fly } from 'svelte/transition';
     import * as m from '$lib/paraglide/messages.js';
@@ -10,6 +10,7 @@
     import Users from '$lib/components/admin/Users.svelte';
     import Institutions from '$lib/components/admin/Institutions.svelte';
     import BusinessSettings from '$lib/components/admin/BusinessSettings.svelte';
+    import PaymentSettings from '$lib/components/admin/PaymentSettings.svelte';
     import AccountSettings from '$lib/components/admin/AccountSettings.svelte';
     import PrivacyPolicy from '$lib/components/admin/PrivacyPolicy.svelte';
     import TermsOfService from '$lib/components/admin/TermsOfService.svelte';
@@ -24,7 +25,7 @@
     // matching entry here silently redirects to #events, which is easy to miss.
     const ADMIN_PAGES = [
         'events', 'users', 'institutions', 'site_settings', 'business_settings',
-        'account_settings', 'privacy_policy', 'terms_of_service', 'api_keys'
+        'payment_settings', 'account_settings', 'privacy_policy', 'terms_of_service', 'api_keys'
     ];
 
     const setAdminPage = () => {
@@ -138,6 +139,11 @@
                                 <Settings class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
+                        <SidebarItem label={m.admin_sidebar_paymentSettings()} active={sidebar_selected === 'payment_settings'} href="#payment_settings">
+                            {#snippet icon()}
+                                <CreditCard class="w-6 h-6" />
+                            {/snippet}
+                        </SidebarItem>
                         <SidebarItem label={m.admin_sidebar_accountSettings()} active={sidebar_selected === 'account_settings'} href="#account_settings">
                             {#snippet icon()}
                                 <Clock class="w-6 h-6" />
@@ -196,6 +202,10 @@
 
             {#if sidebar_selected === 'business_settings'}
             <BusinessSettings {data} />
+            {/if}
+
+            {#if sidebar_selected === 'payment_settings'}
+            <PaymentSettings {data} />
             {/if}
 
             {#if sidebar_selected === 'account_settings'}

@@ -23,7 +23,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from main.models import ApiKey, User, Event, EmailTemplate, Attendee, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction
+from main.models import ApiKey, User, Event, EmailTemplate, Attendee, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings
 from main.schema import *
 from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id
 from main import nicepay
@@ -2181,6 +2181,71 @@ def update_site_settings(request, data: SiteSettingsUpdateSchema):
     }
 
 
+# ===== Payment Settings (Global Admin) =====
+
+@api.get("/payment-settings", response=PaymentSettingsSchema, auth=None)
+def get_payment_settings(request):
+    """Get the configured payment providers (public: the registration page
+    needs to know which payment options to offer)."""
+    settings = PaymentSettings.get_instance()
+    return {
+        'domestic_provider': settings.domestic_provider,
+        'international_provider': settings.international_provider,
+    }
+
+
+@api.post("/admin/payment-settings", response=PaymentSettingsSchema)
+@ensure_staff
+def update_payment_settings(request, data: PaymentSettingsUpdateSchema):
+    """Update the payment providers (admin only). One provider per category."""
+    valid_domestic = [c[0] for c in PaymentSettings.DOMESTIC_CHOICES]
+    valid_international = [c[0] for c in PaymentSettings.INTERNATIONAL_CHOICES]
+
+    if data.domestic_provider not in valid_domestic:
+        return api.create_response(
+            request,
+            {"code": "invalid_provider", "message": "Invalid domestic payment provider."},
+            status=400,
+        )
+    if data.international_provider not in valid_international:
+        return api.create_response(
+            request,
+            {"code": "invalid_provider", "message": "Invalid international payment provider."},
+            status=400,
+        )
+
+    settings = PaymentSettings.get_instance()
+    settings.domestic_provider = data.domestic_provider
+    settings.international_provider = data.international_provider
+    settings.save()
+
+    logger.info(
+        f"Payment providers updated: domestic={settings.domestic_provider}, "
+        f"international={settings.international_provider}"
+    )
+
+    return {
+        'domestic_provider': settings.domestic_provider,
+        'international_provider': settings.international_provider,
+    }
+
+
+def ensure_provider_enabled(request, provider):
+    """Reject payments through a provider the admin has not selected.
+
+    Without this the setting would only hide a button, leaving the other
+    gateways fully usable by anyone posting to their endpoints directly.
+    """
+    if PaymentSettings.get_instance().is_enabled(provider):
+        return None
+    logger.warning(f"Payment attempt via disabled provider: {provider}")
+    return api.create_response(
+        request,
+        {"code": "provider_disabled", "message": "This payment method is not available."},
+        status=400,
+    )
+
+
 # ===== Event Payment Management (Event Admin) =====
 
 @api.get("/event/{event_id}/payments", response=List[EventPaymentSchema])
@@ -2435,6 +2500,10 @@ def confirm_toss_payment(request, data: TossPaymentConfirmSchema):
     Called from the payment success callback page.
     The attendee should already be registered with pending payment status.
     """
+    disabled = ensure_provider_enabled(request, 'toss')
+    if disabled:
+        return disabled
+
     # Validate secret key is configured
     if not settings.TOSS_SECRET_KEY:
         logger.error("TOSS_SECRET_KEY is not configured")
@@ -2663,6 +2732,10 @@ def create_paypal_order(request, data: PayPalCreateOrderSchema):
             status=401,
         )
 
+    disabled = ensure_provider_enabled(request, 'paypal')
+    if disabled:
+        return disabled
+
     # Validate PayPal is configured
     if not settings.PAYPAL_CLIENT_ID or not settings.PAYPAL_SECRET_KEY:
         logger.error("PayPal credentials are not configured")
@@ -2859,6 +2932,10 @@ def capture_paypal_order(request, data: PayPalCaptureOrderSchema):
             status=401,
         )
 
+    disabled = ensure_provider_enabled(request, 'paypal')
+    if disabled:
+        return disabled
+
     # Validate PayPal is configured
     if not settings.PAYPAL_CLIENT_ID or not settings.PAYPAL_SECRET_KEY:
         return api.create_response(
@@ -3008,6 +3085,10 @@ def prepare_nicepay_payment(request, data: NicePayPrepareSchema):
     here so the callback - which arrives without our session cookie - can
     validate the result against a trusted record instead of the POST body.
     """
+    disabled = ensure_provider_enabled(request, 'nicepay')
+    if disabled:
+        return disabled
+
     if not nicepay.is_configured():
         logger.error("NicePay is not configured (NICEPAY_MID / NICEPAY_MERCHANT_KEY)")
         return api.create_response(

@@ -473,6 +473,17 @@ class SiteSettingsUpdateSchema(Schema):
     site_keywords: str = "conference management, event registration, abstract submission, scientific conference, academic event"
 
 
+class PaymentSettingsSchema(Schema):
+    """Which gateway handles each payment category"""
+    domestic_provider: str
+    international_provider: str
+
+
+class PaymentSettingsUpdateSchema(Schema):
+    domestic_provider: str = "toss"
+    international_provider: str = "paypal"
+
+
 class RegistrationHistorySchema(Schema):
     id: int
     registration_date: str

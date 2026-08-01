@@ -43,6 +43,12 @@ export async function load({ parent, params, cookies }) {
         };
     }
 
+    // Load payment settings (public endpoint, doesn't require admin auth)
+    const paymentSettingsResponse = await get('api/payment-settings', cookies);
+    data.admin.paymentSettings = (paymentSettingsResponse.ok && paymentSettingsResponse.status === 200)
+        ? paymentSettingsResponse.data
+        : { domestic_provider: 'toss', international_provider: 'paypal' };
+
     // Load business settings (public endpoint, doesn't require admin auth)
     const businessSettingsResponse = await get('api/business-settings', cookies);
     if (businessSettingsResponse.ok && businessSettingsResponse.status === 200) {
@@ -243,6 +249,19 @@ export const actions = {
             site_keywords: formdata.get('site_keywords') || ''
         };
         const response = await post('api/admin/site-settings', data, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            throw error(response.status, response.data);
+        }
+    },
+    'update_payment_settings': async ({ cookies, request }) => {
+        let formdata = await request.formData();
+        const data = {
+            domestic_provider: formdata.get('domestic_provider') || 'toss',
+            international_provider: formdata.get('international_provider') || 'paypal'
+        };
+        const response = await post('api/admin/payment-settings', data, cookies);
         if (response.ok && response.status === 200) {
             return response.data;
         } else {

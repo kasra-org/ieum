@@ -569,6 +569,56 @@ class AccountSettings(models.Model):
         return "Account Settings"
 
 
+class PaymentSettings(models.Model):
+    """
+    Singleton model choosing which payment gateway handles each category.
+
+    Exactly one provider is active per category: a domestic gateway for Korean
+    cards and an international one. Attendees are offered only the configured
+    providers, and the payment endpoints refuse anything else, so switching
+    gateways here actually takes effect rather than only hiding a button.
+    """
+    NONE = 'none'
+
+    DOMESTIC_CHOICES = [
+        ('toss', 'Toss Payments'),
+        ('nicepay', 'NicePay'),
+        (NONE, 'Disabled'),
+    ]
+    INTERNATIONAL_CHOICES = [
+        ('paypal', 'PayPal'),
+        (NONE, 'Disabled'),
+    ]
+
+    domestic_provider = models.CharField(max_length=20, choices=DOMESTIC_CHOICES, default='toss')
+    international_provider = models.CharField(max_length=20, choices=INTERNATIONAL_CHOICES, default='paypal')
+
+    class Meta:
+        verbose_name = 'Payment Settings'
+        verbose_name_plural = 'Payment Settings'
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        # Prevent deletion of the singleton instance
+        pass
+
+    @classmethod
+    def get_instance(cls):
+        """Get or create the singleton instance"""
+        obj, created = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def is_enabled(self, provider):
+        """True when `provider` is the one configured for its category."""
+        return provider in (self.domestic_provider, self.international_provider)
+
+    def __str__(self):
+        return f"Payment Settings - {self.domestic_provider} / {self.international_provider}"
+
+
 class SiteSettings(models.Model):
     """
     Singleton model for site name and meta tag settings

@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from main import nicepay
-from main.models import Attendee, Event, NicePayTransaction, PaymentHistory
+from main.models import Attendee, Event, NicePayTransaction, PaymentHistory, PaymentSettings
 
 User = get_user_model()
 
@@ -261,3 +261,106 @@ class NicePayCancelTests(TestCase):
         with self.assertRaises(nicepay.NicePayError) as ctx:
             nicepay.cancel(tid='TID1', cancel_amount=1004)
         self.assertEqual(ctx.exception.code, '4000')
+
+
+@nicepay_settings
+class PaymentProviderSelectionTests(TestCase):
+    """One provider per category, enforced server-side rather than in the UI."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='buyer', email='buyer@example.com', password='pw12345!'
+        )
+        self.event = Event.objects.create(
+            name='Paid Event', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, registration_fee=1004,
+        )
+        Attendee.objects.create(
+            user=self.user, event=self.event, first_name='Buy', last_name='Er',
+            nationality=410, institute='KASRA',
+        )
+        self.client.force_login(self.user)
+
+    def set_providers(self, domestic, international):
+        s = PaymentSettings.get_instance()
+        s.domestic_provider = domestic
+        s.international_provider = international
+        s.save()
+
+    def test_defaults_are_toss_and_paypal(self):
+        s = PaymentSettings.get_instance()
+        self.assertEqual(s.domestic_provider, 'toss')
+        self.assertEqual(s.international_provider, 'paypal')
+
+    def test_is_enabled_reflects_selection(self):
+        self.set_providers('nicepay', 'none')
+        s = PaymentSettings.get_instance()
+        self.assertTrue(s.is_enabled('nicepay'))
+        self.assertFalse(s.is_enabled('toss'))
+        self.assertFalse(s.is_enabled('paypal'))
+
+    def test_nicepay_prepare_rejected_when_toss_is_selected(self):
+        self.set_providers('toss', 'paypal')
+        response = self.client.post(
+            '/api/payment/nicepay/prepare',
+            data={'eventId': self.event.id, 'payMethod': 'CARD'},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'provider_disabled')
+
+    @patch('main.apis.requests.post')
+    def test_toss_confirm_rejected_when_nicepay_is_selected(self, mock_post):
+        self.set_providers('nicepay', 'paypal')
+        response = self.client.post(
+            '/api/payment/confirm',
+            data={'paymentKey': 'k', 'orderId': 'o', 'amount': 1004, 'eventId': self.event.id},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'provider_disabled')
+        # Rejected before any money moves.
+        mock_post.assert_not_called()
+
+    def test_paypal_rejected_when_international_disabled(self):
+        self.set_providers('toss', 'none')
+        response = self.client.post(
+            '/api/payment/paypal/create-order',
+            data={'eventId': self.event.id, 'amount': 1004},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'provider_disabled')
+
+    def test_nicepay_prepare_allowed_when_selected(self):
+        self.set_providers('nicepay', 'none')
+        response = self.client.post(
+            '/api/payment/nicepay/prepare',
+            data={'eventId': self.event.id, 'payMethod': 'CARD'},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['params']['MID'], TEST_MID)
+
+    def test_admin_endpoint_rejects_unknown_provider(self):
+        staff = User.objects.create_user(
+            username='boss', email='boss@example.com', password='pw12345!', is_staff=True
+        )
+        self.client.force_login(staff)
+        response = self.client.post(
+            '/api/admin/payment-settings',
+            data={'domestic_provider': 'stripe', 'international_provider': 'paypal'},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'invalid_provider')
+        self.assertEqual(PaymentSettings.get_instance().domestic_provider, 'toss')
+
+    def test_non_staff_cannot_change_providers(self):
+        response = self.client.post(
+            '/api/admin/payment-settings',
+            data={'domestic_provider': 'nicepay', 'international_provider': 'none'},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(PaymentSettings.get_instance().domestic_provider, 'toss')

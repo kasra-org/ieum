@@ -4,6 +4,14 @@ import { error, redirect } from '@sveltejs/kit';
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ parent, params, cookies }) {
     let rtn = await parent();
+
+    // Which gateways the admin has enabled; set before the early returns below
+    // so the payment step always knows what to offer.
+    const paymentSettingsResponse = await get('api/payment-settings', cookies);
+    rtn.payment_settings = (paymentSettingsResponse.ok && paymentSettingsResponse.status === 200)
+        ? paymentSettingsResponse.data
+        : { domestic_provider: 'toss', international_provider: 'paypal' };
+
     if (rtn.user) {
         // Check if already registered
         if (rtn.registered) {
