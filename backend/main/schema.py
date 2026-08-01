@@ -153,6 +153,7 @@ class PublicUserSchema(Schema):
 
 class OrganizerSchema(Schema):
     id: int
+    organizer_type: str
     name: str
     korean_name: str
     email: str

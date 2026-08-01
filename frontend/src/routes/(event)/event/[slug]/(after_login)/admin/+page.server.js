@@ -349,6 +349,7 @@ export const actions = {
     add_organizer: async ({ cookies, params, request }) => {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/organizer/add`, {
+            organizer_type: formdata.get('organizer_type') || 'person',
             name: formdata.get('name'),
             korean_name: formdata.get('korean_name') || '',
             email: formdata.get('email') || '',
@@ -365,6 +366,7 @@ export const actions = {
     update_organizer: async ({ cookies, params, request }) => {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/organizer/${formdata.get('id')}/update`, {
+            organizer_type: formdata.get('organizer_type') || 'person',
             name: formdata.get('name'),
             korean_name: formdata.get('korean_name') || '',
             email: formdata.get('email') || '',

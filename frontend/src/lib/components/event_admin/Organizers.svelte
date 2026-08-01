@@ -45,11 +45,16 @@
     let reordering = $state(false);
 
     // Form field state for organizer modal
+    // A 주최 is either a person (who represents an affiliation) or an
+    // institution/company hosting in its own right, which has no affiliation.
+    let organizerType = $state('person');
     let organizerName = $state('');
     let organizerKoreanName = $state('');
     let organizerEmail = $state('');
     let organizerAffiliation = $state('');
     let organizerAffiliationKo = $state('');
+
+    const isOrganization = $derived(organizerType === 'organization');
 
     // Custom getters for SearchableUserList
     function getAttendeeEmail(attendee) {
@@ -65,6 +70,7 @@
     }
 
     function selectAttendeeForOrganizer(attendee) {
+        organizerType = 'person';
         organizerName = attendee.name || '';
         organizerKoreanName = attendee.korean_name || '';
         organizerEmail = attendee.user?.email || attendee.user_email || '';
@@ -74,6 +80,7 @@
 
     const addOrganizerModal = () => {
         selected_organizer = null;
+        organizerType = 'person';
         organizerName = '';
         organizerKoreanName = '';
         organizerEmail = '';
@@ -83,6 +90,7 @@
     };
     const modifyOrganizerModal = (id) => {
         selected_organizer = data.organizers.find((item) => item.id === id);
+        organizerType = selected_organizer.organizer_type || 'person';
         organizerName = selected_organizer.name;
         organizerKoreanName = selected_organizer.korean_name || '';
         organizerEmail = selected_organizer.email || '';
@@ -192,7 +200,13 @@
                 </TableBodyCell>
                 <TableBodyCell>{languageTag() === 'ko' ? (row.korean_name || row.name) : row.name}</TableBodyCell>
                 <TableBodyCell>{row.email}</TableBodyCell>
-                <TableBodyCell>{languageTag() === 'ko' ? (row.affiliation_ko || row.affiliation) : row.affiliation}</TableBodyCell>
+                <TableBodyCell>
+                    {#if row.organizer_type === 'organization'}
+                        <span class="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{m.organizers_typeOrganization()}</span>
+                    {:else}
+                        {languageTag() === 'ko' ? (row.affiliation_ko || row.affiliation) : row.affiliation}
+                    {/if}
+                </TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
                         <ActionTooltip text={m.organizers_updateOrganizer()}>
@@ -223,7 +237,31 @@
     <form method="POST" action={selected_organizer?"?/update_organizer":"?/add_organizer"} use:enhance={afterUpdateOrganizer}>
         {#if selected_organizer}
             <input type="hidden" name="id" value={selected_organizer.id} />
-        {:else}
+        {/if}
+        <div class="mb-6">
+            <Label class="block mb-2">{m.organizers_type()}</Label>
+            <div class="grid grid-cols-2 gap-3">
+                {#each [{ value: 'person', label: m.organizers_typePerson(), hint: m.organizers_typePersonHint() }, { value: 'organization', label: m.organizers_typeOrganization(), hint: m.organizers_typeOrganizationHint() }] as option}
+                    <label class="flex cursor-pointer items-start gap-3 rounded-lg border-2 p-3 transition-colors
+                        {organizerType === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
+                        <input
+                            type="radio"
+                            name="organizer_type"
+                            value={option.value}
+                            checked={organizerType === option.value}
+                            onchange={() => (organizerType = option.value)}
+                            class="mt-1 h-4 w-4"
+                        />
+                        <span>
+                            <span class="block text-sm font-medium text-gray-900">{option.label}</span>
+                            <span class="block text-sm text-gray-500">{option.hint}</span>
+                        </span>
+                    </label>
+                {/each}
+            </div>
+        </div>
+
+        {#if !selected_organizer && !isOrganization}
             <div class="mb-6">
                 <Label class="block mb-2">{m.organizers_selectAttendee()}</Label>
                 <SearchableUserList
@@ -239,11 +277,15 @@
         {/if}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <div>
-                <Label for="name" class="block mb-2">{m.organizers_name()} ({m.language_english()}) <span class="text-red-500">*</span></Label>
+                <Label for="name" class="block mb-2">
+                    {isOrganization ? m.organizers_organizationName() : m.organizers_name()} ({m.language_english()}) <span class="text-red-500">*</span>
+                </Label>
                 <Input id="name" name="name" type="text" bind:value={organizerName} required />
             </div>
             <div>
-                <Label for="korean_name" class="block mb-2">{m.organizers_name()} ({m.language_korean()})</Label>
+                <Label for="korean_name" class="block mb-2">
+                    {isOrganization ? m.organizers_organizationName() : m.organizers_name()} ({m.language_korean()})
+                </Label>
                 <Input id="korean_name" name="korean_name" type="text" bind:value={organizerKoreanName} />
             </div>
         </div>
@@ -251,16 +293,19 @@
             <Label for="email" class="block mb-2">{m.organizers_email()}</Label>
             <Input id="email" name="email" type="email" bind:value={organizerEmail} />
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div>
-                <Label for="affiliation" class="block mb-2">{m.organizers_affiliation()} ({m.language_english()})</Label>
-                <Input id="affiliation" name="affiliation" type="text" bind:value={organizerAffiliation} />
+        {#if !isOrganization}
+            <!-- An organization hosts under its own name, so it has no affiliation -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div>
+                    <Label for="affiliation" class="block mb-2">{m.organizers_affiliation()} ({m.language_english()})</Label>
+                    <Input id="affiliation" name="affiliation" type="text" bind:value={organizerAffiliation} />
+                </div>
+                <div>
+                    <Label for="affiliation_ko" class="block mb-2">{m.organizers_affiliation()} ({m.language_korean()})</Label>
+                    <Input id="affiliation_ko" name="affiliation_ko" type="text" bind:value={organizerAffiliationKo} />
+                </div>
             </div>
-            <div>
-                <Label for="affiliation_ko" class="block mb-2">{m.organizers_affiliation()} ({m.language_korean()})</Label>
-                <Input id="affiliation_ko" name="affiliation_ko" type="text" bind:value={organizerAffiliationKo} />
-            </div>
-        </div>
+        {/if}
         {#if update_organizer_error}
             <Alert color="red" class="mb-6">{update_organizer_error}</Alert>
         {/if}

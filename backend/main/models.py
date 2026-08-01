@@ -201,7 +201,9 @@ class Event(models.Model):
         organizer_list = []
         for org in self.organizer_set.all():
             name = org.name
-            if org.affiliation:
+            # An organization hosts under its own name, so it never gets the
+            # "Name (Affiliation)" treatment even if a stale value lingers.
+            if org.affiliation and not org.is_organization:
                 organizer_list.append(f"{name} ({org.affiliation})")
             else:
                 organizer_list.append(name)
@@ -214,6 +216,8 @@ class Event(models.Model):
         for org in self.organizer_set.all():
             name = org.korean_name if org.korean_name else org.name
             affiliation = org.affiliation_ko if org.affiliation_ko else org.affiliation
+            if org.is_organization:
+                affiliation = ''
             if affiliation:
                 organizer_list.append(f"{name} ({affiliation})")
             else:
@@ -232,14 +236,30 @@ class Event(models.Model):
 class Organizer(models.Model):
     """
     Organizer model - stores copied organizer info (not FK to User)
+
+    An organizer is either a person (name plus the affiliation they represent)
+    or an institution/company hosting in its own right. For an organization the
+    name *is* the institution, so it carries no affiliation of its own.
     """
+    PERSON = 'person'
+    ORGANIZATION = 'organization'
+    TYPE_CHOICES = [
+        (PERSON, 'Person'),
+        (ORGANIZATION, 'Organization'),
+    ]
+
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='organizer_set')
+    organizer_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=PERSON)
     name = models.CharField(max_length=1000)
     korean_name = models.CharField(max_length=1000, blank=True, default='')
     email = models.EmailField(max_length=254, blank=True)
     affiliation = models.CharField(max_length=1000, blank=True)
     affiliation_ko = models.CharField(max_length=1000, blank=True, default='')
     order = models.PositiveIntegerField(default=0)
+
+    @property
+    def is_organization(self):
+        return self.organizer_type == self.ORGANIZATION
 
     class Meta:
         ordering = ['order']

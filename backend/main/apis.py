@@ -1891,6 +1891,18 @@ def set_main_admin(request, event_id: int, admin_id: int):
     event.save(update_fields=['main_admin'])
     return {"code": "success", "message": "Main admin updated."}
 
+def _organizer_fields(data):
+    """Normalise organizer input: an organization hosts under its own name, so
+    it carries no affiliation. Dropping it here keeps a stale value from
+    reappearing when an existing person is switched to an organization."""
+    organizer_type = data.get("organizer_type", Organizer.PERSON)
+    if organizer_type not in dict(Organizer.TYPE_CHOICES):
+        organizer_type = Organizer.PERSON
+    if organizer_type == Organizer.ORGANIZATION:
+        return organizer_type, "", ""
+    return organizer_type, data.get("affiliation", ""), data.get("affiliation_ko", "")
+
+
 @api.get("/event/{event_id}/organizers", response=List[OrganizerSchema])
 @ensure_event_staff
 def get_organizers(request, event_id: int):
@@ -1910,14 +1922,17 @@ def add_organizer(request, event_id: int):
             status=400,
         )
 
+    organizer_type, affiliation, affiliation_ko = _organizer_fields(data)
+
     max_order = event.organizer_set.aggregate(Max('order'))['order__max'] or -1
     Organizer.objects.create(
         event=event,
+        organizer_type=organizer_type,
         name=data["name"],
         korean_name=data.get("korean_name", ""),
         email=data.get("email", ""),
-        affiliation=data.get("affiliation", ""),
-        affiliation_ko=data.get("affiliation_ko", ""),
+        affiliation=affiliation,
+        affiliation_ko=affiliation_ko,
         order=max_order + 1,
     )
     return {"code": "success", "message": "Organizer added."}
@@ -1928,11 +1943,13 @@ def update_organizer(request, event_id: int, organizer_id: int):
     event = Event.objects.get(id=event_id)
     organizer = event.organizer_set.get(id=organizer_id)
     data = json.loads(request.body)
+    organizer_type, affiliation, affiliation_ko = _organizer_fields(data)
+    organizer.organizer_type = organizer_type
     organizer.name = data["name"]
     organizer.korean_name = data.get("korean_name", "")
     organizer.email = data.get("email", "")
-    organizer.affiliation = data.get("affiliation", "")
-    organizer.affiliation_ko = data.get("affiliation_ko", "")
+    organizer.affiliation = affiliation
+    organizer.affiliation_ko = affiliation_ko
     organizer.save()
     return {"code": "success", "message": "Organizer updated."}
 
