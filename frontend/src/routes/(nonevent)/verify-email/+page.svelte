@@ -1,7 +1,7 @@
 <script>
     let { data } = $props();
-    import { A, Alert } from 'flowbite-svelte';
-    import { EnvelopeSolid } from 'flowbite-svelte-icons';
+    import { A, Alert } from '$lib/components/ui';
+    import { Mail } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
 </script>
 
@@ -22,7 +22,7 @@
 <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
     <div class="flex items-start gap-4">
         <div class="flex-shrink-0">
-            <EnvelopeSolid class="w-12 h-12 text-blue-600" />
+            <Mail class="w-12 h-12 text-blue-600" />
         </div>
         <div class="flex-1">
             <h2 class="text-xl font-semibold text-gray-900 mb-3">{m.verifyEmailPending_checkInbox()}</h2>

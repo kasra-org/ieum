@@ -1,6 +1,6 @@
 <script>
-    import { Modal, Button, Label, Textarea, Alert } from 'flowbite-svelte';
-    import { CloseCircleSolid } from 'flowbite-svelte-icons';
+    import { Modal, Button, Label, Textarea, Alert } from '$lib/components/ui';
+    import { CircleX } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { getDisplayName } from '$lib/utils.js';
@@ -195,7 +195,7 @@
                     >
                         {email}
                         <button type="button" class="ml-0.5 hover:text-red-500 cursor-pointer" onclick={(e) => { e.stopPropagation(); removeAtIndex(i); }}>
-                            <CloseCircleSolid class="w-3 h-3" />
+                            <CircleX class="w-3 h-3" />
                         </button>
                     </span>
                 {/each}

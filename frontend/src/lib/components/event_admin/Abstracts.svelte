@@ -1,8 +1,8 @@
 <script>
-    import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from 'flowbite-svelte';
-    import { Button, Modal, Label, Input, Select, Textarea, Alert } from 'flowbite-svelte';
-    import { Tabs, TabItem } from 'flowbite-svelte';
-    import { UserRemoveSolid, DownloadSolid, EditSolid, TrashBinSolid } from 'flowbite-svelte-icons';
+    import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from '$lib/components/ui';
+    import { Button, Modal, Label, Input, Select, Textarea, Alert } from '$lib/components/ui';
+    import { Tabs, TabItem } from '$lib/components/ui';
+    import { Download, Pencil, Trash2, UserMinus } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import { browser } from '$app/environment';
@@ -215,7 +215,7 @@
                     <div class="flex justify-center gap-2">
                         <ActionTooltip text={m.abstracts_removeReviewer()}>
                             <Button color="none" size="none" onclick={() => deleteReviewerModal(row.id)}>
-                                <UserRemoveSolid class="w-5 h-5" />
+                                <UserMinus class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                     </div>
@@ -257,17 +257,17 @@
                     <div class="flex justify-center gap-2">
                         <ActionTooltip text={m.abstracts_download()}>
                             <Button color="none" size="none" href={row.link}>
-                                <DownloadSolid class="w-5 h-5" />
+                                <Download class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                         <ActionTooltip text={m.abstracts_editAbstract()}>
                             <Button color="none" size="none" onclick={() => showAbstractEditModal(row.id)}>
-                                <EditSolid class="w-5 h-5" />
+                                <Pencil class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                         <ActionTooltip text={m.abstracts_removeAbstract()}>
                             <Button color="none" size="none" onclick={() => showAbstractDeleteModal(row.id)}>
-                                <TrashBinSolid class="w-5 h-5" />
+                                <Trash2 class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                     </div>

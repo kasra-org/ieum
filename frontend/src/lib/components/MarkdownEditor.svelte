@@ -12,8 +12,8 @@
     import { TableCell } from '@tiptap/extension-table-cell';
     import { TableHeader } from '@tiptap/extension-table-header';
     import { marked } from 'marked';
-    import { Label, Tabs, TabItem, Textarea, Button, Dropdown, DropdownItem, Spinner } from 'flowbite-svelte';
-    import { ImageOutline, LinkOutline, PaperClipOutline, ChevronDownOutline, TableColumnOutline } from 'flowbite-svelte-icons';
+    import { Label, Tabs, TabItem, Textarea, Button, Dropdown, DropdownItem, Spinner } from '$lib/components/ui';
+    import { ChevronDown, Columns3, Image as ImageIcon, Link as LinkIcon, Paperclip } from '@lucide/svelte';
     import { deserialize } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
 
@@ -553,8 +553,8 @@
                     onclick={() => tableDropdownOpen = !tableDropdownOpen}
                     title={m.markdownEditor_table()}
                 >
-                    <TableColumnOutline class="w-4 h-4" />
-                    <ChevronDownOutline class="w-3 h-3" />
+                    <Columns3 class="w-4 h-4" />
+                    <ChevronDown class="w-3 h-3" />
                 </button>
                 {#if tableDropdownOpen}
                     <div class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[180px]">
@@ -635,7 +635,7 @@
                 onclick={insertLink}
                 title={m.markdownEditor_link()}
             >
-                <LinkOutline class="w-4 h-4" />
+                <LinkIcon class="w-4 h-4" />
             </button>
 
             <!-- Image Dropdown -->
@@ -646,8 +646,8 @@
                     onclick={() => imageDropdownOpen = !imageDropdownOpen}
                     title={m.markdownEditor_image()}
                 >
-                    <ImageOutline class="w-4 h-4" />
-                    <ChevronDownOutline class="w-3 h-3" />
+                    <ImageIcon class="w-4 h-4" />
+                    <ChevronDown class="w-3 h-3" />
                 </button>
                 {#if imageDropdownOpen}
                     <div class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[160px]">
@@ -656,7 +656,7 @@
                             class="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
                             onclick={() => triggerImageInput('inline')}
                         >
-                            <ImageOutline class="w-4 h-4" />
+                            <ImageIcon class="w-4 h-4" />
                             {m.markdownEditor_insertInline()}
                         </button>
                         <button
@@ -664,7 +664,7 @@
                             class="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
                             onclick={() => triggerImageInput('attachment')}
                         >
-                            <PaperClipOutline class="w-4 h-4" />
+                            <Paperclip class="w-4 h-4" />
                             {m.markdownEditor_insertAsLink()}
                         </button>
                     </div>
@@ -682,7 +682,7 @@
                 {#if uploading}
                     <Spinner size="4" />
                 {:else}
-                    <PaperClipOutline class="w-4 h-4" />
+                    <Paperclip class="w-4 h-4" />
                 {/if}
             </button>
         </div>

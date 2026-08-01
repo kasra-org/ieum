@@ -2,7 +2,7 @@
     import { enhance } from '$app/forms';
     import { goto } from '$app/navigation';
 
-    import { A, List, Li, Card, Button, Heading, Indicator, Label, Input, Dropzone, Checkbox, Select, Alert, Navbar } from 'flowbite-svelte';
+    import { A, List, Li, Card, Button, Heading, Indicator, Label, Input, Dropzone, Checkbox, Select, Alert, Navbar } from '$lib/components/ui';
     import { onMount } from 'svelte';
     import * as m from '$lib/paraglide/messages.js';
 

@@ -1,7 +1,7 @@
 <script>
-    import { Button, Alert, Card } from 'flowbite-svelte';
-    import { Sidebar, SidebarGroup, SidebarItem } from 'flowbite-svelte';
-    import { UserCircleSolid, FileLinesSolid, CreditCardSolid } from 'flowbite-svelte-icons';
+    import { Button, Alert, Card } from '$lib/components/ui';
+    import { Sidebar, SidebarGroup, SidebarItem } from '$lib/components/ui';
+    import { CircleUser, CreditCard, FileText } from '@lucide/svelte';
     import { onMount } from 'svelte';
     import { fly } from 'svelte/transition';
     import * as m from '$lib/paraglide/messages.js';
@@ -107,17 +107,17 @@
                             <SidebarGroup>
                                 <SidebarItem label={m.myRegistration_registrationInfo()} active={sidebar_selected === 'registration_info'} href="#registration_info">
                                     {#snippet icon()}
-                                        <UserCircleSolid class="w-6 h-6" />
+                                        <CircleUser class="w-6 h-6" />
                                     {/snippet}
                                 </SidebarItem>
                                 <SidebarItem label={m.myRegistration_abstractInfo()} active={sidebar_selected === 'abstract_info'} href="#abstract_info">
                                     {#snippet icon()}
-                                        <FileLinesSolid class="w-6 h-6" />
+                                        <FileText class="w-6 h-6" />
                                     {/snippet}
                                 </SidebarItem>
                                 <SidebarItem label={m.myRegistration_paymentInfo()} active={sidebar_selected === 'payment_info'} href="#payment_info">
                                     {#snippet icon()}
-                                        <CreditCardSolid class="w-6 h-6" />
+                                        <CreditCard class="w-6 h-6" />
                                     {/snippet}
                                 </SidebarItem>
                             </SidebarGroup>

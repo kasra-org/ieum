@@ -31,8 +31,7 @@
   --color-secondary-900: #111827;
 }
 
-@source "../node_modules/flowbite-svelte/dist";
-@source "../node_modules/flowbite-svelte-icons/dist";
+@source "./lib/components/ui";
 
 @layer base {
   /* Initialize CSS variables for Tailwind ring/shadow utilities */

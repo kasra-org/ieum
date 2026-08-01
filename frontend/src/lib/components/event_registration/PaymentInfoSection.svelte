@@ -1,5 +1,5 @@
 <script>
-    import { CreditCardSolid } from 'flowbite-svelte-icons';
+    import { CreditCard } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { formatDate } from '$lib/utils.js';
@@ -40,7 +40,7 @@
 </script>
 
 <div class="flex items-center gap-2 mb-6">
-    <CreditCardSolid class="w-6 h-6 text-gray-700" />
+    <CreditCard class="w-6 h-6 text-gray-700" />
     <h2 class="text-xl font-bold text-gray-900">{m.myRegistration_paymentInfo()}</h2>
 </div>
 

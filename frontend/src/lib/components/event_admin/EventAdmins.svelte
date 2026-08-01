@@ -1,8 +1,8 @@
 <script>
-    import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from 'flowbite-svelte';
-    import { Button, Modal, Label, Input, Select, Textarea, Alert } from 'flowbite-svelte';
-    import { Tabs, TabItem } from 'flowbite-svelte';
-    import { UserRemoveSolid, StarSolid, StarOutline } from 'flowbite-svelte-icons';
+    import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from '$lib/components/ui';
+    import { Button, Modal, Label, Input, Select, Textarea, Alert } from '$lib/components/ui';
+    import { Tabs, TabItem } from '$lib/components/ui';
+    import { Star, UserMinus } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import * as m from '$lib/paraglide/messages.js';
@@ -117,16 +117,16 @@
                                 <input type="hidden" name="id" value={row.id} />
                                 <Button color="none" size="none" type="submit">
                                     {#if data.event.main_admin_id === row.id}
-                                        <StarSolid class="w-5 h-5 text-yellow-400" />
+                                        <Star class="w-5 h-5 text-yellow-400" />
                                     {:else}
-                                        <StarOutline class="w-5 h-5 text-gray-400 hover:text-yellow-400" />
+                                        <Star class="w-5 h-5 text-gray-400 hover:text-yellow-400" />
                                     {/if}
                                 </Button>
                             </form>
                         </ActionTooltip>
                         <ActionTooltip text={m.eventAdmins_deleteAdmin()}>
                             <Button color="none" size="none" onclick={() => deleteEventAdminModal(row.id)}>
-                                <UserRemoveSolid class="w-5 h-5" />
+                                <UserMinus class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                     </div>

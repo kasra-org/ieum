@@ -1,5 +1,5 @@
 <script>
-    import { Card, Alert } from 'flowbite-svelte';
+    import { Card, Alert } from '$lib/components/ui';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import * as m from '$lib/paraglide/messages.js';
 

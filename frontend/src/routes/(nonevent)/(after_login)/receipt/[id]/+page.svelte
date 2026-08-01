@@ -1,5 +1,5 @@
 <script>
-    import { Button, Alert, Select } from 'flowbite-svelte';
+    import { Button, Alert, Select } from '$lib/components/ui';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag, setLanguageTag } from '$lib/paraglide/runtime.js';
     import { formatDate, formatDateRange } from '$lib/utils.js';

@@ -1,7 +1,7 @@
 <script>
     import { enhance } from '$app/forms';
-    import { Alert, Button, Card, Heading, Input, Label, Li, List, Select, Textarea } from 'flowbite-svelte';
-    import { ChevronUpOutline, ChevronDownOutline } from 'flowbite-svelte-icons';
+    import { Alert, Button, Card, Heading, Input, Label, Li, List, Select, Textarea } from '$lib/components/ui';
+    import { ChevronDown, ChevronUp } from '@lucide/svelte';
     import { flip } from 'svelte/animate';
     import * as m from '$lib/paraglide/messages.js';
 
@@ -87,10 +87,10 @@
             <span class="text-sm font-medium text-gray-500">#{i + 1}</span>
             <div class="flex gap-1">
                 <Button type="button" size="xs" color="light" disabled={i === 0} onclick={() => moveQuestion(i, -1)}>
-                    <ChevronUpOutline class="w-4 h-4" />
+                    <ChevronUp class="w-4 h-4" />
                 </Button>
                 <Button type="button" size="xs" color="light" disabled={i === custom_questions.length - 1} onclick={() => moveQuestion(i, 1)}>
-                    <ChevronDownOutline class="w-4 h-4" />
+                    <ChevronDown class="w-4 h-4" />
                 </Button>
             </div>
         </div>

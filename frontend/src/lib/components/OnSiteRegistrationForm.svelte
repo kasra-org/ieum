@@ -1,5 +1,5 @@
 <script>
-  import { Input, Label, Alert } from 'flowbite-svelte';
+  import { Input, Label, Alert } from '$lib/components/ui';
   import * as m from '$lib/paraglide/messages.js';
 
   // Props to accept form data and errors from parent

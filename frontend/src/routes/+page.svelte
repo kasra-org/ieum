@@ -1,6 +1,6 @@
 <script>
-    import { Input, Label, Button, Checkbox, Spinner, Tooltip } from 'flowbite-svelte';
-    import { SearchOutline, CalendarMonthOutline, MapPinAltSolid, UserCircleOutline, ClockOutline, GlobeSolid, CheckOutline, CloseCircleOutline } from 'flowbite-svelte-icons';
+    import { Input, Label, Button, Checkbox, Spinner, Tooltip } from '$lib/components/ui';
+    import { Calendar, Check, CircleUser, CircleX, Clock, Globe, MapPin, Search } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { getDisplayVenue, getDisplayOrganizers } from '$lib/utils.js';
     import { goto } from '$app/navigation';
@@ -223,7 +223,7 @@
                                 placeholder={m.events_searchPlaceholder()}
                                 class="pl-10"
                             />
-                            <SearchOutline class="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+                            <Search class="w-4 h-4 absolute left-3 top-3 text-gray-400" />
                         </div>
                     </div>
 
@@ -260,7 +260,7 @@
                     </div>
                 {:else if allEvents.length === 0}
                     <div class="text-center py-16">
-                        <CalendarMonthOutline class="w-16 h-16 mx-auto text-gray-400 mb-4" />
+                        <Calendar class="w-16 h-16 mx-auto text-gray-400 mb-4" />
                         <h3 class="text-xl font-semibold text-gray-900 mb-2">{m.events_noResults()}</h3>
                         <p class="text-gray-600">{m.events_noResultsDesc()}</p>
                     </div>
@@ -343,16 +343,16 @@
                                     <!-- Meta Info -->
                                     <div class="mt-2 flex items-center gap-3 text-sm text-gray-500 flex-wrap">
                                         <span class="flex items-center gap-1">
-                                            <MapPinAltSolid class="w-4 h-4" />
+                                            <MapPin class="w-4 h-4" />
                                             <span>{@html highlightText(getDisplayVenue(event), searchKeyword)}</span>
                                         </span>
                                         <span class="flex items-center gap-1">
-                                            <UserCircleOutline class="w-4 h-4" />
+                                            <CircleUser class="w-4 h-4" />
                                             <span>{@html highlightText(getDisplayOrganizers(event), searchKeyword)}</span>
                                         </span>
                                         {#if event.main_languages && event.main_languages.length > 0}
                                             <span class="flex items-center gap-1">
-                                                <GlobeSolid class="w-4 h-4" />
+                                                <Globe class="w-4 h-4" />
                                                 <span>{event.main_languages.map(lang => lang === 'ko' ? m.language_korean() : m.language_english()).join(', ')}</span>
                                             </span>
                                         {/if}
@@ -370,11 +370,11 @@
                                     }`}
                                 >
                                     {#if !isEventOpen(event)}
-                                        <CloseCircleOutline class="w-5 h-5" />
+                                        <CircleX class="w-5 h-5" />
                                     {:else if isClosingSoon(event)}
-                                        <ClockOutline class="w-5 h-5" />
+                                        <Clock class="w-5 h-5" />
                                     {:else}
-                                        <CheckOutline class="w-5 h-5" />
+                                        <Check class="w-5 h-5" />
                                     {/if}
                                     {getStatusText(event)}
                                 </div>

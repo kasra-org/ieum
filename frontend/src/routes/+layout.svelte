@@ -11,8 +11,8 @@
 		DropdownDivider,
 		Button,
 		Spinner,
-	} from "flowbite-svelte";
-	import { GlobeOutline } from "flowbite-svelte-icons";
+	} from '$lib/components/ui';
+	import { Globe } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
@@ -138,7 +138,7 @@
 		<div class="flex flex-row items-center gap-3">
 			<!-- Language Selector -->
 			<Button color="none" size="sm" class="flex items-center gap-1 hover:bg-gray-100">
-				<GlobeOutline class="w-5 h-5" />
+				<Globe class="w-5 h-5" />
 				<span class="text-sm font-medium">{currentLanguage.toUpperCase()}</span>
 			</Button>
 			<Dropdown simple bind:open={languageDropdownOpen}>

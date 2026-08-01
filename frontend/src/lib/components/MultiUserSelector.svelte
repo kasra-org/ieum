@@ -1,6 +1,6 @@
 <script>
-    import { Input, Checkbox, Label } from 'flowbite-svelte';
-    import { SearchOutline, UserRemoveSolid } from 'flowbite-svelte-icons';
+    import { Input, Checkbox, Label } from '$lib/components/ui';
+    import { Search, UserMinus } from '@lucide/svelte';
     import { getDisplayName, getDisplayInstitute } from '$lib/utils.js';
     import * as m from '$lib/paraglide/messages.js';
 
@@ -56,7 +56,7 @@
                 <span class="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
                     {getDisplayName(user)}
                     <button type="button" onclick={() => removeUser(user.id)} class="hover:text-blue-600">
-                        <UserRemoveSolid class="w-4 h-4" />
+                        <UserMinus class="w-4 h-4" />
                     </button>
                 </span>
             {/each}
@@ -71,7 +71,7 @@
             placeholder={placeholder || m.organizers_searchPlaceholder()}
             class="pl-10"
         />
-        <SearchOutline class="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+        <Search class="w-4 h-4 absolute left-3 top-3 text-gray-400" />
     </div>
 
     <!-- User List -->

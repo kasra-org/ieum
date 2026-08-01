@@ -1,9 +1,9 @@
 <script>
     import { error } from '@sveltejs/kit';
-    import { Modal, Heading, Button, Table, TableSearch, TableBody, TableBodyCell, TableBodyRow, TableHead, TableHeadCell, Input, Label, Toggle } from 'flowbite-svelte';
-    import { Card, List, Li, Checkbox, Datepicker, Select } from 'flowbite-svelte';
-    import { Sidebar, SidebarGroup, SidebarItem, SidebarWrapper, Alert, SidebarButton, uiHelpers } from 'flowbite-svelte';
-    import { NewspaperSolid, EnvelopeSolid, ClipboardListSolid, MicrophoneSolid, UsersGroupSolid, EditSolid, ProfileCardSolid, EyeSolid, EyeSlashSolid, CreditCardSolid } from 'flowbite-svelte-icons';
+    import { Modal, Heading, Button, Table, TableSearch, TableBody, TableBodyCell, TableBodyRow, TableHead, TableHeadCell, Input, Label, Toggle } from '$lib/components/ui';
+    import { Card, List, Li, Checkbox, Datepicker, Select } from '$lib/components/ui';
+    import { Sidebar, SidebarGroup, SidebarItem, SidebarWrapper, Alert, SidebarButton, uiHelpers } from '$lib/components/ui';
+    import { ClipboardList, ContactRound, CreditCard, Eye, EyeOff, Mail, Mic, Newspaper, Pencil, Users } from '@lucide/svelte';
     import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
     import { fly } from 'svelte/transition';
@@ -141,10 +141,10 @@
         }}>
             <Button type="submit" color={published ? 'green' : 'light'} size="lg" disabled={saving_published}>
                 {#if published}
-                    <EyeSolid class="w-5 h-5 me-2" />
+                    <Eye class="w-5 h-5 me-2" />
                     {m.eventPublished_published()}
                 {:else}
-                    <EyeSlashSolid class="w-5 h-5 me-2" />
+                    <EyeOff class="w-5 h-5 me-2" />
                     {m.eventPublished_draft()}
                 {/if}
             </Button>
@@ -163,52 +163,52 @@
                         <SidebarGroup>
                             <SidebarItem label={m.eventAdmin_eventInformation()} active={sidebar_selected === 'event_information'} href="#event_information">
                                 {#snippet icon()}
-                                    <NewspaperSolid class="w-6 h-6" />
+                                    <Newspaper class="w-6 h-6" />
                                 {/snippet}
                             </SidebarItem>
                             <SidebarItem label={m.eventAdmin_emailTemplates()} active={sidebar_selected === 'email_templates'} href="#email_templates">
                                 {#snippet icon()}
-                                    <EnvelopeSolid class="w-6 h-6" />
+                                    <Mail class="w-6 h-6" />
                                 {/snippet}
                             </SidebarItem>
                             <SidebarItem label={m.eventAdmin_eventSpecificQuestions()} active={sidebar_selected === 'event_specific_questions'} href="#event_specific_questions">
                                 {#snippet icon()}
-                                    <ClipboardListSolid class="w-6 h-6" />
+                                    <ClipboardList class="w-6 h-6" />
                                 {/snippet}
                             </SidebarItem>
                             <SidebarItem label={m.eventAdmin_speakers()} active={sidebar_selected === 'speakers'} href="#speakers">
                                 {#snippet icon()}
-                                    <MicrophoneSolid class="w-6 h-6" />
+                                    <Mic class="w-6 h-6" />
                                 {/snippet}
                             </SidebarItem>
                             <SidebarItem label={m.eventAdmin_attendees()} active={sidebar_selected === 'attendees'} href="#attendees">
                                 {#snippet icon()}
-                                    <UsersGroupSolid class="w-6 h-6" />
+                                    <Users class="w-6 h-6" />
                                 {/snippet}
                             </SidebarItem>
                             <SidebarItem label={m.eventAdmin_onsiteAttendees()} active={sidebar_selected === 'onsite'} href="#onsite">
                                 {#snippet icon()}
-                                    <UsersGroupSolid class="w-6 h-6" />
+                                    <Users class="w-6 h-6" />
                                 {/snippet}
                             </SidebarItem>
                             <SidebarItem label={m.eventAdmin_abstracts()} active={sidebar_selected === 'abstracts'} href="#abstracts">
                                 {#snippet icon()}
-                                    <EditSolid class="w-6 h-6" />
+                                    <Pencil class="w-6 h-6" />
                                 {/snippet}
                             </SidebarItem>
                             <SidebarItem label={m.eventAdmin_organizers()} active={sidebar_selected === 'organizers'} href="#organizers">
                                 {#snippet icon()}
-                                    <UsersGroupSolid class="w-6 h-6" />
+                                    <Users class="w-6 h-6" />
                                 {/snippet}
                             </SidebarItem>
                             <SidebarItem label={m.eventAdmin_eventAdmins()} active={sidebar_selected === 'event_admins'} href="#event_admins">
                                 {#snippet icon()}
-                                    <ProfileCardSolid class="w-6 h-6" />
+                                    <ContactRound class="w-6 h-6" />
                                 {/snippet}
                             </SidebarItem>
                             <SidebarItem label={m.eventAdmin_transactions()} active={sidebar_selected === 'transactions'} href="#transactions">
                                 {#snippet icon()}
-                                    <CreditCardSolid class="w-6 h-6" />
+                                    <CreditCard class="w-6 h-6" />
                                 {/snippet}
                             </SidebarItem>
                         </SidebarGroup>

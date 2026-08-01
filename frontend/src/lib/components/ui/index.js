@@ -1,0 +1,52 @@
+// Local replacement for flowbite-svelte. Same component names and prop
+// vocabulary, so call sites only change the import path.
+
+export { default as A } from './A.svelte';
+export { default as Alert } from './Alert.svelte';
+export { default as Avatar } from './Avatar.svelte';
+export { default as Badge } from './Badge.svelte';
+export { default as Button } from './Button.svelte';
+export { default as ButtonGroup } from './ButtonGroup.svelte';
+export { default as Card } from './Card.svelte';
+export { default as Checkbox } from './Checkbox.svelte';
+export { default as Datepicker } from './Datepicker.svelte';
+export { default as Dropdown } from './Dropdown.svelte';
+export { default as DropdownDivider } from './DropdownDivider.svelte';
+export { default as DropdownHeader } from './DropdownHeader.svelte';
+export { default as DropdownItem } from './DropdownItem.svelte';
+export { default as Dropzone } from './Dropzone.svelte';
+export { default as Heading } from './Heading.svelte';
+export { default as Helper } from './Helper.svelte';
+export { default as Hr } from './Hr.svelte';
+export { default as Indicator } from './Indicator.svelte';
+export { default as Input } from './Input.svelte';
+export { default as InputAddon } from './InputAddon.svelte';
+export { default as Label } from './Label.svelte';
+export { default as Li } from './Li.svelte';
+export { default as List } from './List.svelte';
+export { default as Modal } from './Modal.svelte';
+export { default as NavBrand } from './NavBrand.svelte';
+export { default as Navbar } from './Navbar.svelte';
+export { default as ProgressStepper } from './ProgressStepper.svelte';
+export { default as Radio } from './Radio.svelte';
+export { default as Select } from './Select.svelte';
+export { default as Sidebar } from './Sidebar.svelte';
+export { default as SidebarButton } from './SidebarButton.svelte';
+export { default as SidebarGroup } from './SidebarGroup.svelte';
+export { default as SidebarItem } from './SidebarItem.svelte';
+export { default as SidebarWrapper } from './SidebarWrapper.svelte';
+export { default as Spinner } from './Spinner.svelte';
+export { default as TabItem } from './TabItem.svelte';
+export { default as Table } from './Table.svelte';
+export { default as TableBody } from './TableBody.svelte';
+export { default as TableBodyCell } from './TableBodyCell.svelte';
+export { default as TableBodyRow } from './TableBodyRow.svelte';
+export { default as TableHead } from './TableHead.svelte';
+export { default as TableHeadCell } from './TableHeadCell.svelte';
+export { default as TableSearch } from './TableSearch.svelte';
+export { default as Tabs } from './Tabs.svelte';
+export { default as Textarea } from './Textarea.svelte';
+export { default as Toggle } from './Toggle.svelte';
+export { default as Tooltip } from './Tooltip.svelte';
+
+export { uiHelpers } from './uiHelpers.svelte.js';

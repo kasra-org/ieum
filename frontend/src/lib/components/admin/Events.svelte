@@ -1,7 +1,7 @@
 <script>
-    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Toggle } from 'flowbite-svelte';
-    import { Modal, Button, Alert } from 'flowbite-svelte';
-    import { CogSolid, ArchiveSolid, CheckCircleSolid } from 'flowbite-svelte-icons';
+    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Toggle } from '$lib/components/ui';
+    import { Modal, Button, Alert } from '$lib/components/ui';
+    import { Archive, CircleCheck, Settings } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { getDisplayVenue, getDisplayVenueAddress } from '$lib/utils.js';
@@ -157,16 +157,16 @@
                 </TableBodyCell>
                 <TableBodyCell class="text-center">
                     {#if event.is_archived}
-                        <CheckCircleSolid class="w-5 h-5 text-gray-500 inline-block" />
+                        <CircleCheck class="w-5 h-5 text-gray-500 inline-block" />
                     {/if}
                 </TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
                         <Button color="none" size="none" href={`/event/${event.id}/admin`}>
-                            <CogSolid class="w-5 h-5" />
+                            <Settings class="w-5 h-5" />
                         </Button>
                         <Button color="none" size="none" onclick={() => archiveEvent(event)}>
-                            <ArchiveSolid class="w-5 h-5" />
+                            <Archive class="w-5 h-5" />
                         </Button>
                     </div>
                 </TableBodyCell>

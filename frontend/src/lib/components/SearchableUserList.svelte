@@ -1,6 +1,6 @@
 <script>
-    import { Input, Button } from 'flowbite-svelte';
-    import { SearchOutline } from 'flowbite-svelte-icons';
+    import { Input, Button } from '$lib/components/ui';
+    import { Search } from '@lucide/svelte';
     import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
     import * as m from '$lib/paraglide/messages.js';
 
@@ -123,7 +123,7 @@
             placeholder={placeholder || m.userSelection_searchPlaceholder()}
             class="pl-10"
         />
-        <SearchOutline class="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+        <Search class="w-4 h-4 absolute left-3 top-3 text-gray-400" />
     </div>
     <div class="border border-gray-200 rounded-lg {maxHeight} overflow-y-auto">
         {#if filteredItems.length === 0}

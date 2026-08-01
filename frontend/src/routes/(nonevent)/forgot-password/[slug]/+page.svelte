@@ -1,6 +1,6 @@
 <script>
     import { goto } from '$app/navigation';
-    import { Alert, Button, Label, Input } from 'flowbite-svelte';
+    import { Alert, Button, Label, Input } from '$lib/components/ui';
     import { createForm } from 'felte';
     import { validator } from '@felte/validator-yup';
     import * as yup from 'yup';

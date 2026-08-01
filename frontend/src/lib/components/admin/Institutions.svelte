@@ -1,7 +1,7 @@
 <script>
-    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from 'flowbite-svelte';
-    import { Modal, Button, Alert } from 'flowbite-svelte';
-    import { CogSolid, TrashBinSolid } from 'flowbite-svelte-icons';
+    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
+    import { Modal, Button, Alert } from '$lib/components/ui';
+    import { Settings, Trash2 } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
 
@@ -69,10 +69,10 @@
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
                         <Button color="none" size="none" onclick={() => openInstitutionModal(institution)}>
-                            <CogSolid class="w-5 h-5" />
+                            <Settings class="w-5 h-5" />
                         </Button>
                         <Button color="none" size="none" onclick={() => deleteInstitution(institution)}>
-                            <TrashBinSolid class="w-5 h-5" />
+                            <Trash2 class="w-5 h-5" />
                         </Button>
                     </div>
                 </TableBodyCell>

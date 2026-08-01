@@ -1,5 +1,5 @@
 <script>
-    import { Button, Alert, Modal, Textarea, Spinner } from 'flowbite-svelte';
+    import { Button, Alert, Modal, Textarea, Spinner } from '$lib/components/ui';
     import * as m from '$lib/paraglide/messages.js';
     import { enhance } from '$app/forms';
 

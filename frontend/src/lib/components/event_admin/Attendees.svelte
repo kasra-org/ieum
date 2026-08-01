@@ -1,11 +1,11 @@
 <script>
-    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Button, Dropdown, DropdownItem } from 'flowbite-svelte';
-    import { Modal, Heading, Textarea, Select, Label, Card, Input } from 'flowbite-svelte';
-    import { Alert } from 'flowbite-svelte';
-    import { ChevronDownOutline } from 'flowbite-svelte-icons';
+    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Button, Dropdown, DropdownItem } from '$lib/components/ui';
+    import { Modal, Heading, Textarea, Select, Label, Card, Input } from '$lib/components/ui';
+    import { Alert } from '$lib/components/ui';
+    import { ChevronDown } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { invalidateAll } from '$app/navigation';
-    import { UserEditSolid, UserRemoveSolid, TagOutline, AwardOutline, CheckCircleSolid } from 'flowbite-svelte-icons';
+    import { Award, CircleCheck, Tag, UserMinus, UserPen } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
@@ -621,13 +621,13 @@
 <Heading tag="h2" class="text-xl font-bold mb-3">{m.attendees_title()}</Heading>
 <p class="font-light mb-6">{m.attendees_description()}</p>
 <div class="flex justify-end items-center gap-2 flex-wrap">
-    <Button color="primary" size="sm">{m.attendees_emailActions()}<ChevronDownOutline class="w-3 h-3 ms-1" /></Button>
+    <Button color="primary" size="sm">{m.attendees_emailActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
     <Dropdown class="w-auto list-none p-1">
         <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendEmailToAllModal}>{m.attendees_sendEmailToAll()}</DropdownItem>
         <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendEmailModal} disabled={selectedAttendees.length === 0}>{m.attendees_sendEmailToSelected()}</DropdownItem>
     </Dropdown>
 
-    <Button color="primary" size="sm" disabled={bulk_cert_sending}>{bulk_cert_sending ? m.attendees_sendingCertificates() : m.attendees_certificateActions()}<ChevronDownOutline class="w-3 h-3 ms-1" /></Button>
+    <Button color="primary" size="sm" disabled={bulk_cert_sending}>{bulk_cert_sending ? m.attendees_sendingCertificates() : m.attendees_certificateActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
     <Dropdown class="w-auto list-none p-1">
         <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendCertificatesToAllConfirm} disabled={bulk_cert_sending}>{m.attendees_sendCertificatesToAll()}</DropdownItem>
         <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendCertificatesConfirm} disabled={selectedAttendees.length === 0 || bulk_cert_sending}>{m.attendees_sendCertificatesToSelected()}</DropdownItem>
@@ -693,7 +693,7 @@
                 <TableBodyCell>{row.attendee_nametag_id}</TableBodyCell>
                 <TableBodyCell>
                     <button onclick={() => toggleAttended(row.id, row.is_attended)} class="cursor-pointer">
-                        <CheckCircleSolid class="w-5 h-5 {row.is_attended ? 'text-green-500' : 'text-gray-300'}" />
+                        <CircleCheck class="w-5 h-5 {row.is_attended ? 'text-green-500' : 'text-gray-300'}" />
                     </button>
                 </TableBodyCell>
                 <TableBodyCell>{row.name}</TableBodyCell>
@@ -714,22 +714,22 @@
                     <div class="flex justify-center gap-2">
                         <ActionTooltip text={m.attendees_nametag()}>
                             <Button color="none" size="none" onclick={() => showNametagModal(row.id)}>
-                                <TagOutline class="w-5 h-5" />
+                                <Tag class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                         <ActionTooltip text={m.attendees_certificate()}>
                             <Button color="none" size="none" onclick={() => showCertificateModal(row.id)} disabled={!row.is_attended}>
-                                <AwardOutline class="w-5 h-5 {row.is_attended ? '' : 'opacity-30'}" />
+                                <Award class="w-5 h-5 {row.is_attended ? '' : 'opacity-30'}" />
                             </Button>
                         </ActionTooltip>
                         <ActionTooltip text={m.attendees_detailsTitle()}>
                             <Button color="none" size="none" onclick={() => showAttenteeModal(row.id)}>
-                                <UserEditSolid class="w-5 h-5" />
+                                <UserPen class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                         <ActionTooltip text={m.attendees_removeTitle()}>
                             <Button color="none" size="none" onclick={() => showRemoveAttenteeModal(row.id)}>
-                                <UserRemoveSolid class="w-5 h-5" />
+                                <UserMinus class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                     </div>

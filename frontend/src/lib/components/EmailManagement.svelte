@@ -1,5 +1,5 @@
 <script>
-    import { Alert, Badge, Button, Heading, Input, Label, Modal } from 'flowbite-svelte';
+    import { Alert, Badge, Button, Heading, Input, Label, Modal } from '$lib/components/ui';
     import { onMount } from 'svelte';
     import * as m from '$lib/paraglide/messages.js';
 

@@ -1,6 +1,6 @@
 <script>
-  import { Input, Label, Alert, Modal, Button, Hr } from 'flowbite-svelte';
-  import { MapPinAltSolid } from 'flowbite-svelte-icons';
+  import { Input, Label, Alert, Modal, Button, Hr } from '$lib/components/ui';
+  import { MapPin } from '@lucide/svelte';
   import * as m from '$lib/paraglide/messages.js';
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
@@ -396,7 +396,7 @@
       <Label for="search_address" class="block mb-2">{m.form_searchAddress()}</Label>
       <div class="relative">
         <div class="absolute inset-y-0 start-0 flex items-center ps-3.5 pointer-events-none">
-          <MapPinAltSolid class="h-5 w-5 text-gray-500" />
+          <MapPin class="h-5 w-5 text-gray-500" />
         </div>
         <Input
           id="search_address"

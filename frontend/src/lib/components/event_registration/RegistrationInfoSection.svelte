@@ -1,6 +1,6 @@
 <script>
-    import { Button, Checkbox } from 'flowbite-svelte';
-    import { UserCircleSolid, ClipboardListSolid } from 'flowbite-svelte-icons';
+    import { Button, Checkbox } from '$lib/components/ui';
+    import { CircleUser, ClipboardList } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { generateCertificatePDF } from '$lib/pdfUtils.js';
@@ -85,7 +85,7 @@
 
 <div class="mb-8">
     <div class="flex items-center gap-2 mb-6">
-        <UserCircleSolid class="w-6 h-6 text-gray-700" />
+        <CircleUser class="w-6 h-6 text-gray-700" />
         <h2 class="text-xl font-bold text-gray-900">{m.myRegistration_personalInfo()}</h2>
     </div>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pl-8">
@@ -150,7 +150,7 @@
 {#if attendee.custom_answers && attendee.custom_answers.length > 0}
     <div class="pt-6 border-t border-gray-200">
         <div class="flex items-center gap-2 mb-4">
-            <ClipboardListSolid class="w-6 h-6 text-gray-700" />
+            <ClipboardList class="w-6 h-6 text-gray-700" />
             <h2 class="text-xl font-bold text-gray-900">{m.myRegistration_eventSpecificAnswers()}</h2>
         </div>
         <div class="space-y-4 pl-8">

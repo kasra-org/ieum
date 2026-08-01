@@ -1,7 +1,7 @@
 <script>
-    import { Table, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from 'flowbite-svelte';
-    import { Modal, Button, Alert, Label, Input, Select, Badge } from 'flowbite-svelte';
-    import { TrashBinSolid, RefreshOutline } from 'flowbite-svelte-icons';
+    import { Table, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
+    import { Modal, Button, Alert, Label, Input, Select, Badge } from '$lib/components/ui';
+    import { RefreshCw, Trash2 } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { invalidateAll } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
@@ -97,7 +97,7 @@
                                 <input type="hidden" name="key_id" value={key.id} />
                                 <Button type="submit" size="xs" color="alternative"
                                         onclick={(e) => { if (!confirm(m.admin_apiKeys_confirmRotate())) e.preventDefault(); }}>
-                                    <RefreshOutline class="w-3 h-3 me-1" />{m.admin_apiKeys_rotate()}
+                                    <RefreshCw class="w-3 h-3 me-1" />{m.admin_apiKeys_rotate()}
                                 </Button>
                             </form>
                             <form method="POST" action="?/revoke_api_key" use:enhance={afterAction}>
@@ -111,7 +111,7 @@
                                 <input type="hidden" name="key_id" value={key.id} />
                                 <Button type="submit" size="xs" color="red"
                                         onclick={(e) => { if (!confirm(m.admin_apiKeys_confirmDelete())) e.preventDefault(); }}>
-                                    <TrashBinSolid class="w-3 h-3" />
+                                    <Trash2 class="w-3 h-3" />
                                 </Button>
                             </form>
                         </div>

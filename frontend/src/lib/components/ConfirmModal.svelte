@@ -1,6 +1,6 @@
 <script>
-    import { Modal, Button } from 'flowbite-svelte';
-    import { ExclamationCircleOutline } from 'flowbite-svelte-icons';
+    import { Modal, Button } from '$lib/components/ui';
+    import { CircleAlert } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
 
     let {
@@ -25,7 +25,7 @@
 
 <Modal bind:open={open} size="sm" outsideclose>
     <div class="text-center">
-        <ExclamationCircleOutline class="mx-auto mb-4 text-gray-400 w-12 h-12" />
+        <CircleAlert class="mx-auto mb-4 text-gray-400 w-12 h-12" />
         {#if title}
             <h3 class="mb-2 text-lg font-medium text-gray-900">{title}</h3>
         {/if}

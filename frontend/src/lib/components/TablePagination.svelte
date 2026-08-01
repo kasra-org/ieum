@@ -1,6 +1,6 @@
 <script>
-    import { ButtonGroup, Button } from 'flowbite-svelte';
-    import { ChevronDoubleLeftOutline, ChevronLeftOutline, ChevronRightOutline, ChevronDoubleRightOutline } from 'flowbite-svelte-icons';
+    import { ButtonGroup, Button } from '$lib/components/ui';
+    import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from '@lucide/svelte';
 
     let { currentPage, totalPages, onPageChange } = $props();
 
@@ -40,14 +40,14 @@
                 class={btnClass}
                 disabled={currentPage === 1}
                 onclick={() => onPageChange(1)}
-            ><ChevronDoubleLeftOutline class="h-4 w-4" /></Button>
+            ><ChevronsLeft class="h-4 w-4" /></Button>
             <Button
                 color="light"
                 size="sm"
                 class={btnClass}
                 disabled={currentPage === 1}
                 onclick={() => onPageChange(currentPage - 1)}
-            ><ChevronLeftOutline class="h-4 w-4" /></Button>
+            ><ChevronLeft class="h-4 w-4" /></Button>
             {#each visiblePages() as page}
                 <Button
                     color="light"
@@ -62,13 +62,13 @@
                 class={btnClass}
                 disabled={currentPage >= effectiveTotalPages}
                 onclick={() => onPageChange(currentPage + 1)}
-            ><ChevronRightOutline class="h-4 w-4" /></Button>
+            ><ChevronRight class="h-4 w-4" /></Button>
             <Button
                 color="light"
                 size="sm"
                 class={btnClass}
                 disabled={currentPage >= effectiveTotalPages}
                 onclick={() => onPageChange(effectiveTotalPages)}
-            ><ChevronDoubleRightOutline class="h-4 w-4" /></Button>
+            ><ChevronsRight class="h-4 w-4" /></Button>
         </ButtonGroup>
     </div>

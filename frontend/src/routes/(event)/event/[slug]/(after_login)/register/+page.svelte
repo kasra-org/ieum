@@ -2,8 +2,8 @@
     import { enhance } from '$app/forms';
     import { goto, invalidateAll } from '$app/navigation';
 
-    import { A, Card, Button, Heading, Indicator, Label, Input, Checkbox, Select, Alert, Navbar, Textarea, ProgressStepper, Modal, Spinner } from 'flowbite-svelte';
-    import { ClipboardListSolid, CheckCircleSolid, CheckCircleOutline, CreditCardSolid } from 'flowbite-svelte-icons';
+    import { A, Card, Button, Heading, Indicator, Label, Input, Checkbox, Select, Alert, Navbar, Textarea, ProgressStepper, Modal, Spinner } from '$lib/components/ui';
+    import { CircleCheck, ClipboardList, CreditCard } from '@lucide/svelte';
     import { onMount } from 'svelte';
 
     import { createForm } from 'felte';
@@ -710,7 +710,7 @@
                         <!-- Payment Summary Card -->
                         <div class="border border-gray-200 rounded-lg p-6">
                             <div class="flex items-center justify-center mb-6">
-                                <CheckCircleOutline class="w-12 h-12 text-green-500 mr-3" />
+                                <CircleCheck class="w-12 h-12 text-green-500 mr-3" />
                                 <div>
                                     <h3 class="text-lg font-semibold text-gray-900">{m.eventRegister_registrationComplete()}</h3>
                                     <p class="text-sm text-gray-600">{m.eventRegister_proceedToPayment()}</p>
@@ -741,7 +741,7 @@
                                         />
                                         <div class="flex items-center gap-3 w-full">
                                             <div class="flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-lg bg-blue-100">
-                                                <CreditCardSolid class="w-6 h-6 text-blue-600" />
+                                                <CreditCard class="w-6 h-6 text-blue-600" />
                                             </div>
                                             <div>
                                                 <p class="font-semibold text-gray-900">{m.eventRegister_payWithToss()}</p>
@@ -749,7 +749,7 @@
                                             </div>
                                         </div>
                                         {#if paymentMethod === 'toss'}
-                                            <CheckCircleSolid class="absolute top-2 right-2 w-5 h-5 text-primary-500" />
+                                            <CircleCheck class="absolute top-2 right-2 w-5 h-5 text-primary-500" />
                                         {/if}
                                     </label>
 
@@ -764,7 +764,7 @@
                                         />
                                         <div class="flex items-center gap-3 w-full">
                                             <div class="flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-lg bg-green-100">
-                                                <CreditCardSolid class="w-6 h-6 text-green-600" />
+                                                <CreditCard class="w-6 h-6 text-green-600" />
                                             </div>
                                             <div>
                                                 <p class="font-semibold text-gray-900">{m.eventRegister_payWithNicePay()}</p>
@@ -772,7 +772,7 @@
                                             </div>
                                         </div>
                                         {#if paymentMethod === 'nicepay'}
-                                            <CheckCircleSolid class="absolute top-2 right-2 w-5 h-5 text-primary-500" />
+                                            <CircleCheck class="absolute top-2 right-2 w-5 h-5 text-primary-500" />
                                         {/if}
                                     </label>
 
@@ -798,7 +798,7 @@
                                             </div>
                                         </div>
                                         {#if paymentMethod === 'paypal'}
-                                            <CheckCircleSolid class="absolute top-2 right-2 w-5 h-5 text-primary-500" />
+                                            <CircleCheck class="absolute top-2 right-2 w-5 h-5 text-primary-500" />
                                         {/if}
                                     </label>
                                 </div>
@@ -856,7 +856,7 @@
                     <h3 class="text-xl font-semibold text-gray-900 mb-2">{m.eventRegister_processingPayment()}</h3>
                     <p class="text-gray-600">{m.eventRegister_pleaseWait()}</p>
                 {:else if checkoutStatus === 'success'}
-                    <CheckCircleOutline class="w-16 h-16 mx-auto mb-4 text-green-500" />
+                    <CircleCheck class="w-16 h-16 mx-auto mb-4 text-green-500" />
                     <h3 class="text-xl font-semibold text-gray-900 mb-2">{m.eventRegister_paymentSuccess()}</h3>
                     <p class="text-gray-600">{m.eventRegister_completingRegistration()}</p>
                 {/if}

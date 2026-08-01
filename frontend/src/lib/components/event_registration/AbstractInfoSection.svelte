@@ -1,13 +1,13 @@
 <script>
-    import { Button } from 'flowbite-svelte';
-    import { FileLinesSolid } from 'flowbite-svelte-icons';
+    import { Button } from '$lib/components/ui';
+    import { FileText } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
 
     let { event, my_abstract } = $props();
 </script>
 
 <div class="flex items-center gap-2 mb-6">
-    <FileLinesSolid class="w-6 h-6 text-gray-700" />
+    <FileText class="w-6 h-6 text-gray-700" />
     <h2 class="text-xl font-bold text-gray-900">{m.myRegistration_abstractInfo()}</h2>
 </div>
 

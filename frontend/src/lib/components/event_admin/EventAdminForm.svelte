@@ -1,5 +1,5 @@
 <script>
-    import { Label, Input, Select, Checkbox } from 'flowbite-svelte';
+    import { Label, Input, Select, Checkbox } from '$lib/components/ui';
     import * as m from '$lib/paraglide/messages.js';
     import MarkdownEditor from '$lib/components/MarkdownEditor.svelte';
     import VenueSelector from '$lib/components/VenueSelector.svelte';

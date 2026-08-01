@@ -1,5 +1,5 @@
 <script>
-  import { Heading, Input, ButtonGroup, InputAddon, Button, Textarea, Select, Label, Alert } from 'flowbite-svelte';
+  import { Heading, Input, ButtonGroup, InputAddon, Button, Textarea, Select, Label, Alert } from '$lib/components/ui';
   import * as m from '$lib/paraglide/messages.js';
   import InstitutionLookup from '$lib/components/InstitutionLookup.svelte';
   import EmailManagement from '$lib/components/EmailManagement.svelte';

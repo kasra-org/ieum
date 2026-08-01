@@ -1,5 +1,5 @@
 <script>
-    import { Label } from 'flowbite-svelte';
+    import { Label } from '$lib/components/ui';
     import * as m from '$lib/paraglide/messages.js';
     import { onMount } from 'svelte';
 

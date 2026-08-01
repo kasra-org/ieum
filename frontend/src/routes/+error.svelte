@@ -1,6 +1,6 @@
 <script>
     import { page } from '$app/stores';
-    import { Heading } from 'flowbite-svelte';
+    import { Heading } from '$lib/components/ui';
 </script>
   
 <div class="flex mx-auto flex-col text-center items-center justify-center h-96">

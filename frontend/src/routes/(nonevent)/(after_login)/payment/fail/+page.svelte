@@ -1,6 +1,6 @@
 <script>
-    import { Card, Button, Alert } from 'flowbite-svelte';
-    import { ExclamationCircleSolid } from 'flowbite-svelte-icons';
+    import { Card, Button, Alert } from '$lib/components/ui';
+    import { CircleAlert } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
 
     let { data } = $props();
@@ -14,7 +14,7 @@
     <Card class="max-w-md w-full">
         <div class="text-center">
             <div class="flex justify-center mb-4">
-                <ExclamationCircleSolid class="w-16 h-16 text-red-500" />
+                <CircleAlert class="w-16 h-16 text-red-500" />
             </div>
             <h1 class="text-2xl font-bold text-gray-900 mb-2">{m.payment_failedTitle()}</h1>
             <p class="text-gray-600 mb-4">{m.payment_cancelledMessage()}</p>

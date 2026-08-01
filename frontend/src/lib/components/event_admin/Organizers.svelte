@@ -1,7 +1,7 @@
 <script>
-    import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Input, Card } from 'flowbite-svelte';
-    import { Button, Modal, Label, Alert } from 'flowbite-svelte';
-    import { UserEditSolid, UserRemoveSolid, ChevronUpOutline, ChevronDownOutline } from 'flowbite-svelte-icons';
+    import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Input, Card } from '$lib/components/ui';
+    import { Button, Modal, Label, Alert } from '$lib/components/ui';
+    import { ChevronDown, ChevronUp, UserMinus, UserPen } from '@lucide/svelte';
     import { enhance, deserialize } from '$app/forms';
     import { invalidateAll } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
@@ -179,14 +179,14 @@
                             disabled={globalIndex === 0 || reordering || searchTermOrganizer}
                             class="p-0.5 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
                         >
-                            <ChevronUpOutline class="w-4 h-4" />
+                            <ChevronUp class="w-4 h-4" />
                         </button>
                         <button
                             onclick={() => moveOrganizer(globalIndex, 1)}
                             disabled={globalIndex === data.organizers.length - 1 || reordering || searchTermOrganizer}
                             class="p-0.5 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
                         >
-                            <ChevronDownOutline class="w-4 h-4" />
+                            <ChevronDown class="w-4 h-4" />
                         </button>
                     </div>
                 </TableBodyCell>
@@ -197,12 +197,12 @@
                     <div class="flex justify-center gap-2">
                         <ActionTooltip text={m.organizers_updateOrganizer()}>
                             <Button color="none" size="none" onclick={() => modifyOrganizerModal(row.id)}>
-                                <UserEditSolid class="w-5 h-5" />
+                                <UserPen class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                         <ActionTooltip text={m.organizers_deleteOrganizer()}>
                             <Button color="none" size="none" onclick={() => deleteOrganizerModal(row.id)}>
-                                <UserRemoveSolid class="w-5 h-5" />
+                                <UserMinus class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                     </div>

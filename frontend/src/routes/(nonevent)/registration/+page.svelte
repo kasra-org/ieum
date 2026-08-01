@@ -7,8 +7,8 @@
     import { createForm } from 'felte';
     import { validator } from '@felte/validator-yup';
     import * as yup from 'yup';
-    import { Alert, Input, Textarea, Select, Button, Label, InputAddon, ButtonGroup, Heading, Card, Checkbox } from 'flowbite-svelte';
-    import { UserCircleSolid, ChevronLeftOutline, ChevronRightOutline } from 'flowbite-svelte-icons';
+    import { Alert, Input, Textarea, Select, Button, Label, InputAddon, ButtonGroup, Heading, Card, Checkbox } from '$lib/components/ui';
+    import { ChevronLeft, ChevronRight, CircleUser } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { onlyLatinChars } from '$lib/utils.js';
@@ -213,7 +213,7 @@
         <div class="flex justify-end mt-8">
             <Button color="primary" size="lg" disabled={!canProceed} onclick={goToStep2}>
                 {m.registration_next()}
-                <ChevronRightOutline class="w-4 h-4 ml-2" />
+                <ChevronRight class="w-4 h-4 ml-2" />
             </Button>
         </div>
     </div>
@@ -224,7 +224,7 @@
             <RegistrationForm data={$data} errors={$errors} config={form_config} />
             <div class="flex flex-col md:flex-row justify-between gap-4 mt-8">
                 <Button color="alternative" size="lg" onclick={goToStep1}>
-                    <ChevronLeftOutline class="w-4 h-4 mr-2" />
+                    <ChevronLeft class="w-4 h-4 mr-2" />
                     {m.registration_back()}
                 </Button>
                 <Button type="submit" size="lg" color="primary" disabled={$isSubmitting}>

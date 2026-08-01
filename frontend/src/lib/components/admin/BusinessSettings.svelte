@@ -1,5 +1,5 @@
 <script>
-    import { Button, Alert } from 'flowbite-svelte';
+    import { Button, Alert } from '$lib/components/ui';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
 

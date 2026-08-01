@@ -1,8 +1,8 @@
 <script>
     let { data } = $props();
 
-    import { Button, Alert, Spinner } from 'flowbite-svelte';
-    import { CheckCircleSolid, EnvelopeSolid } from 'flowbite-svelte-icons';
+    import { Button, Alert, Spinner } from '$lib/components/ui';
+    import { CircleCheck, Mail } from '@lucide/svelte';
     import { goto } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
 
@@ -47,13 +47,13 @@
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
         <div class="text-center mb-6">
             {#if success}
-                <CheckCircleSolid class="mx-auto mb-4 text-green-600 w-16 h-16" />
+                <CircleCheck class="mx-auto mb-4 text-green-600 w-16 h-16" />
             {:else if verifying}
                 <div class="flex justify-center mb-4">
                     <Spinner size="12" color="blue" />
                 </div>
             {:else}
-                <EnvelopeSolid class="mx-auto mb-4 text-blue-600 w-16 h-16" />
+                <Mail class="mx-auto mb-4 text-blue-600 w-16 h-16" />
             {/if}
 
             <h1 class="text-3xl font-bold text-gray-900 mb-3">

@@ -1,7 +1,7 @@
 <script>
     import { goto } from '$app/navigation';
 
-    import { A, Card, Button, Heading, Indicator, Label, Input, Checkbox, Select, Alert, Navbar, Textarea } from 'flowbite-svelte';
+    import { A, Card, Button, Heading, Indicator, Label, Input, Checkbox, Select, Alert, Navbar, Textarea } from '$lib/components/ui';
     import { onMount } from 'svelte';
 
     import { createForm } from 'felte';

@@ -1,8 +1,8 @@
 <script>
-    import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from 'flowbite-svelte';
-    import { Button, Modal, Label, Input, Select, Textarea, Alert } from 'flowbite-svelte';
-    import { Tabs, TabItem } from 'flowbite-svelte';
-    import { UserEditSolid, UserRemoveSolid, CheckOutline } from 'flowbite-svelte-icons';
+    import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from '$lib/components/ui';
+    import { Button, Modal, Label, Input, Select, Textarea, Alert } from '$lib/components/ui';
+    import { Tabs, TabItem } from '$lib/components/ui';
+    import { Check, UserMinus, UserPen } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import * as m from '$lib/paraglide/messages.js';
@@ -205,18 +205,18 @@
                     <div>{row.affiliation}</div>
                     {#if row.affiliation_ko}<div class="text-sm text-gray-500">{row.affiliation_ko}</div>{/if}
                 </TableBodyCell>
-                <TableBodyCell>{#if row.is_domestic}<CheckOutline class="w-4 h-4 text-green-500 inline mr-2" />{/if}</TableBodyCell>
+                <TableBodyCell>{#if row.is_domestic}<Check class="w-4 h-4 text-green-500 inline mr-2" />{/if}</TableBodyCell>
                 <TableBodyCell>{format_type(row.type)}</TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
                         <ActionTooltip text={m.speakers_updateSpeaker()}>
                             <Button color="none" size="none" onclick={() => modifySpeakerModal(row.id)}>
-                                <UserEditSolid class="w-5 h-5" />
+                                <UserPen class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                         <ActionTooltip text={m.speakers_removeSpeaker()}>
                             <Button color="none" size="none" onclick={() => removeSpeakerModal(row.id)}>
-                                <UserRemoveSolid class="w-5 h-5" />
+                                <UserMinus class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                     </div>

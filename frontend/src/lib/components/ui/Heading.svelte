@@ -1,0 +1,11 @@
+<script>
+    let { tag = 'h1', class: className = '', children, ...rest } = $props();
+    const DEFAULTS = {
+        h1: 'text-5xl font-extrabold', h2: 'text-4xl font-bold', h3: 'text-3xl font-bold',
+        h4: 'text-2xl font-bold', h5: 'text-xl font-bold', h6: 'text-lg font-bold'
+    };
+</script>
+
+<svelte:element this={tag} class="{DEFAULTS[tag] ?? DEFAULTS.h1} text-gray-900 {className}" {...rest}>
+    {@render children?.()}
+</svelte:element>

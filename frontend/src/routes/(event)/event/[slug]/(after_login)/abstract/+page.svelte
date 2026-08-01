@@ -1,7 +1,7 @@
 <script>
     import { browser } from '$app/environment';
-    import { A, List, Li, Card, Button, Label, Input, Dropzone, Checkbox, Alert, Radio } from 'flowbite-svelte';
-    import { DownloadSolid } from 'flowbite-svelte-icons';
+    import { A, List, Li, Card, Button, Label, Input, Dropzone, Checkbox, Alert, Radio } from '$lib/components/ui';
+    import { Download } from '@lucide/svelte';
     import { createForm } from 'felte';
     import { validator } from '@felte/validator-yup';
     import * as yup from 'yup';
@@ -170,7 +170,7 @@
                 <hr class="my-6 border-gray-200" />
                 <div class="flex flex-col sm:flex-row gap-4">
                     <Button href={abstract.link} color="primary" size="lg" class="flex-1">
-                        <DownloadSolid class="w-4 h-4 me-2" />
+                        <Download class="w-4 h-4 me-2" />
                         {m.abstractSubmission_downloadSubmission()}
                     </Button>
                     <Button href="/event/{event.id}" color="alternative" size="lg" class="flex-1">

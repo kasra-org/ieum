@@ -1,6 +1,6 @@
 <script>
-    import { Heading, Card, Button } from 'flowbite-svelte';
-    import { CheckCircleSolid } from 'flowbite-svelte-icons';
+    import { Heading, Card, Button } from '$lib/components/ui';
+    import { CircleCheck } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
 
@@ -16,7 +16,7 @@
 <div class="flex items-center justify-center min-h-screen bg-gray-50 px-4">
     <Card size="xl" class="max-w-md w-full text-center">
         <div class="flex justify-center mb-4">
-            <CheckCircleSolid class="w-16 h-16 text-green-500" />
+            <CircleCheck class="w-16 h-16 text-green-500" />
         </div>
         <Heading tag="h1" class="text-2xl font-bold mb-3">{m.onsiteRegistration_complete()}</Heading>
         <p class="mb-6 text-gray-600">

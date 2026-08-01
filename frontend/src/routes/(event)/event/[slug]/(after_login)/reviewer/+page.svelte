@@ -1,7 +1,7 @@
 <script>
     import { invalidateAll } from '$app/navigation';
     import { browser } from '$app/environment';
-    import { Heading, Button, Input, Textarea, Alert, Card, Checkbox } from 'flowbite-svelte';
+    import { Heading, Button, Input, Textarea, Alert, Card, Checkbox } from '$lib/components/ui';
 
     let { data } = $props();
 

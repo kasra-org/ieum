@@ -1,8 +1,8 @@
 <script>
-    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Button, Badge } from 'flowbite-svelte';
-    import { Modal, Heading, Textarea, Select, Label, Input, Alert } from 'flowbite-svelte';
+    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Button, Badge } from '$lib/components/ui';
+    import { Modal, Heading, Textarea, Select, Label, Input, Alert } from '$lib/components/ui';
     import { enhance } from '$app/forms';
-    import { EditOutline, CloseCircleSolid, PlusOutline } from 'flowbite-svelte-icons';
+    import { CircleX, Pencil, Plus } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
 
@@ -421,7 +421,7 @@
         {m.common_exportCSV()}
     </Button>
     <Button color="primary" size="sm" onclick={showCreateModal}>
-        <PlusOutline class="w-4 h-4 me-2" />
+        <Plus class="w-4 h-4 me-2" />
         {m.transactions_createPayment()}
     </Button>
 </div>
@@ -470,13 +470,13 @@
                     <div class="flex justify-center gap-2">
                         <ActionTooltip text={m.transactions_editNote()}>
                             <Button color="none" size="none" onclick={() => showNoteModal(payment)}>
-                                <EditOutline class="w-5 h-5" />
+                                <Pencil class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
                         {#if payment.status !== 'cancelled'}
                             <ActionTooltip text={m.transactions_cancelPayment()}>
                                 <Button color="none" size="none" onclick={() => showCancelModal(payment)}>
-                                    <CloseCircleSolid class="w-5 h-5 text-red-500" />
+                                    <CircleX class="w-5 h-5 text-red-500" />
                                 </Button>
                             </ActionTooltip>
                         {/if}

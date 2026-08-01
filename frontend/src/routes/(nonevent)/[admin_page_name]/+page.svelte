@@ -1,7 +1,7 @@
 <script>
-    import { Card, Button } from 'flowbite-svelte';
-    import { Sidebar, SidebarGroup, SidebarItem, SidebarWrapper } from 'flowbite-svelte';
-    import { CalendarMonthSolid, UsersGroupSolid, BuildingSolid, CogSolid, ClockSolid, FileLinesSolid, ClipboardListSolid, GlobeSolid, LockSolid } from 'flowbite-svelte-icons';
+    import { Card, Button } from '$lib/components/ui';
+    import { Sidebar, SidebarGroup, SidebarItem, SidebarWrapper } from '$lib/components/ui';
+    import { Building2, Calendar, ClipboardList, Clock, FileText, Globe, Lock, Settings, Users as UsersIcon } from '@lucide/svelte';
     import { onMount } from 'svelte';
     import { fly } from 'svelte/transition';
     import * as m from '$lib/paraglide/messages.js';
@@ -115,48 +115,48 @@
                     <SidebarGroup>
                         <SidebarItem label={m.admin_sidebar_events()} active={sidebar_selected === 'events'} href="#events">
                             {#snippet icon()}
-                                <CalendarMonthSolid class="w-6 h-6" />
+                                <Calendar class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
                         <SidebarItem label={m.admin_sidebar_users()} active={sidebar_selected === 'users'} href="#users">
                             {#snippet icon()}
-                                <UsersGroupSolid class="w-6 h-6" />
+                                <UsersIcon class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
                         <SidebarItem label={m.admin_sidebar_institutions()} active={sidebar_selected === 'institutions'} href="#institutions">
                             {#snippet icon()}
-                                <BuildingSolid class="w-6 h-6" />
+                                <Building2 class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
                         <SidebarItem label={m.admin_sidebar_siteSettings()} active={sidebar_selected === 'site_settings'} href="#site_settings">
                             {#snippet icon()}
-                                <GlobeSolid class="w-6 h-6" />
+                                <Globe class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
                         <SidebarItem label={m.admin_sidebar_businessSettings()} active={sidebar_selected === 'business_settings'} href="#business_settings">
                             {#snippet icon()}
-                                <CogSolid class="w-6 h-6" />
+                                <Settings class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
                         <SidebarItem label={m.admin_sidebar_accountSettings()} active={sidebar_selected === 'account_settings'} href="#account_settings">
                             {#snippet icon()}
-                                <ClockSolid class="w-6 h-6" />
+                                <Clock class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
                         <SidebarItem label={m.admin_sidebar_privacyPolicy()} active={sidebar_selected === 'privacy_policy'} href="#privacy_policy">
                             {#snippet icon()}
-                                <FileLinesSolid class="w-6 h-6" />
+                                <FileText class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
                         <SidebarItem label={m.admin_sidebar_termsOfService()} active={sidebar_selected === 'terms_of_service'} href="#terms_of_service">
                             {#snippet icon()}
-                                <ClipboardListSolid class="w-6 h-6" />
+                                <ClipboardList class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
                         {#if data.admin.apiKeys}
                         <SidebarItem label={m.admin_sidebar_apiKeys()} active={sidebar_selected === 'api_keys'} href="#api_keys">
                             {#snippet icon()}
-                                <LockSolid class="w-6 h-6" />
+                                <Lock class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
                         {/if}
@@ -183,7 +183,7 @@
             {/if}
 
             {#if sidebar_selected === 'users'}
-            <Users {data} />
+            <UsersIcon {data} />
             {/if}
 
             {#if sidebar_selected === 'institutions'}

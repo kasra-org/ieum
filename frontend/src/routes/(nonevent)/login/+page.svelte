@@ -1,5 +1,5 @@
 <script>
-    import { A, Card, Button, Heading, Indicator, Label, Input, Checkbox, Select, Alert, Modal } from 'flowbite-svelte';
+    import { A, Card, Button, Heading, Indicator, Label, Input, Checkbox, Select, Alert, Modal } from '$lib/components/ui';
     import { onMount } from 'svelte';
     import * as m from '$lib/paraglide/messages.js';
 

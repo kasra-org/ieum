@@ -1,7 +1,7 @@
 <script>
-    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from 'flowbite-svelte';
-    import { Modal, Button, Alert } from 'flowbite-svelte';
-    import { UserEditSolid } from 'flowbite-svelte-icons';
+    import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
+    import { Modal, Button, Alert } from '$lib/components/ui';
+    import { UserPen } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
@@ -87,7 +87,7 @@
                 <TableBodyCell>
                     <div class="flex justify-center">
                         <Button color="none" size="none" onclick={() => openUserEditModal(user)}>
-                            <UserEditSolid class="w-5 h-5" />
+                            <UserPen class="w-5 h-5" />
                         </Button>
                     </div>
                 </TableBodyCell>

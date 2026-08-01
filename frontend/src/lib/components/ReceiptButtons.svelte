@@ -1,5 +1,5 @@
 <script>
-    import { Button } from 'flowbite-svelte';
+    import { Button } from '$lib/components/ui';
     import * as m from '$lib/paraglide/messages.js';
     import { openReceiptWindow, openCardReceiptWindow, isCardPayment } from '$lib/utils.js';
 

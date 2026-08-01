@@ -5,8 +5,8 @@
     import { createForm } from 'felte';
     import { validator } from '@felte/validator-yup';
     import * as yup from 'yup';
-    import { Alert, Input, Textarea, Select, Button, Label, InputAddon, ButtonGroup, Heading, Card } from 'flowbite-svelte';
-    import { UserCircleSolid } from 'flowbite-svelte-icons';
+    import { Alert, Input, Textarea, Select, Button, Label, InputAddon, ButtonGroup, Heading, Card } from '$lib/components/ui';
+    import { CircleUser } from '@lucide/svelte';
     import { goto } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
     import { onlyLatinChars } from '$lib/utils.js';

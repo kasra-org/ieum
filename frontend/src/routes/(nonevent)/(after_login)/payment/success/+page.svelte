@@ -1,8 +1,8 @@
 <script>
     import { onMount } from 'svelte';
     import { enhance } from '$app/forms';
-    import { Card, Button, Alert, Spinner } from 'flowbite-svelte';
-    import { CheckCircleSolid, ExclamationCircleSolid } from 'flowbite-svelte-icons';
+    import { Card, Button, Alert, Spinner } from '$lib/components/ui';
+    import { CircleAlert, CircleCheck } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
 
     let { data, form } = $props();
@@ -125,7 +125,7 @@
         {:else if status === 'success'}
             <div class="text-center">
                 <div class="flex justify-center mb-4">
-                    <CheckCircleSolid class="w-16 h-16 text-green-500" />
+                    <CircleCheck class="w-16 h-16 text-green-500" />
                 </div>
                 <h1 class="text-2xl font-bold text-gray-900 mb-2">{m.payment_successTitle()}</h1>
                 <p class="text-gray-600 mb-6">{m.payment_successMessage()}</p>
@@ -163,7 +163,7 @@
         {:else}
             <div class="text-center">
                 <div class="flex justify-center mb-4">
-                    <ExclamationCircleSolid class="w-16 h-16 text-red-500" />
+                    <CircleAlert class="w-16 h-16 text-red-500" />
                 </div>
                 <h1 class="text-2xl font-bold text-gray-900 mb-2">{m.payment_failedTitle()}</h1>
                 <p class="text-gray-600 mb-4">{m.payment_failedMessage()}</p>

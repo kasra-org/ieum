@@ -1,7 +1,7 @@
 <script>
   import { tick } from 'svelte';
-  import { Input, Label, Alert, Modal, Button, ButtonGroup } from 'flowbite-svelte';
-  import { SearchOutline } from 'flowbite-svelte-icons';
+  import { Input, Label, Alert, Modal, Button, ButtonGroup } from '$lib/components/ui';
+  import { Search } from '@lucide/svelte';
   import * as m from '$lib/paraglide/messages.js';
   import { languageTag } from '$lib/paraglide/runtime.js';
   import { enhance, deserialize } from '$app/forms';
@@ -195,7 +195,7 @@
     onclick={openModal}
   />
   <Button color="primary" onclick={openModal} class="min-w-48">
-    <SearchOutline class="w-4 h-4 me-2" />
+    <Search class="w-4 h-4 me-2" />
     {m.form_findInstitution()}
   </Button>
 </ButtonGroup>

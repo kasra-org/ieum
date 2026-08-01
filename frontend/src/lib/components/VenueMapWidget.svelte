@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import * as m from '$lib/paraglide/messages.js';
-  import { ArrowUpRightFromSquareOutline } from 'flowbite-svelte-icons';
+  import { ExternalLink } from '@lucide/svelte';
 
   let {
     venueName = '',
@@ -137,7 +137,7 @@
           class="absolute top-2 right-2 bg-white hover:bg-gray-50 shadow-md rounded-lg px-3 py-2 text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors"
         >
           {m.venue_viewOnMaps()}
-          <ArrowUpRightFromSquareOutline class="w-3.5 h-3.5" />
+          <ExternalLink class="w-3.5 h-3.5" />
         </a>
       </div>
     {/if}
