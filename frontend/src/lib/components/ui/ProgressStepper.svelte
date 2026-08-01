@@ -10,23 +10,19 @@
 </script>
 
 <!--
-    Every step keeps its natural width and the connectors are a fixed length, so
-    labels never get squeezed into wrapping and the group stays compact and
-    centred instead of being flung to the container's edges on wide screens.
+    The step content is shrink-0 so a label can never be squeezed into wrapping;
+    only the connectors flex. Capping each segment keeps the group from being
+    flung out to the container's edges on wide screens.
 -->
 <ol class="flex w-full items-center justify-center overflow-x-auto text-sm {className}" {...rest}>
     {#each steps as step, i}
         {@const done = i < current}
         {@const active = i === current}
-        <li class="flex shrink-0 items-center">
+        <li class="flex items-center {i < steps.length - 1 ? 'max-w-[18rem] flex-1' : 'shrink-0'}">
             <span class="flex shrink-0 items-center gap-2.5">
                 <span
                     class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors
-                    {active
-                        ? 'bg-primary-600 text-white ring-4 ring-primary-100'
-                        : done
-                            ? 'bg-primary-600 text-white'
-                            : 'bg-gray-100 text-gray-400'}"
+                    {active || done ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-400'}"
                 >
                     {#if done && showCheckmarkForCompleted}
                         <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -44,18 +40,18 @@
                     <button
                         type="button"
                         class="whitespace-nowrap font-medium transition-colors hover:underline
-                        {active ? 'text-gray-900' : done ? 'text-gray-700' : 'text-gray-400'}"
+                        {active ? 'font-semibold text-gray-900' : done ? 'text-gray-700' : 'text-gray-400'}"
                         onclick={() => onstepclick?.(i)}
                     >{label(step)}</button>
                 {:else}
-                    <span class="whitespace-nowrap font-medium {active ? 'text-gray-900' : done ? 'text-gray-700' : 'text-gray-400'}">
+                    <span class="whitespace-nowrap font-medium {active ? 'font-semibold text-gray-900' : done ? 'text-gray-700' : 'text-gray-400'}">
                         {label(step)}
                     </span>
                 {/if}
             </span>
             {#if i < steps.length - 1}
                 <span
-                    class="mx-2 h-px w-8 shrink-0 sm:mx-4 sm:w-16 {done ? 'bg-primary-300' : 'bg-gray-200'}"
+                    class="mx-3 h-px min-w-6 flex-1 sm:mx-4 {done ? 'bg-primary-300' : 'bg-gray-200'}"
                     aria-hidden="true"
                 ></span>
             {/if}
