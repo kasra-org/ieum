@@ -1,0 +1,8 @@
+# node_modules must not be copied into the image: `COPY . /app/` would overwrite
+# the freshly resolved tree from `pnpm install` with whatever the host happens
+# to have, which is both non-reproducible and a different platform's binaries.
+node_modules
+.svelte-kit
+build
+.env
+.env.*

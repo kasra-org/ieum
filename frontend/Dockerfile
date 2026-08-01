@@ -6,7 +6,7 @@ RUN corepack enable
 
 WORKDIR /app
 
-COPY package.json /app/
+COPY package.json pnpm-workspace.yaml /app/
 RUN pnpm install
 
 COPY . /app/
