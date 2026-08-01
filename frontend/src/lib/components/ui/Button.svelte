@@ -19,7 +19,7 @@
         yellow:      'text-white bg-yellow-400 hover:bg-yellow-500 focus:ring-yellow-300',
         purple:      'text-white bg-purple-700 hover:bg-purple-800 focus:ring-purple-300',
         blue:        'text-white bg-blue-700 hover:bg-blue-800 focus:ring-blue-300',
-        none:        ''
+        none:        ''   // flowbite: unmapped key -> no classes
     };
     const OUTLINES = {
         primary: 'text-primary-700 border border-primary-700 hover:bg-primary-700 hover:text-white focus:ring-primary-300',
@@ -28,15 +28,16 @@
         dark:    'text-gray-800 border border-gray-800 hover:bg-gray-900 hover:text-white focus:ring-gray-300'
     };
     const SIZES = {
-        xs: 'px-3 py-2 text-xs', sm: 'px-3 py-2 text-sm', md: 'px-5 py-2.5 text-sm',
+        none: '',
+        xs: 'px-3 py-2 text-xs', sm: 'px-4 py-2 text-sm', md: 'px-5 py-2.5 text-sm',
         lg: 'px-5 py-3 text-base', xl: 'px-6 py-3.5 text-base'
     };
 
     const base = 'inline-flex items-center justify-center font-medium text-center focus:outline-none focus:ring-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
     const cls = $derived([
         base,
-        SIZES[size] ?? SIZES.md,
-        outline ? (OUTLINES[color] ?? OUTLINES.primary) : (COLORS[color] ?? COLORS.primary),
+        SIZES[size] ?? '',
+        outline ? (OUTLINES[color] ?? '') : (COLORS[color] ?? ''),
         pill ? 'rounded-full' : 'rounded-lg',
         className
     ].filter(Boolean).join(' '));

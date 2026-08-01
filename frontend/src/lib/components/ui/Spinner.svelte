@@ -1,6 +1,6 @@
 <script>
     let { size = '8', color = 'primary', class: className = '', ...rest } = $props();
-    const COLORS = { primary: 'fill-primary-600', gray: 'fill-gray-600', white: 'fill-white' };
+    const COLORS = { blue: 'text-gray-200 fill-blue-600', primary: 'fill-primary-600', gray: 'fill-gray-600', white: 'fill-white' };
     // Explicit map, not `h-{size}` interpolation: Tailwind scans source text and
     // never sees a class name that is only assembled at runtime.
     const SIZES = {
