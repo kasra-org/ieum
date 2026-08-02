@@ -56,6 +56,19 @@
     display: none;
   }
 
+  /* Tailwind v4's Preflight sets buttons to `cursor: default`, so every button
+     in the app lost its hand cursor on the v3 -> v4 upgrade. Restore it here
+     rather than adding cursor-pointer to each call site. Disabled controls are
+     excluded so they keep `not-allowed`. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  summary,
+  input[type="button"]:not(:disabled),
+  input[type="submit"]:not(:disabled),
+  input[type="reset"]:not(:disabled) {
+    cursor: pointer;
+  }
+
 }
 
 button:focus,
