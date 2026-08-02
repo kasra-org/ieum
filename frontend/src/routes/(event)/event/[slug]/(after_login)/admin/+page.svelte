@@ -17,6 +17,7 @@
     import EventSpecificQuestions from '$lib/components/event_admin/EventSpecificQuestions.svelte';
     import Speakers from '$lib/components/event_admin/Speakers.svelte';
     import Attendees from '$lib/components/event_admin/Attendees.svelte';
+    import UnpaidAttendees from '$lib/components/event_admin/UnpaidAttendees.svelte';
     import OnSiteAttendees from '$lib/components/event_admin/OnSiteAttendees.svelte';
     import Abstracts from '$lib/components/event_admin/Abstracts.svelte';
     import EventAdmins from '$lib/components/event_admin/EventAdmins.svelte';
@@ -36,6 +37,7 @@
             location.hash !== '#event_specific_questions' &&
             location.hash !== '#speakers' &&
             location.hash !== '#attendees' &&
+            location.hash !== '#unpaid' &&
             location.hash !== '#abstracts' &&
             location.hash !== '#organizers' &&
             location.hash !== '#event_admins' &&
@@ -186,6 +188,11 @@
                                     <Users class="w-6 h-6" />
                                 {/snippet}
                             </SidebarItem>
+                            <SidebarItem label={m.eventAdmin_unpaidAttendees()} active={sidebar_selected === 'unpaid'} href="#unpaid">
+                                {#snippet icon()}
+                                    <CreditCard class="w-6 h-6" />
+                                {/snippet}
+                            </SidebarItem>
                             <SidebarItem label={m.eventAdmin_onsiteAttendees()} active={sidebar_selected === 'onsite'} href="#onsite">
                                 {#snippet icon()}
                                     <Users class="w-6 h-6" />
@@ -243,6 +250,10 @@
 
                 {#if sidebar_selected === 'attendees'}
                 <Attendees data={data} />
+                {/if}
+
+                {#if sidebar_selected === 'unpaid'}
+                <UnpaidAttendees {data} />
                 {/if}
 
                 {#if sidebar_selected === 'onsite'}

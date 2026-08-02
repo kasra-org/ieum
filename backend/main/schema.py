@@ -310,6 +310,7 @@ class AttendeeSchema(Schema):
     user_email: str
     is_attended: bool
     payment_status: str
+    registered_at: str
     custom_answers: List[AnswerSchema]
 
     @staticmethod
@@ -324,6 +325,12 @@ class AttendeeSchema(Schema):
             return 'free'
         paid = any(p.status == 'completed' for p in da.payments.all())
         return 'paid' if paid else 'pending'
+
+    @staticmethod
+    def resolve_registered_at(da: Attendee) -> str:
+        # Shown on the unpaid list so organisers can see how long a registration
+        # has been waiting to be paid.
+        return da.created_at.isoformat() if da.created_at else ''
 
     @staticmethod
     def resolve_name(da: Attendee) -> str:
