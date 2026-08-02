@@ -108,6 +108,28 @@
                 attributes: {
                     class: 'prose prose-sm max-w-none focus:outline-none min-h-[200px] p-4',
                 },
+                handleKeyDown: (view, event) => {
+                    if (event.key !== 'Tab') return false;
+
+                    // Tab belongs to the editor. Without this the browser moves
+                    // focus to the next form field, so tabbing inside the
+                    // description jumped out of it entirely.
+                    //
+                    // ProseMirror consults editorProps before plugin keymaps, so
+                    // returning true here pre-empts TipTap's own Tab bindings -
+                    // which is why the list and table behaviour is spelled out
+                    // rather than delegated.
+                    event.preventDefault();
+
+                    if (editor?.isActive('table')) {
+                        editor.commands[event.shiftKey ? 'goToPreviousCell' : 'goToNextCell']();
+                    } else if (editor?.isActive('listItem')) {
+                        // Fails harmlessly on the first item of a level, which
+                        // has no sibling to nest under.
+                        editor.commands[event.shiftKey ? 'liftListItem' : 'sinkListItem']('listItem');
+                    }
+                    return true;
+                },
                 handleDrop: (view, event, slice, moved) => {
                     if (!moved && event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files.length > 0) {
                         const file = event.dataTransfer.files[0];
