@@ -67,6 +67,7 @@
             const row = {
                 id: item.id,
                 attendee_nametag_id: item.attendee_nametag_id,
+                payment_status: item.payment_status,
                 name: getDisplayName(item),
                 first_name: item.first_name,
                 middle_initial: item.middle_initial,
@@ -421,13 +422,25 @@
     let batch_nametag_role = $state('Participant');
     let batch_nametag_generating = $state(false);
 
+    // Selection is shared with the email and certificate actions, which do apply
+    // to unpaid attendees, so filter here rather than blocking the selection.
+    let batchNametagEligible = $derived(
+        selectedAttendees
+            .map(id => table_data_attendees.find(att => att.id === id))
+            .filter(a => a && a.payment_status !== 'pending')
+    );
+    let batchNametagSkipped = $derived(selectedAttendees.length - batchNametagEligible.length);
+
     const generateBatchNametags = async () => {
-        if (selectedAttendees.length === 0) return;
+        const eligible = batchNametagEligible;
+        if (eligible.length === 0) {
+            batch_nametag_pdf = '';
+            return;
+        }
         batch_nametag_generating = true;
-        const attendees = selectedAttendees.map(id => {
-            const a = table_data_attendees.find(att => att.id === id);
-            return { name: a.name, institute: a.institute, id: a.attendee_nametag_id };
-        });
+        const attendees = eligible.map(a => ({
+            name: a.name, institute: a.institute, id: a.attendee_nametag_id
+        }));
         batch_nametag_pdf = await generateBatchNametagPDF({
             attendees,
             role: batch_nametag_role,
@@ -598,17 +611,10 @@
     let custom_headers_attendees = $state([]);
     let table_data_attendees = $state([]);
     $effect.pre(() => {
-        // Filter attendees to only show those with completed payments if there's a registration fee
-        let filteredAttendees = data.attendees;
-        if (data.event.registration_fee && data.event.registration_fee > 0 && data.payments) {
-            const paidAttendeeIds = new Set(
-                data.payments
-                    .filter(p => p.status === 'completed')
-                    .map(p => p.attendee_id)
-            );
-            filteredAttendees = data.attendees.filter(a => paidAttendeeIds.has(a.id));
-        }
-        let df = transformToTableFormat(filteredAttendees);
+        // Everyone who registered is listed, paid or not, so unpaid registrations
+        // can still be managed. They are marked with a badge and excluded from
+        // nametag printing rather than hidden.
+        let df = transformToTableFormat(data.attendees);
         custom_headers_attendees = df.custom_headers;
         table_data_attendees = df.table_data;
     });
@@ -699,7 +705,14 @@
                         <CircleCheck class="w-5 h-5 {row.is_attended ? 'text-green-500' : 'text-gray-300'}" />
                     </button>
                 </TableBodyCell>
-                <TableBodyCell>{row.name}</TableBodyCell>
+                <TableBodyCell>
+                    {row.name}
+                    {#if row.payment_status === 'pending'}
+                        <span class="ml-2 whitespace-nowrap rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                            {m.attendees_unpaid()}
+                        </span>
+                    {/if}
+                </TableBodyCell>
                 <TableBodyCell>{row.email}</TableBodyCell>
                 <TableBodyCell>{stringify_nationality(row.nationality)}</TableBodyCell>
                 <TableBodyCell>{row.institute}</TableBodyCell>
@@ -715,9 +728,9 @@
                 {/if}
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
-                        <ActionTooltip text={m.attendees_nametag()}>
-                            <Button color="none" size="none" onclick={() => showNametagModal(row.id)}>
-                                <Tag class="w-5 h-5" />
+                        <ActionTooltip text={row.payment_status === 'pending' ? m.attendees_nametagUnpaid() : m.attendees_nametag()}>
+                            <Button color="none" size="none" onclick={() => showNametagModal(row.id)} disabled={row.payment_status === 'pending'}>
+                                <Tag class="w-5 h-5 {row.payment_status === 'pending' ? 'opacity-30' : ''}" />
                             </Button>
                         </ActionTooltip>
                         <ActionTooltip text={m.attendees_certificate()}>
@@ -915,6 +928,11 @@
 </Modal>
 
 <Modal id="batch_nametag_modal" size="lg" title={m.attendees_batchNametag()} bind:open={batch_nametag_modal} outsideclose>
+    {#if batchNametagSkipped > 0}
+        <Alert color="yellow" class="mb-4">
+            {m.attendees_nametagSkippedUnpaid({ eligible: batchNametagEligible.length, skipped: batchNametagSkipped })}
+        </Alert>
+    {/if}
     <div class="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="flex gap-2 items-center">
             <Label for="batch_role" class="whitespace-nowrap">{m.nametag_role()}:</Label>
@@ -947,7 +965,11 @@
             <span class="text-sm text-gray-500">mm</span>
         </div>
     </div>
-    {#if batch_nametag_generating}
+    {#if batchNametagEligible.length === 0}
+        <div class="flex justify-center items-center h-[200px]">
+            <p class="text-gray-500">{m.attendees_nametagNoneEligible()}</p>
+        </div>
+    {:else if batch_nametag_generating}
         <div class="flex justify-center items-center h-[500px]">
             <p class="text-gray-500">...</p>
         </div>

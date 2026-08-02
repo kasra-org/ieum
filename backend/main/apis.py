@@ -881,7 +881,9 @@ def get_event_stats(request, event_id: int):
 @ensure_event_staff
 def get_event_attendees(request, event_id: int, all: bool = False):
     event = Event.objects.get(id=event_id)
-    attendees = event.attendees.all()
+    # select_related/prefetch feed AttendeeSchema.resolve_payment_status without
+    # a query per attendee.
+    attendees = event.attendees.select_related('event').prefetch_related('payments')
 
     # If event has a registration fee, filter to only those with completed payments
     # Unless all=True is passed (for admin use like manual payment creation)

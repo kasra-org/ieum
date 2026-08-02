@@ -309,7 +309,21 @@ class AttendeeSchema(Schema):
     dietary: str
     user_email: str
     is_attended: bool
+    payment_status: str
     custom_answers: List[AnswerSchema]
+
+    @staticmethod
+    def resolve_payment_status(da: Attendee) -> str:
+        """'free' when the event charges nothing, else 'paid' or 'pending'.
+
+        Reads the prefetched payments rather than filtering, so listing a whole
+        event does not run a query per attendee.
+        """
+        fee = da.event.registration_fee if da.event_id else None
+        if not fee or fee <= 0:
+            return 'free'
+        paid = any(p.status == 'completed' for p in da.payments.all())
+        return 'paid' if paid else 'pending'
 
     @staticmethod
     def resolve_name(da: Attendee) -> str:
