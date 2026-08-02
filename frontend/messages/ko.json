@@ -659,6 +659,8 @@
 	"markdownEditor_heading2": "제목 2",
 	"markdownEditor_heading3": "제목 3",
 	"markdownEditor_bulletList": "글머리 기호 목록",
+	"markdownEditor_indentList": "목록 수준 늘리기",
+	"markdownEditor_outdentList": "목록 수준 줄이기",
 	"markdownEditor_orderedList": "번호 매기기 목록",
 	"markdownEditor_quote": "인용",
 	"markdownEditor_link": "링크",

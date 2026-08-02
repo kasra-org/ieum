@@ -659,6 +659,8 @@
 	"markdownEditor_heading2": "Heading 2",
 	"markdownEditor_heading3": "Heading 3",
 	"markdownEditor_bulletList": "Bullet List",
+	"markdownEditor_indentList": "Increase list level",
+	"markdownEditor_outdentList": "Decrease list level",
 	"markdownEditor_orderedList": "Ordered List",
 	"markdownEditor_quote": "Quote",
 	"markdownEditor_link": "Link",

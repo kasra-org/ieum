@@ -13,7 +13,10 @@
     import { TableHeader } from '@tiptap/extension-table-header';
     import { marked } from 'marked';
     import { Label, Tabs, TabItem, Textarea, Button, Dropdown, DropdownItem, Spinner } from '$lib/components/ui';
-    import { ChevronDown, Columns3, Image as ImageIcon, Link as LinkIcon, Paperclip } from '@lucide/svelte';
+    import { Bold, ChevronDown, Columns3, Heading1, Heading2, Heading3,
+             Image as ImageIcon, IndentDecrease, IndentIncrease, Italic,
+             Link as LinkIcon, List, ListOrdered, Paperclip, Quote,
+             Strikethrough, Underline as UnderlineIcon } from '@lucide/svelte';
     import { deserialize } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
 
@@ -155,6 +158,76 @@
         }
     });
 
+    /**
+     * Serialize a <ul>/<ol> element, and anything nested inside it, to markdown.
+     *
+     * This cannot be done with regex: a non-greedy /<ul>(.*?)<\/ul>/ match ends
+     * at the *inner* list's closing tag, so nesting was flattened - the first
+     * sub-item lost its marker entirely and the remaining ones were emitted as
+     * top-level items.
+     */
+    function serializeList(listEl, depth = 0) {
+        const ordered = listEl.tagName === 'OL';
+        const indent = '  '.repeat(depth);
+        const lines = [];
+        let index = 1;
+
+        for (const li of Array.from(listEl.children)) {
+            if (li.tagName !== 'LI') continue;
+
+            let text = '';
+            const sublists = [];
+            for (const node of Array.from(li.childNodes)) {
+                if (node.nodeType === 1 && (node.tagName === 'UL' || node.tagName === 'OL')) {
+                    sublists.push(node);
+                } else if (node.nodeType === 1) {
+                    // TipTap wraps item content in <p>; unwrap it so items stay
+                    // tight rather than becoming blank-line separated.
+                    text += node.tagName === 'P' ? node.innerHTML : node.outerHTML;
+                } else {
+                    text += node.textContent;
+                }
+            }
+
+            lines.push(`${indent}${ordered ? `${index++}.` : '-'} ${text.trim()}`);
+            for (const sub of sublists) lines.push(serializeList(sub, depth + 1));
+        }
+        return lines.join('\n');
+    }
+
+    /** Replace every top-level list block in an HTML string with markdown. */
+    function convertLists(html) {
+        if (typeof DOMParser === 'undefined') return html;
+
+        let out = '';
+        let rest = html;
+        while (true) {
+            const start = rest.match(/<(ul|ol)\b[^>]*>/i);
+            if (!start) { out += rest; break; }
+            out += rest.slice(0, start.index);
+
+            // Walk the tags forward tracking depth so we stop at the *matching*
+            // close tag rather than the first one.
+            const tagRe = /<(\/?)(?:ul|ol)\b[^>]*>/gi;
+            tagRe.lastIndex = start.index;
+            let depth = 0;
+            let endIdx = -1;
+            let tag;
+            while ((tag = tagRe.exec(rest)) !== null) {
+                depth += tag[1] ? -1 : 1;
+                if (depth === 0) { endIdx = tag.index + tag[0].length; break; }
+            }
+            if (endIdx === -1) { out += rest.slice(start.index); break; }
+
+            const block = rest.slice(start.index, endIdx);
+            const listEl = new DOMParser()
+                .parseFromString(block, 'text/html').body.firstElementChild;
+            out += listEl ? `\n${serializeList(listEl, 0)}\n\n` : block;
+            rest = rest.slice(endIdx);
+        }
+        return out;
+    }
+
     // Simple HTML to Markdown converter
     function htmlToMarkdown(html) {
         if (!html || html === '<p></p>') return '';
@@ -180,14 +253,8 @@
         md = md.replace(/<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*\/?>/gi, '![$2]($1)');
         md = md.replace(/<img[^>]*src="([^"]*)"[^>]*\/?>/gi, '![]($1)');
 
-        // Convert lists
-        md = md.replace(/<ul[^>]*>(.*?)<\/ul>/gis, (match, content) => {
-            return content.replace(/<li[^>]*>(.*?)<\/li>/gi, '- $1\n');
-        });
-        md = md.replace(/<ol[^>]*>(.*?)<\/ol>/gis, (match, content) => {
-            let index = 1;
-            return content.replace(/<li[^>]*>(.*?)<\/li>/gi, () => `${index++}. $1\n`);
-        });
+        // Convert lists (see convertLists: nesting needs real parsing, not regex)
+        md = convertLists(md);
 
         // Convert blockquotes
         md = md.replace(/<blockquote[^>]*>(.*?)<\/blockquote>/gis, (match, content) => {
@@ -422,6 +489,14 @@
     let isH3Active = $derived(editorState >= 0 && editor?.isActive('heading', { level: 3 }));
     let isBulletListActive = $derived(editorState >= 0 && editor?.isActive('bulletList'));
     let isOrderedListActive = $derived(editorState >= 0 && editor?.isActive('orderedList'));
+    // TipTap reports whether the commands can run in the current selection; a
+    // first-level item cannot be outdented and a first child cannot be indented.
+    let canIndentListItem = $derived(
+        editorState >= 0 && !!editor?.can().sinkListItem('listItem')
+    );
+    let canOutdentListItem = $derived(
+        editorState >= 0 && !!editor?.can().liftListItem('listItem')
+    );
     let isBlockquoteActive = $derived(editorState >= 0 && editor?.isActive('blockquote'));
     let isLinkActive = $derived(editorState >= 0 && editor?.isActive('link'));
 </script>
@@ -460,7 +535,7 @@
                 onclick={() => editor?.chain().focus().toggleBold().run()}
                 title={m.markdownEditor_bold()}
             >
-                <span class="font-bold text-sm">B</span>
+                <Bold class="w-4 h-4" />
             </button>
             <button
                 type="button"
@@ -468,7 +543,7 @@
                 onclick={() => editor?.chain().focus().toggleItalic().run()}
                 title={m.markdownEditor_italic()}
             >
-                <span class="italic text-sm">I</span>
+                <Italic class="w-4 h-4" />
             </button>
             <button
                 type="button"
@@ -476,7 +551,7 @@
                 onclick={() => editor?.chain().focus().toggleUnderline().run()}
                 title={m.markdownEditor_underline()}
             >
-                <span class="underline text-sm">U</span>
+                <UnderlineIcon class="w-4 h-4" />
             </button>
             <button
                 type="button"
@@ -484,7 +559,7 @@
                 onclick={() => editor?.chain().focus().toggleStrike().run()}
                 title={m.markdownEditor_strikethrough()}
             >
-                <span class="line-through text-sm">S</span>
+                <Strikethrough class="w-4 h-4" />
             </button>
 
             <div class="w-px h-6 bg-gray-300 mx-1"></div>
@@ -496,7 +571,7 @@
                 onclick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
                 title={m.markdownEditor_heading1()}
             >
-                H1
+                <Heading1 class="w-4 h-4" />
             </button>
             <button
                 type="button"
@@ -504,7 +579,7 @@
                 onclick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
                 title={m.markdownEditor_heading2()}
             >
-                H2
+                <Heading2 class="w-4 h-4" />
             </button>
             <button
                 type="button"
@@ -512,7 +587,7 @@
                 onclick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
                 title={m.markdownEditor_heading3()}
             >
-                H3
+                <Heading3 class="w-4 h-4" />
             </button>
 
             <div class="w-px h-6 bg-gray-300 mx-1"></div>
@@ -524,7 +599,7 @@
                 onclick={() => editor?.chain().focus().toggleBulletList().run()}
                 title={m.markdownEditor_bulletList()}
             >
-                <span class="text-sm">-</span>
+                <List class="w-4 h-4" />
             </button>
             <button
                 type="button"
@@ -532,7 +607,7 @@
                 onclick={() => editor?.chain().focus().toggleOrderedList().run()}
                 title={m.markdownEditor_orderedList()}
             >
-                <span class="text-sm">1.</span>
+                <ListOrdered class="w-4 h-4" />
             </button>
             <button
                 type="button"
@@ -540,7 +615,27 @@
                 onclick={() => editor?.chain().focus().toggleBlockquote().run()}
                 title={m.markdownEditor_quote()}
             >
-                <span class="text-sm">"</span>
+                <Quote class="w-4 h-4" />
+            </button>
+
+            <!-- List level: only meaningful inside a list, so disabled elsewhere -->
+            <button
+                type="button"
+                class="p-1.5 rounded hover:bg-gray-200 disabled:opacity-40"
+                onclick={() => editor?.chain().focus().sinkListItem('listItem').run()}
+                disabled={!canIndentListItem}
+                title={m.markdownEditor_indentList()}
+            >
+                <IndentIncrease class="w-4 h-4" />
+            </button>
+            <button
+                type="button"
+                class="p-1.5 rounded hover:bg-gray-200 disabled:opacity-40"
+                onclick={() => editor?.chain().focus().liftListItem('listItem').run()}
+                disabled={!canOutdentListItem}
+                title={m.markdownEditor_outdentList()}
+            >
+                <IndentDecrease class="w-4 h-4" />
             </button>
 
             <div class="w-px h-6 bg-gray-300 mx-1"></div>
