@@ -201,6 +201,7 @@ class EventSchema(Schema):
     main_languages: List[str]
     registration_deadline: Union[date, None]
     registration_fee: Union[int, None]
+    onsite_registration_fee: Union[int, None]
     undergraduate_enabled: bool
     registration_fee_undergraduate: Union[int, None]
     graduate_enabled: bool
@@ -256,6 +257,7 @@ class EventAdminSchema(Schema):
     registration_deadline: Union[date, None]
     capacity: int
     registration_fee: Union[int, None]
+    onsite_registration_fee: Union[int, None]
     undergraduate_enabled: bool
     registration_fee_undergraduate: Union[int, None]
     graduate_enabled: bool
@@ -462,6 +464,7 @@ class OnSiteAttendeeSchema(Schema):
     institute: str
     job_title: str
     is_confirmed: bool
+    is_registration_complete: bool
 
 class PaymentHistorySchema(Schema):
     number: str

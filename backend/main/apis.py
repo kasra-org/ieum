@@ -722,6 +722,11 @@ def update_event(request, event_id: int):
         event.capacity = data["capacity"]
     if "registration_fee" in data:
         event.registration_fee = int(data["registration_fee"]) if data["registration_fee"] not in (None, "") else None
+    if "onsite_registration_fee" in data:
+        event.onsite_registration_fee = (
+            int(data["onsite_registration_fee"])
+            if data["onsite_registration_fee"] not in (None, "") else None
+        )
     if "undergraduate_enabled" in data:
         event.undergraduate_enabled = data["undergraduate_enabled"] in (True, 'true', 'True', 'on', 1, '1')
     if "registration_fee_undergraduate" in data:
@@ -2208,7 +2213,19 @@ def register_on_site(request, event_id: int):
         institute=data.get("institute", ""),
         job_title=data.get("job_title", "")
     )
-    return {"code": "success", "message": "Successfully registered on-site.", "id": oa.id, "onsiteattendee_nametag_id": oa.onsiteattendee_nametag_id}
+
+    # With an on-site fee the record is held unpaid: the walk-in is registered
+    # in the system but the registration is not complete until staff take
+    # payment at the desk and mark it so.
+    fee = event.onsite_registration_fee or 0
+    return {
+        "code": "success",
+        "message": "Successfully registered on-site.",
+        "id": oa.id,
+        "onsiteattendee_nametag_id": oa.onsiteattendee_nametag_id,
+        "payment_required": fee > 0,
+        "fee": fee,
+    }
 
 @api.get("/event/{event_id}/onsite", response=List[OnSiteAttendeeSchema])
 @ensure_event_staff

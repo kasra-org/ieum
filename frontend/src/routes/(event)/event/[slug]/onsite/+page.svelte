@@ -9,6 +9,7 @@
     import * as yup from 'yup';
     import * as m from '$lib/paraglide/messages.js';
     import { onlyLatinChars } from '$lib/utils.js';
+    import { languageTag } from '$lib/paraglide/runtime.js';
 
     import OnSiteRegistrationForm from '$lib/components/OnSiteRegistrationForm.svelte';
 
@@ -29,6 +30,15 @@
 
     let onsite_code_valid = $derived(data.onsite_code_valid);
     let onsite_code = $derived(data.onsite_code);
+
+    // Payment is taken at the desk, so the fee is stated before the form to set
+    // the expectation rather than surprising the walk-in on the next screen.
+    let onsiteFee = $derived(event.onsite_registration_fee || 0);
+    let formattedOnsiteFee = $derived(
+        onsiteFee ? (languageTag() === 'ko'
+            ? `${onsiteFee.toLocaleString('ko-KR')} 원`
+            : `KRW ${onsiteFee.toLocaleString('ko-KR')}`) : ''
+    );
 
     let error_message = $state('');
     const { form: felteForm, data: formData, errors, isSubmitting } = createForm({
@@ -87,7 +97,16 @@
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
         <Heading tag="h1" class="text-2xl font-bold mb-3">{m.onsiteRegistration_title()}</Heading>
         {#if onsite_code_valid}
-            <p class="mb-10 font-light">{m.onsiteRegistration_description()}</p>
+            <p class="mb-6 font-light">{m.onsiteRegistration_description()}</p>
+            {#if onsiteFee > 0}
+                <div class="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                    <div class="flex items-baseline justify-between gap-4">
+                        <span class="font-medium text-gray-900">{m.onsiteRegistration_feeNotice()}</span>
+                        <span class="text-xl font-bold text-primary-600">{formattedOnsiteFee}</span>
+                    </div>
+                    <p class="mt-2 text-sm text-gray-700">{m.onsiteRegistration_payAtDesk()}</p>
+                </div>
+            {/if}
             <form use:felteForm method="post" class="space-y-5">
                 <OnSiteRegistrationForm errors={$errors} />
                 {#if error_message}

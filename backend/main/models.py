@@ -115,7 +115,16 @@ class OnSiteAttendee(models.Model):
     email = models.EmailField(blank=True)
     institute = models.CharField(max_length=1000)
     job_title = models.CharField(max_length=1000, blank=True)
+    # Staff confirm a walk-in at the desk. Where the event charges an on-site
+    # fee, confirming is also the acknowledgement that they paid, so it is what
+    # completes the registration.
     is_confirmed = models.BooleanField(default=False)
+
+    @property
+    def is_registration_complete(self):
+        """A paid-for on-site registration only counts once staff confirm it."""
+        fee = self.event.onsite_registration_fee or 0
+        return self.is_confirmed if fee > 0 else True
 
     class Meta:
         unique_together = [['event', 'onsiteattendee_nametag_id']]
@@ -184,6 +193,9 @@ class Event(models.Model):
     # Standard price, and the one PI / non-academic attendees pay. The two tier
     # fields below override it for students; left blank, everyone pays this.
     registration_fee = models.IntegerField(blank=True, null=True)
+    # Charged to walk-ins at the desk. Blank or 0 means on-site registration is
+    # free and completes immediately.
+    onsite_registration_fee = models.IntegerField(blank=True, null=True)
     # Each student tier is offered only when the admin enables it; its price is
     # then charged instead of the standard fee.
     undergraduate_enabled = models.BooleanField(default=False)

@@ -21,6 +21,7 @@
         deadline: '',
         capacity: 0,
         registration_fee: null,
+        onsite_registration_fee: null,
         undergraduate_enabled: false,
         registration_fee_undergraduate: null,
         graduate_enabled: false,
@@ -172,6 +173,11 @@
     <Label for="registration_fee" class="block mb-2">{m.eventForm_registrationFeeStandard()}</Label>
     <Input type="number" id="registration_fee" name="registration_fee" value={data.registration_fee} step="1" min="0" placeholder="0" />
     <span class="text-sm">* {m.eventForm_registrationFeeStandardHelp()}</span>
+</div>
+<div class="mb-6">
+    <Label for="onsite_registration_fee" class="block mb-2">{m.eventForm_onsiteRegistrationFee()}</Label>
+    <Input type="number" id="onsite_registration_fee" name="onsite_registration_fee" value={data.onsite_registration_fee} step="1" min="0" placeholder="0" />
+    <span class="text-sm">* {m.eventForm_onsiteRegistrationFeeHelp()}</span>
 </div>
 <div class="mb-6 rounded-lg border border-gray-200 p-4">
     <p class="mb-1 text-sm font-medium">{m.eventForm_studentTiers()}</p>

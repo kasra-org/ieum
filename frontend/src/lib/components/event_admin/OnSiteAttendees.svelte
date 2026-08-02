@@ -147,6 +147,8 @@
         }
     };
 
+    const onsiteFee = $derived(data.event.onsite_registration_fee || 0);
+
     let nametag_modal = $state(false);
     let selected_nametag = $state('');
     let selected_nametag_id = $state(null);
@@ -560,8 +562,8 @@
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
                         <ActionTooltip text={m.onsiteAttendees_nametag()}>
-                            <Button color="none" size="none" onclick={() => showNametagModal(row.id)}>
-                                <Tag class="w-5 h-5" />
+                            <Button color="none" size="none" onclick={() => showNametagModal(row.id)} disabled={onsiteFee > 0 && !row.is_confirmed}>
+                                <Tag class="w-5 h-5 {onsiteFee > 0 && !row.is_confirmed ? 'opacity-30' : ''}" />
                             </Button>
                         </ActionTooltip>
                         <ActionTooltip text={m.onsiteAttendees_certificate()}>

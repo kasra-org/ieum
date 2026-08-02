@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 
 from main import nicepay
 from main.utils import render_email_template
-from main.models import Abstract, AbstractVote, Attendee, Institution, EmailTemplate, Event, NicePayTransaction, PaymentHistory, PaymentSettings
+from main.models import Abstract, AbstractVote, Attendee, Institution, EmailTemplate, Event, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings
 
 User = get_user_model()
 
@@ -757,3 +757,61 @@ class EmailTemplateEscapingTests(TestCase):
             {'event': Event(name='Symposium'), 'attendee': Attendee(first_name='Jeongbin')},
         )
         self.assertEqual(rendered, 'Dear Jeongbin, see you at Symposium.')
+
+
+class OnSiteRegistrationFeeTests(TestCase):
+    """A paid-for on-site registration is not complete until staff confirm it."""
+
+    def setUp(self):
+        from zoneinfo import ZoneInfo
+        from datetime import datetime as dt
+        from main.models import BusinessSettings
+        today = dt.now(ZoneInfo(BusinessSettings.get_instance().timezone)).date()
+        self.event = Event.objects.create(
+            name='Walk-in Event', start_date=today, end_date=today,
+            venue='Seoul', capacity=100, onsite_code='TESTCD',
+            onsite_registration_fee=30000,
+        )
+
+    def register(self):
+        return self.client.post(
+            f'/api/event/{self.event.id}/onsite',
+            data={'code': 'TESTCD', 'name': 'Walk In', 'email': 'w@example.com',
+                  'institute': 'PNU', 'job_title': 'Dev'},
+            content_type='application/json',
+        )
+
+    def test_registration_reports_the_fee_owed(self):
+        response = self.register()
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body['payment_required'])
+        self.assertEqual(body['fee'], 30000)
+
+    def test_not_complete_until_confirmed(self):
+        self.register()
+        oa = OnSiteAttendee.objects.get(event=self.event, email='w@example.com')
+        self.assertFalse(oa.is_confirmed)
+        self.assertFalse(oa.is_registration_complete)
+
+        oa.is_confirmed = True
+        oa.save()
+        self.assertTrue(oa.is_registration_complete)
+
+    def test_free_on_site_registration_completes_immediately(self):
+        self.event.onsite_registration_fee = None
+        self.event.save()
+        response = self.register()
+        self.assertFalse(response.json()['payment_required'])
+
+        oa = OnSiteAttendee.objects.get(event=self.event, email='w@example.com')
+        self.assertFalse(oa.is_confirmed)
+        # No fee to collect, so confirmation is not what completes it.
+        self.assertTrue(oa.is_registration_complete)
+
+    def test_zero_fee_is_treated_as_free(self):
+        self.event.onsite_registration_fee = 0
+        self.event.save()
+        self.register()
+        oa = OnSiteAttendee.objects.get(event=self.event, email='w@example.com')
+        self.assertTrue(oa.is_registration_complete)
