@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from main import nicepay
+from main.utils import render_email_template
 from main.models import Abstract, AbstractVote, Attendee, Institution, EmailTemplate, Event, NicePayTransaction, PaymentHistory, PaymentSettings
 
 User = get_user_model()
@@ -730,3 +731,29 @@ class InvitedTalkReviewExemptionTests(TestCase):
             data={'voted_abstracts': [self.competing.id]}, content_type='application/json')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(AbstractVote.objects.get(reviewer=self.reviewer).voted_abstracts.count(), 1)
+
+
+class EmailTemplateEscapingTests(TestCase):
+    """Emails are text/plain, so template rendering must not HTML-escape."""
+
+    def test_ampersand_survives(self):
+        rendered = render_email_template(
+            'Registration for {{ event.name }}',
+            {'event': Event(name='SCSOK & KSBMB Joint Symposium')},
+        )
+        self.assertIn('SCSOK & KSBMB', rendered)
+        self.assertNotIn('&amp;', rendered)
+
+    def test_quotes_and_angle_brackets_survive(self):
+        rendered = render_email_template(
+            '{{ event.name }}',
+            {'event': Event(name='O\'Brien "quoted" <tagged>')},
+        )
+        self.assertEqual(rendered, 'O\'Brien "quoted" <tagged>')
+
+    def test_template_variables_still_render(self):
+        rendered = render_email_template(
+            'Dear {{ attendee.first_name }}, see you at {{ event.name }}.',
+            {'event': Event(name='Symposium'), 'attendee': Attendee(first_name='Jeongbin')},
+        )
+        self.assertEqual(rendered, 'Dear Jeongbin, see you at Symposium.')

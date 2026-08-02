@@ -654,3 +654,15 @@ def odt_to_html(file_path):
             html_output.append('</p>')
 
     return ''.join(html_output)
+
+
+def render_email_template(template_string, context_dict):
+    """Render an email template as plain text.
+
+    Emails are sent as text/plain, so Django's HTML autoescaping must be off:
+    with it on, an event named "SCSOK & KSBMB" reaches the recipient as
+    "SCSOK &amp; KSBMB", and any quote or angle bracket is mangled the same way.
+    """
+    from django.template import Context, Template
+
+    return Template(template_string).render(Context(context_dict, autoescape=False))

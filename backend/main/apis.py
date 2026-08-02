@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 from main.models import ApiKey, User, Event, EmailTemplate, Attendee, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings
 from main.schema import *
-from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id
+from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id, render_email_template
 from main import nicepay
 
 from .tasks import send_mail, send_mail_with_attachment
@@ -1171,8 +1171,8 @@ def register_event(request, event_id: int):
 
     reply_to = event.main_admin.email if event.main_admin else None
     send_mail.delay(
-        Template(event.email_template_registration.subject).render(Context({"event": event, "attendee": attendee})),
-        Template(event.email_template_registration.body).render(Context({"event": event, "attendee": attendee})),
+        render_email_template(event.email_template_registration.subject, {"event": event, "attendee": attendee}),
+        render_email_template(event.email_template_registration.body, {"event": event, "attendee": attendee}),
         user.email,
         reply_to=reply_to
     )
@@ -1327,8 +1327,8 @@ def submit_abstract(request, event_id: int):
 
     reply_to = event.main_admin.email if event.main_admin else None
     send_mail.delay(
-        Template(event.email_template_abstract_submission.subject).render(Context({"event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)})),
-        Template(event.email_template_abstract_submission.body).render(Context({"attendee": attendee, "event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)})),
+        render_email_template(event.email_template_abstract_submission.subject, {"event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)}),
+        render_email_template(event.email_template_abstract_submission.body, {"attendee": attendee, "event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)}),
         attendee.user.email,
         reply_to=reply_to
     )
@@ -1475,9 +1475,9 @@ def send_certificate(request, event_id: int):
             status=404,
         )
 
-    context = Context({"event": event, "attendee": attendee})
-    subject = Template(event.email_template_certificate.subject).render(context)
-    body = Template(event.email_template_certificate.body).render(context)
+    email_context = {"event": event, "attendee": attendee}
+    subject = render_email_template(event.email_template_certificate.subject, email_context)
+    body = render_email_template(event.email_template_certificate.body, email_context)
 
     reply_to = event.main_admin.email if event.main_admin else None
     send_mail_with_attachment.delay(
