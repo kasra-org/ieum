@@ -7,7 +7,7 @@
     import { error } from '@sveltejs/kit';
     import { browser } from '$app/environment';
     import * as m from '$lib/paraglide/messages.js';
-    import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
+    import { getDisplayInstitute, getDisplayName, getPresentationTypeLabel } from '$lib/utils.js';
     import UserSelectionModal from '$lib/components/UserSelectionModal.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
@@ -247,13 +247,16 @@
             <TableBodyRow>
                 <TableBodyCell>{(row.title.length > 10)?row.title.slice(0, 10)+'...':row.title}</TableBodyCell>
                 <TableBodyCell>{getDisplayName(row.attendee)}</TableBodyCell>
+                <TableBodyCell>{getPresentationTypeLabel(row, m)}</TableBodyCell>
                 <TableBodyCell>
-                    {row.type === 'speaker' ? m.abstractType_speaker() : m.abstractType_poster()}
-                    {#if row.type === 'poster' && row.wants_short_talk}
-                        <span class="text-xs text-gray-500 ml-1">({m.myRegistration_shortTalkNomination()})</span>
+                    {#if row.is_reviewable}
+                        {row.votes}
+                    {:else}
+                        <!-- 0 votes here would read as "nobody voted" rather than
+                             "not up for review", so say so explicitly. -->
+                        <span class="text-xs text-gray-500">{m.abstracts_notReviewed()}</span>
                     {/if}
                 </TableBodyCell>
-                <TableBodyCell>{row.votes}</TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
                         <ActionTooltip text={m.abstracts_download()}>
@@ -320,18 +323,14 @@
                 <Input id="votes" type="number" value={selected_abstract?selected_abstract.votes:''} readonly />
             </div>
             <div class="w-full">
-                <Label for="type" class="block mb-2">{m.abstracts_type()}</Label>
-                <Select id="type" name="type" items={[
-                    { value: 'speaker', name: m.abstractType_speaker() },
-                    { value: 'poster', name: m.abstractType_poster() }
-                ]} value={selected_abstract?selected_abstract.type:''} />
-            </div>
-            <div class="w-full">
-                <Label for="wants_short_talk" class="block mb-2">{m.myRegistration_shortTalkNomination()}</Label>
-                <Select id="wants_short_talk" name="wants_short_talk" items={[
-                    { value: 'true', name: m.abstracts_yes() },
-                    { value: 'false', name: m.abstracts_no() }
-                ]} value={selected_abstract?selected_abstract.wants_short_talk?'true':'false':''} />
+                <Label for="presentation_type" class="block mb-2">{m.abstracts_type()}</Label>
+                <Select id="presentation_type" name="presentation_type" items={[
+                    { value: 'poster', name: m.presentationType_poster() },
+                    { value: 'short_talk_poster', name: m.presentationType_shortTalkPoster() },
+                    { value: 'short_talk', name: m.presentationType_shortTalk() },
+                    { value: 'flash_talk_poster', name: m.presentationType_flashTalkPoster() },
+                    { value: 'invited', name: m.presentationType_invited() }
+                ]} value={selected_abstract?selected_abstract.presentation_type:''} />
             </div>
         </div>
         <div class="mb-6">

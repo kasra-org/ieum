@@ -2,6 +2,7 @@
     import { Button } from '$lib/components/ui';
     import { FileText } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
+    import { getPresentationTypeLabel } from '$lib/utils.js';
 
     let { event, my_abstract } = $props();
 </script>
@@ -26,14 +27,8 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <p class="text-sm font-medium text-gray-500">{m.myRegistration_abstractType()}</p>
-                    <p class="text-base text-gray-900">{my_abstract.type === 'speaker' ? m.abstractType_speaker() : m.abstractType_poster()}</p>
+                    <p class="text-base text-gray-900">{getPresentationTypeLabel(my_abstract, m)}</p>
                 </div>
-                {#if my_abstract.type === 'poster' && my_abstract.wants_short_talk}
-                    <div>
-                        <p class="text-sm font-medium text-gray-500">{m.myRegistration_shortTalkNomination()}</p>
-                        <p class="text-base text-gray-900">{m.common_yes()}</p>
-                    </div>
-                {/if}
             </div>
 
             <!-- Action Buttons -->

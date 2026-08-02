@@ -294,8 +294,7 @@ export const actions = {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/abstract/${formdata.get('id')}/update`, {
             title: formdata.get('title'),
-            type: formdata.get('type'),
-            wants_short_talk: formdata.get('wants_short_talk') === 'true',
+            presentation_type: formdata.get('presentation_type'),
         }, cookies);
         if (response.ok && response.status === 200) {
             return JSON.stringify(response.data);

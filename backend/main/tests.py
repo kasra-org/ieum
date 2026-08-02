@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from main import nicepay
-from main.models import Attendee, Institution, EmailTemplate, Event, NicePayTransaction, PaymentHistory, PaymentSettings
+from main.models import Abstract, AbstractVote, Attendee, Institution, EmailTemplate, Event, NicePayTransaction, PaymentHistory, PaymentSettings
 
 User = get_user_model()
 
@@ -618,3 +618,115 @@ class TieredRegistrationFeeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payment = PaymentHistory.objects.get(event=self.event)
         self.assertEqual(payment.amount, 100000)
+
+
+class AbstractPresentationTypeTests(TestCase):
+    """presentation_type is authoritative; the legacy pair is derived from it."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Symposium', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10,
+        )
+
+    def make(self, presentation_type):
+        return Abstract.objects.create(
+            event=self.event, title='T', file_path='abstracts/x/a.docx',
+            presentation_type=presentation_type,
+        )
+
+    def test_legacy_fields_are_derived(self):
+        cases = {
+            'poster': ('poster', False),
+            'short_talk_poster': ('poster', True),
+            'short_talk': ('speaker', False),
+            'flash_talk_poster': ('poster', False),
+            'invited': ('speaker', False),
+        }
+        for presentation_type, (expected_type, expected_short) in cases.items():
+            a = self.make(presentation_type)
+            self.assertEqual(a.type, expected_type, presentation_type)
+            self.assertEqual(a.wants_short_talk, expected_short, presentation_type)
+
+    def test_legacy_fields_cannot_drift(self):
+        a = self.make('invited')
+        # Even if something writes the old fields directly, saving re-derives them.
+        a.type = 'poster'
+        a.wants_short_talk = True
+        a.save()
+        self.assertEqual(a.type, 'speaker')
+        self.assertFalse(a.wants_short_talk)
+
+    def test_all_five_options_are_offered(self):
+        self.assertEqual(
+            [c[0] for c in Abstract.PRESENTATION_TYPE_CHOICES],
+            ['poster', 'short_talk_poster', 'short_talk', 'flash_talk_poster', 'invited'],
+        )
+
+
+class InvitedTalkReviewExemptionTests(TestCase):
+    """Invited and plenary talks are not scored, and reviewers never see them."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Reviewed Event', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, accepts_abstract=True,
+            abstract_deadline=date(2020, 1, 1),  # passed, so voting is open
+        )
+        self.reviewer_user = User.objects.create_user(
+            username='rev@example.com', email='rev@example.com', password='pw12345!aA')
+        self.reviewer = Attendee.objects.create(
+            user=self.reviewer_user, event=self.event, first_name='Rev', last_name='Iewer',
+            nationality=1, institute='PNU')
+        self.event.reviewers.add(self.reviewer)
+        AbstractVote.objects.create(reviewer=self.reviewer)
+
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+
+        author = Attendee.objects.create(
+            event=self.event, first_name='Au', last_name='Thor',
+            nationality=1, institute='PNU')
+        self.competing = Abstract.objects.create(
+            event=self.event, attendee=author, title='Competing', file_path='a/b.docx',
+            presentation_type='short_talk_poster')
+        self.invited = Abstract.objects.create(
+            event=self.event, attendee=author, title='Invited', file_path='a/c.docx',
+            presentation_type='invited')
+
+    def test_is_reviewable_flag(self):
+        self.assertTrue(self.competing.is_reviewable)
+        self.assertFalse(self.invited.is_reviewable)
+
+    def test_reviewer_does_not_see_invited_talks(self):
+        self.client.force_login(self.reviewer_user)
+        response = self.client.get(f'/api/event/{self.event.id}/abstracts')
+        self.assertEqual(response.status_code, 200)
+        titles = [a['title'] for a in response.json()]
+        self.assertIn('Competing', titles)
+        self.assertNotIn('Invited', titles)
+
+    def test_admin_still_sees_every_abstract(self):
+        self.client.force_login(self.admin_user)
+        response = self.client.get(f'/api/event/{self.event.id}/abstracts')
+        titles = [a['title'] for a in response.json()]
+        self.assertIn('Competing', titles)
+        self.assertIn('Invited', titles)
+
+    def test_voting_for_an_invited_talk_is_refused(self):
+        self.client.force_login(self.reviewer_user)
+        response = self.client.post(
+            f'/api/event/{self.event.id}/reviewer/vote',
+            data={'voted_abstracts': [self.invited.id]}, content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'not_reviewable')
+        self.assertEqual(AbstractVote.objects.get(reviewer=self.reviewer).voted_abstracts.count(), 0)
+
+    def test_voting_for_a_competing_abstract_still_works(self):
+        self.client.force_login(self.reviewer_user)
+        response = self.client.post(
+            f'/api/event/{self.event.id}/reviewer/vote',
+            data={'voted_abstracts': [self.competing.id]}, content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(AbstractVote.objects.get(reviewer=self.reviewer).voted_abstracts.count(), 1)

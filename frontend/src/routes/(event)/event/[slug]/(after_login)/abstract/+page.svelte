@@ -37,17 +37,25 @@
         title: yup.string().required(m.abstractSubmission_titleRequired()),
     });
 
+    // Order matches how organisers list them: poster-only first, then the
+    // formats that add or replace it with a talk.
+    const presentationTypes = [
+        { value: 'poster', label: m.presentationType_poster() },
+        { value: 'short_talk_poster', label: m.presentationType_shortTalkPoster() },
+        { value: 'short_talk', label: m.presentationType_shortTalk() },
+        { value: 'flash_talk_poster', label: m.presentationType_flashTalkPoster() },
+        { value: 'invited', label: m.presentationType_invited() },
+    ];
+
     let error_message = $state('');
     const { form: felteForm, data: formData, errors, isSubmitting } = createForm({
         initialValues: {
-            type: 'poster',
-            wants_short_talk: false,
+            presentation_type: 'poster',
         },
         onSubmit: async (data) => {
             const fd = new FormData();
             fd.append('title', data.title);
-            fd.append('type', data.type);
-            fd.append('wants_short_talk', data.type === 'poster' ? data.wants_short_talk : false);
+            fd.append('presentation_type', data.presentation_type);
             fd.append('file_name', abstract_file.file_name);
             fd.append('file_content', abstract_file.file_content);
 
@@ -244,25 +252,24 @@
                     {/if}
 
                     <div>
-                        <Label class="block mb-3">{m.abstractSubmission_presentationType()} <span class="text-red-500">*</span></Label>
-                        <div class="flex flex-col gap-3">
-                            <Radio name="type" value="speaker" bind:group={$formData.type}>
-                                {m.abstractType_speaker()}
-                            </Radio>
-                            <Radio name="type" value="poster" bind:group={$formData.type}>
-                                {m.abstractType_poster()}
-                            </Radio>
+                        <Label class="block mb-1">{m.abstractSubmission_presentationType()} <span class="text-red-500">*</span></Label>
+                        <p class="mb-3 text-sm text-gray-500">{m.abstractSubmission_talkDurations()}</p>
+                        <div class="flex flex-col gap-2">
+                            {#each presentationTypes as option}
+                                <label class="flex cursor-pointer items-center gap-3 rounded-lg border-2 p-3 transition-colors
+                                    {$formData.presentation_type === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
+                                    <input
+                                        type="radio"
+                                        name="presentation_type"
+                                        value={option.value}
+                                        bind:group={$formData.presentation_type}
+                                        class="h-4 w-4"
+                                    />
+                                    <span class="text-sm font-medium text-gray-900">{option.label}</span>
+                                </label>
+                            {/each}
                         </div>
                     </div>
-
-                    {#if $formData.type === 'poster'}
-                        <div class="ml-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                            <Checkbox id="wants_short_talk" name="wants_short_talk" bind:checked={$formData.wants_short_talk}>
-                                {m.abstractSubmission_wantsShortTalk()}
-                            </Checkbox>
-                            <p class="text-sm text-gray-500 mt-2 ml-6">{m.abstractSubmission_wantsShortTalkDescription()}</p>
-                        </div>
-                    {/if}
 
                     <div class="flex flex-col sm:flex-row gap-4 pt-4">
                         <Button type="submit" color="primary" size="lg" disabled={$isSubmitting} class="flex-1">

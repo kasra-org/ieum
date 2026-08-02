@@ -372,6 +372,8 @@ class AbstractShortSchema(Schema):
     title: str
     type: str
     wants_short_talk: bool
+    presentation_type: str
+    is_reviewable: bool
     votes: int
     link: str
     @staticmethod
@@ -391,6 +393,8 @@ class AbstractSchema(Schema):
     body: str
     type: str
     wants_short_talk: bool
+    presentation_type: str
+    is_reviewable: bool
     votes: int
     link: str
     @staticmethod
@@ -423,6 +427,8 @@ class AbstractUserSchema(Schema):
     body: str
     type: str
     wants_short_talk: bool
+    presentation_type: str
+    is_reviewable: bool
     link: str
     @staticmethod
     def resolve_body(abstract: Abstract) -> str:

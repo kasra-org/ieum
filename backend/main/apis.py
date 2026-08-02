@@ -1311,15 +1311,17 @@ def submit_abstract(request, event_id: int):
     file = ContentFile(file_content)
     default_storage.save(file_path, file)
 
-    abstract_type = data.get("type", "poster")
-    wants_short_talk = data.get("wants_short_talk", "false") == "true"
+    # type/wants_short_talk are derived in Abstract.save(), so only the
+    # requested presentation format needs to be validated here.
+    presentation_type = data.get("presentation_type", "poster")
+    if presentation_type not in dict(Abstract.PRESENTATION_TYPE_CHOICES):
+        presentation_type = "poster"
 
     Abstract.objects.create(
         attendee=attendee,
         event=event,
         title=data["title"],
-        type=abstract_type,
-        wants_short_talk=wants_short_talk if abstract_type == "poster" else False,
+        presentation_type=presentation_type,
         file_path=file_path,
     )
 
@@ -1523,16 +1525,23 @@ def delete_reviewer(request, event_id: int, reviewer_id: int):
 @api.get("/event/{event_id}/abstracts", response=List[AbstractShortSchema])
 def get_abstracts(request, event_id: int):
     user = request.user
-    if not (user.is_staff or
-            user in Event.objects.get(id=event_id).admins.all() or
-            user in Event.objects.get(id=event_id).reviewers.all()):
+    event = Event.objects.get(id=event_id)
+    # event.reviewers is a M2M to Attendee, so a User is never "in" it; the old
+    # `user in event.reviewers.all()` was always False and reviewers got a 403.
+    is_admin = user.is_staff or user in event.admins.all()
+    is_reviewer = event.reviewers.filter(user=user).exists()
+    if not (is_admin or is_reviewer):
         return api.create_response(
             request,
             {"code": "permission_denied", "message": "Permission denied"},
             status=403,
         )
-    event = Event.objects.get(id=event_id)
     abstracts = event.abstracts.all()
+    # Admins manage every submission; reviewers only score the ones in
+    # competition, so invited and plenary talks are not shown to them at all.
+    if not is_admin:
+        abstracts = abstracts.exclude(
+            presentation_type__in=Abstract.NON_REVIEWABLE_PRESENTATION_TYPES)
     return abstracts
 
 @api.get("/event/{event_id}/abstract", response=AbstractUserSchema)
@@ -1579,8 +1588,9 @@ def update_abstract(request, event_id: int, abstract_id: int):
     abstract = event.abstracts.get(id=abstract_id)
     data = json.loads(request.body)
     abstract.title = data["title"]
-    abstract.type = data.get("type", "poster")
-    abstract.wants_short_talk = data.get("wants_short_talk", False) if abstract.type == "poster" else False
+    presentation_type = data.get("presentation_type", abstract.presentation_type)
+    if presentation_type in dict(Abstract.PRESENTATION_TYPE_CHOICES):
+        abstract.presentation_type = presentation_type
     abstract.save()
     return {"code": "success", "message": "Abstract updated."}
 
@@ -1655,7 +1665,15 @@ def vote_abstract(request, event_id: int):
     vote = AbstractVote.objects.get(reviewer=reviewer)
     for abstract_id in data["voted_abstracts"]:
         # Validate abstract belongs to this event to prevent cross-event voting
-        vote.voted_abstracts.add(Abstract.objects.get(id=abstract_id, event=event))
+        abstract = Abstract.objects.get(id=abstract_id, event=event)
+        if not abstract.is_reviewable:
+            return api.create_response(
+                request,
+                {"code": "not_reviewable",
+                 "message": "Invited and plenary talks are not under review."},
+                status=400,
+            )
+        vote.voted_abstracts.add(abstract)
     return {"code": "success", "message": "Votes submitted."}
 
 @api.get("/admin/users", response=List[UserSchema])

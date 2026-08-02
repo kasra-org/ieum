@@ -350,12 +350,41 @@ class Abstract(models.Model):
         ('poster', 'Poster'),
     ]
 
+    # What the author is asking to present. This is the field the UI sets;
+    # `type` and `wants_short_talk` below are kept in sync from it so existing
+    # consumers of the API keep working rather than seeing two sources of truth.
+    PRESENTATION_TYPE_CHOICES = [
+        ('poster', 'Poster presentation only'),
+        ('short_talk_poster', 'Short talk and poster presentation'),
+        ('short_talk', 'Short talk only'),
+        ('flash_talk_poster', 'Flash talk and poster presentation'),
+        ('invited', 'Invited / Plenary talk'),
+    ]
+    # Presentation types that involve a talk rather than only a poster.
+    TALK_PRESENTATION_TYPES = ('short_talk_poster', 'short_talk', 'flash_talk_poster', 'invited')
+
     attendee = models.ForeignKey(Attendee, null=True, on_delete=models.CASCADE, related_name='abstracts')
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='abstracts')
     title = models.CharField(max_length=1000)
     file_path = models.CharField(max_length=1000)
+    presentation_type = models.CharField(max_length=32, choices=PRESENTATION_TYPE_CHOICES, default='poster')
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='poster')
     wants_short_talk = models.BooleanField(default=False)  # Only applicable for poster type
+
+    # Invited and plenary speakers are asked to present; their abstracts are not
+    # in competition, so they are not scored.
+    NON_REVIEWABLE_PRESENTATION_TYPES = ('invited',)
+
+    @property
+    def is_reviewable(self):
+        return self.presentation_type not in self.NON_REVIEWABLE_PRESENTATION_TYPES
+
+    def save(self, *args, **kwargs):
+        # Derive the legacy pair so it can never disagree with presentation_type.
+        self.type = 'speaker' if self.presentation_type in ('short_talk', 'invited') else 'poster'
+        self.wants_short_talk = self.presentation_type == 'short_talk_poster'
+        super().save(*args, **kwargs)
+
     def delete(self):
         try:
             import os, shutil

@@ -232,3 +232,22 @@ export function generateOrderId() {
     const random = Math.random().toString(36).substring(2, 10);
     return `${timestamp}${random}`;
 }
+
+/**
+ * Human label for an abstract's requested presentation format.
+ * Falls back to the legacy type/wants_short_talk pair for records that predate
+ * presentation_type.
+ */
+export function getPresentationTypeLabel(abstract, m) {
+    const type = abstract?.presentation_type
+        ?? (abstract?.type === 'speaker'
+            ? 'short_talk'
+            : (abstract?.wants_short_talk ? 'short_talk_poster' : 'poster'));
+    switch (type) {
+        case 'short_talk_poster': return m.presentationType_shortTalkPoster();
+        case 'short_talk': return m.presentationType_shortTalk();
+        case 'flash_talk_poster': return m.presentationType_flashTalkPoster();
+        case 'invited': return m.presentationType_invited();
+        default: return m.presentationType_poster();
+    }
+}
