@@ -1,6 +1,31 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100..900&display=swap');
+
+/* 펴진고딕 (PyeojinGothic), SIL Open Font License. Served from our own /static
+   rather than a CDN, so the main typeface does not depend on a third party
+   staying up. Only the three weights the UI uses are shipped: body text is 300,
+   most UI is 400, and 700 covers bold. */
+@font-face {
+  font-family: 'PyeojinGothic';
+  src: url('/fonts/PyeojinGothic-Light.woff2') format('woff2');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'PyeojinGothic';
+  src: url('/fonts/PyeojinGothic-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'PyeojinGothic';
+  src: url('/fonts/PyeojinGothic-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
 
 @plugin "@tailwindcss/typography";
 @plugin 'flowbite/plugin';
@@ -92,7 +117,7 @@ textarea:focus-visible,
 }
 
 html, body {
-    font-family: "Roboto", "Noto Sans KR", sans-serif;
+    font-family: "PyeojinGothic", "Noto Sans KR", sans-serif;
     font-weight: 300;
     /* The footer is white and sits after a min-h-screen slate block. Without a
        background here the area past the footer — short pages, tall viewports,
