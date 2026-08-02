@@ -1,7 +1,7 @@
 <script>
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
     import { Button, Modal, Alert, Dropdown, DropdownItem } from '$lib/components/ui';
-    import { ChevronDown, UserMinus } from '@lucide/svelte';
+    import { ChevronDown, UserMinus, UserPen } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
@@ -9,6 +9,7 @@
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
+    import RegistrationForm from '$lib/components/RegistrationForm.svelte';
 
     let { data } = $props();
 
@@ -24,6 +25,18 @@
                 email: a.user?.email || a.user_email || '',
                 institute: getDisplayInstitute(a),
                 registered_at: a.registered_at,
+                // Fields the edit form binds to
+                first_name: a.first_name,
+                middle_initial: a.middle_initial,
+                last_name: a.last_name,
+                korean_name: a.korean_name,
+                nationality: a.nationality?.toString() ?? '1',
+                institute_en: a.institute,
+                institute_ko: a.institute_ko,
+                department: a.department,
+                job_title: a.job_title,
+                disability: a.disability,
+                dietary: a.dietary,
             }))
             .sort((x, y) => (x.registered_at || '').localeCompare(y.registered_at || ''))
     );
@@ -86,6 +99,31 @@
         (send_email_to_all ? unpaid : unpaid.filter(a => activeSelection.includes(a.id)))
             .map(a => a.email).filter(Boolean).join('; ')
     );
+
+    // Editing reuses the same form and action as the attendee roster, so a
+    // registration can be corrected before payment without leaving this tab.
+    const form_config = { hide_login_info: true, show_english_name: true, show_korean_name: true };
+    let edit_modal = $state(false);
+    let edit_target = $state(null);
+    let edit_message = $state({ type: '', message: '' });
+    const showEditModal = (row) => {
+        edit_target = row;
+        edit_message = { type: '', message: '' };
+        edit_modal = true;
+    };
+    let edit_institution_resolved = $derived(edit_target
+        ? { name_en: edit_target.institute_en, name_ko: edit_target.institute_ko }
+        : null);
+    const afterEdit = () => {
+        return async ({ result, update }) => {
+            if (result.type === 'success') {
+                await update({ reset: false });
+                edit_modal = false;
+            } else {
+                edit_message = { type: 'error', message: result.error?.message || 'An error occurred' };
+            }
+        };
+    };
 
     let deregister_modal = $state(false);
     let deregister_target = $state(null);
@@ -160,7 +198,12 @@
                     <TableBodyCell>{formatDate(row.registered_at)}</TableBodyCell>
                     <TableBodyCell>{formatFee(data.event.registration_fee)}</TableBodyCell>
                     <TableBodyCell>
-                        <div class="flex justify-center">
+                        <div class="flex justify-center gap-2">
+                            <ActionTooltip text={m.unpaidAttendees_edit()}>
+                                <Button color="none" size="none" onclick={() => showEditModal(row)}>
+                                    <UserPen class="w-5 h-5" />
+                                </Button>
+                            </ActionTooltip>
                             <ActionTooltip text={m.unpaidAttendees_deregister()}>
                                 <Button color="none" size="none" onclick={() => showDeregisterModal(row)}>
                                     <UserMinus class="w-5 h-5" />
@@ -183,6 +226,21 @@
 {/if}
 
 <SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
+
+<Modal id="unpaid_edit_modal" size="xl" title={m.unpaidAttendees_edit()} bind:open={edit_modal} outsideclose>
+    {#if edit_target}
+        <form method="post" action="?/update_attendee" use:enhance={afterEdit}>
+            <input type="hidden" name="id" value={edit_target.id} />
+            <RegistrationForm data={edit_target} config={form_config} institution_resolved={edit_institution_resolved} />
+            {#if edit_message.type === 'error'}
+                <Alert color="red" class="mt-4">{edit_message.message}</Alert>
+            {/if}
+            <div class="flex justify-center mt-6">
+                <Button color="primary" type="submit">{m.unpaidAttendees_save()}</Button>
+            </div>
+        </form>
+    {/if}
+</Modal>
 
 <Modal bind:open={deregister_modal} title={m.unpaidAttendees_deregister()} size="sm">
     <form method="POST" action="?/deregister_attendee" use:enhance={afterDeregister}>

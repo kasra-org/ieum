@@ -397,6 +397,8 @@
 	"unpaidAttendees_emailActions": "Email",
 	"unpaidAttendees_emailAll": "Email all unpaid",
 	"unpaidAttendees_emailSelected": "Email selected",
+	"unpaidAttendees_edit": "Edit registration",
+	"unpaidAttendees_save": "Save",
 	"unpaidAttendees_deregister": "Remove registration",
 	"unpaidAttendees_deregisterConfirm": "Remove {name}'s registration? This cannot be undone.",
 	"unpaidAttendees_cancel": "Cancel",
