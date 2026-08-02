@@ -183,6 +183,35 @@
     let selected_attendee_id = $state(null);
     let registration_fee = $derived(data.event.registration_fee || 0);
     let payment_amount = $state(0);
+
+    // Mirrors Event.fee_for(): which category the attendee falls into decides
+    // the price, so recording a manual payment has to offer the same choice.
+    const feeForTier = (tier) => {
+        if (tier === 'undergraduate' && data.event.undergraduate_enabled) return data.event.registration_fee_undergraduate || 0;
+        if (tier === 'graduate' && data.event.graduate_enabled) return data.event.registration_fee_graduate || 0;
+        return data.event.registration_fee || 0;
+    };
+    const tierOptions = $derived([
+        ...(data.event.undergraduate_enabled ? [{ value: 'undergraduate', label: m.eventRegister_tierUndergraduate() }] : []),
+        ...(data.event.graduate_enabled ? [{ value: 'graduate', label: m.eventRegister_tierGraduate() }] : []),
+        { value: 'pi_non_academic', label: m.eventRegister_tierPiNonAcademic() },
+    ]);
+    let payment_tier = $state('pi_non_academic');
+
+    // Picking someone pre-selects the category they registered under, so the
+    // common case needs no thought; the admin can still override it.
+    $effect(() => {
+        const attendee = data.attendees.find(a => a.id === selected_attendee_id);
+        if (!attendee) return;
+        const tier = attendee.student_status || 'pi_non_academic';
+        payment_tier = tier;
+        payment_amount = feeForTier(tier);
+    });
+
+    const onTierChange = (tier) => {
+        payment_tier = tier;
+        payment_amount = feeForTier(tier);
+    };
     let payment_type = $state('card');
     let payment_note = $state('');
     // Common fields
@@ -212,6 +241,7 @@
 
     const showCreateModal = () => {
         selected_attendee_id = null;
+        payment_tier = 'pi_non_academic';
         payment_amount = registration_fee;
         payment_type = 'card';
         payment_note = '';
@@ -511,6 +541,30 @@
                 getItemEmail={getAttendeeEmail}
             />
         </div>
+        {#if data.event.has_tiered_fees}
+            <div class="mb-4">
+                <Label class="block mb-2">{m.transactions_category()}</Label>
+                <div class="grid grid-cols-1 gap-2 md:grid-cols-3">
+                    {#each tierOptions as option}
+                        <label class="flex cursor-pointer items-start gap-2 rounded-lg border-2 p-2 transition-colors
+                            {payment_tier === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
+                            <input
+                                type="radio"
+                                name="student_status"
+                                value={option.value}
+                                checked={payment_tier === option.value}
+                                onchange={() => onTierChange(option.value)}
+                                class="mt-1 h-4 w-4"
+                            />
+                            <span>
+                                <span class="block text-sm font-medium text-gray-900">{option.label}</span>
+                                <span class="block text-xs text-gray-500">{formatAmount(feeForTier(option.value))}</span>
+                            </span>
+                        </label>
+                    {/each}
+                </div>
+            </div>
+        {/if}
         <div class="grid grid-cols-2 gap-4 mb-4">
             <div>
                 <Label for="amount" class="block mb-2">{m.transactions_amount()}*</Label>

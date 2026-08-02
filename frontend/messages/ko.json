@@ -1072,6 +1072,7 @@
 	"transactions_date": "날짜",
 	"transactions_attendee": "참가자",
 	"transactions_type": "결제수단",
+	"transactions_category": "등록 구분",
 	"transactions_amount": "금액",
 	"transactions_status": "상태",
 	"transactions_note": "메모",

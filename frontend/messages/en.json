@@ -1072,6 +1072,7 @@
 	"transactions_date": "Date",
 	"transactions_attendee": "Attendee",
 	"transactions_type": "Type",
+	"transactions_category": "Registration category",
 	"transactions_amount": "Amount",
 	"transactions_status": "Status",
 	"transactions_note": "Note",
