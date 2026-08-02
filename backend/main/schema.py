@@ -201,6 +201,11 @@ class EventSchema(Schema):
     main_languages: List[str]
     registration_deadline: Union[date, None]
     registration_fee: Union[int, None]
+    undergraduate_enabled: bool
+    registration_fee_undergraduate: Union[int, None]
+    graduate_enabled: bool
+    registration_fee_graduate: Union[int, None]
+    has_tiered_fees: bool
     accepts_abstract: bool
     abstract_submission_type: str
     external_abstract_url: str
@@ -251,6 +256,11 @@ class EventAdminSchema(Schema):
     registration_deadline: Union[date, None]
     capacity: int
     registration_fee: Union[int, None]
+    undergraduate_enabled: bool
+    registration_fee_undergraduate: Union[int, None]
+    graduate_enabled: bool
+    registration_fee_graduate: Union[int, None]
+    has_tiered_fees: bool
     accepts_abstract: bool
     abstract_submission_type: str
     external_abstract_url: str
@@ -309,18 +319,24 @@ class AttendeeSchema(Schema):
     dietary: str
     user_email: str
     is_attended: bool
+    student_status: str
+    registration_fee: int
     payment_status: str
     registered_at: str
     custom_answers: List[AnswerSchema]
 
     @staticmethod
+    def resolve_registration_fee(da: Attendee) -> int:
+        return da.event.fee_for(da.student_status) if da.event_id else 0
+
+    @staticmethod
     def resolve_payment_status(da: Attendee) -> str:
-        """'free' when the event charges nothing, else 'paid' or 'pending'.
+        """'free' when this attendee's tier costs nothing, else 'paid'/'pending'.
 
         Reads the prefetched payments rather than filtering, so listing a whole
         event does not run a query per attendee.
         """
-        fee = da.event.registration_fee if da.event_id else None
+        fee = da.event.fee_for(da.student_status) if da.event_id else None
         if not fee or fee <= 0:
             return 'free'
         paid = any(p.status == 'completed' for p in da.payments.all())

@@ -79,6 +79,16 @@ class Attendee(models.Model):
     user_deleted_at = models.DateTimeField(null=True, blank=True)  # When the associated user was deleted
     user_email = models.EmailField(blank=True)  # Preserved email after user deletion
     is_attended = models.BooleanField(default=False)
+    # Self-reported at registration; selects which fee tier applies.
+    student_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('undergraduate', 'Undergraduate'),
+            ('graduate', 'Graduate'),
+            ('pi_non_academic', 'PI / Non-academic'),
+        ],
+        default='pi_non_academic',
+    )
 
     class Meta:
         unique_together = [['event', 'attendee_nametag_id']]
@@ -171,7 +181,15 @@ class Event(models.Model):
     main_languages = models.JSONField(default=default_main_languages)  # Array of language codes: ['ko', 'en']
     registration_deadline = models.DateField(blank=True, null=True)
     capacity = models.IntegerField()
+    # Standard price, and the one PI / non-academic attendees pay. The two tier
+    # fields below override it for students; left blank, everyone pays this.
     registration_fee = models.IntegerField(blank=True, null=True)
+    # Each student tier is offered only when the admin enables it; its price is
+    # then charged instead of the standard fee.
+    undergraduate_enabled = models.BooleanField(default=False)
+    registration_fee_undergraduate = models.IntegerField(blank=True, null=True)
+    graduate_enabled = models.BooleanField(default=False)
+    registration_fee_graduate = models.IntegerField(blank=True, null=True)
     accepts_abstract = models.BooleanField(default=False)
     abstract_submission_type = models.CharField(max_length=10, choices=[('internal', 'Internal'), ('external', 'External')], default='internal')
     external_abstract_url = models.URLField(max_length=500, blank=True)
@@ -197,6 +215,33 @@ class Event(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def has_tiered_fees(self):
+        """True when the attendee is offered a choice of tier at registration."""
+        return self.undergraduate_enabled or self.graduate_enabled
+
+    def is_tier_enabled(self, student_status):
+        if student_status == 'undergraduate':
+            return self.undergraduate_enabled
+        if student_status == 'graduate':
+            return self.graduate_enabled
+        # PI / non-academic is the standard tier and always available.
+        return student_status == 'pi_non_academic'
+
+    def fee_for(self, student_status):
+        """Registration fee for a student status.
+
+        Every price check goes through here so the amount charged, the amount
+        validated and the amount displayed cannot drift apart. A tier that is
+        not enabled falls back to the standard fee rather than erroring, so a
+        tier switched off after someone registered still has a defined price.
+        """
+        if student_status == 'undergraduate' and self.undergraduate_enabled:
+            return self.registration_fee_undergraduate or 0
+        if student_status == 'graduate' and self.graduate_enabled:
+            return self.registration_fee_graduate or 0
+        return self.registration_fee or 0
 
     @property
     def organizers_en(self):

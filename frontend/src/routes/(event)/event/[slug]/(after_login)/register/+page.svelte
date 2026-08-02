@@ -23,7 +23,27 @@
     let { data, form } = $props();
 
     let event = data.event;
-    const isFreeEvent = event.registration_fee === null || event.registration_fee === 0;
+
+    // Mirrors Event.fee_for() on the server, which remains the authority: the
+    // backend recomputes the price from the stored tier before charging.
+    const feeForTier = (tier) => {
+        if (tier === 'undergraduate' && event.undergraduate_enabled) return event.registration_fee_undergraduate || 0;
+        if (tier === 'graduate' && event.graduate_enabled) return event.registration_fee_graduate || 0;
+        return event.registration_fee || 0;
+    };
+    const tierOptions = [
+        ...(event.undergraduate_enabled ? [{ value: 'undergraduate', label: m.eventRegister_tierUndergraduate() }] : []),
+        ...(event.graduate_enabled ? [{ value: 'graduate', label: m.eventRegister_tierGraduate() }] : []),
+        { value: 'pi_non_academic', label: m.eventRegister_tierPiNonAcademic() },
+    ];
+    let studentStatus = $state(tierOptions[0]?.value ?? 'pi_non_academic');
+    let selectedFee = $derived(feeForTier(studentStatus));
+
+    // With tiers enabled the event is only free if every offered tier is free,
+    // so the payment step is still reached when one tier costs money.
+    const isFreeEvent = event.has_tiered_fees
+        ? tierOptions.every(o => feeForTier(o.value) === 0)
+        : (event.registration_fee === null || event.registration_fee === 0);
     const startAtPaymentStep = data.startAtPaymentStep || false;
 
     // Stepper state and configuration
@@ -149,6 +169,7 @@
             disability: me?me.disability:'',
             dietary: me?me.dietary:'',
             invitation_code: '',
+            student_status: tierOptions[0]?.value ?? 'pi_non_academic',
         },
         extend: validator({ schema }),
         transform: (values) => ({
@@ -301,7 +322,7 @@
             // Open Toss payment
             await requestCardPayment({
                 customerKey: `user-${user?.id || 'anonymous'}`,
-                amount: event.registration_fee,
+                amount: selectedFee,
                 orderId: orderId,
                 orderName: event.name,
                 successUrl: `${window.location.origin}/payment/success`,
@@ -391,8 +412,14 @@
     }
 
     // Format registration fee
+    function formatFee(fee) {
+        if (!fee) return m.eventDetail_registrationFeeFree();
+        const amount = fee.toLocaleString('ko-KR', { maximumFractionDigits: 0 });
+        return languageTag() === 'ko' ? `${amount} 원` : `KRW ${amount}`;
+    }
+
     const formattedRegistrationFee = $derived(() => {
-        const fee = event.registration_fee || 0;
+        const fee = selectedFee;
         if (fee === 0) return m.eventDetail_registrationFeeFree();
         const formattedAmount = fee.toLocaleString('ko-KR', {maximumFractionDigits: 0});
         return languageTag() === 'ko' ? `${formattedAmount} 원` : `KRW ${formattedAmount}`;
@@ -407,7 +434,7 @@
                 if (container && !paypalButtonsRendered) {
                     renderPayPalButtons({
                         containerId: 'paypal-button-container',
-                        amount: event.registration_fee,
+                        amount: selectedFee,
                         onSuccess: handlePayPalSuccess,
                         onError: handlePayPalError,
                         onCancel: handlePayPalCancel,
@@ -539,6 +566,32 @@
                         </div>
                     {/if}
 
+                    {#if event.has_tiered_fees}
+                        <div class="mb-8 rounded-lg border border-gray-200 p-4">
+                            <p class="mb-1 font-medium text-gray-900">
+                                {m.eventRegister_selectTier()} <span class="text-red-500">*</span>
+                            </p>
+                            <p class="mb-4 text-sm text-gray-500">{m.eventRegister_selectTierHelp()}</p>
+                            <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                {#each tierOptions as option}
+                                    <label class="flex cursor-pointer items-start gap-3 rounded-lg border-2 p-3 transition-colors
+                                        {studentStatus === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
+                                        <input
+                                            type="radio"
+                                            name="student_status"
+                                            value={option.value}
+                                            bind:group={studentStatus}
+                                            class="mt-1 h-4 w-4"
+                                        />
+                                        <span>
+                                            <span class="block text-sm font-medium text-gray-900">{option.label}</span>
+                                            <span class="block text-sm text-gray-600">{formatFee(feeForTier(option.value))}</span>
+                                        </span>
+                                    </label>
+                                {/each}
+                            </div>
+                        </div>
+                    {/if}
                     <RegistrationForm data={$formData} errors={$errors} config={form_config} institution_resolved={data.user?.institution_resolved} bind:instituteDisplayName={instituteDisplayName} />
 
                     {#if data.questions.length > 0}

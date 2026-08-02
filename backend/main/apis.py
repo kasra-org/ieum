@@ -722,6 +722,20 @@ def update_event(request, event_id: int):
         event.capacity = data["capacity"]
     if "registration_fee" in data:
         event.registration_fee = int(data["registration_fee"]) if data["registration_fee"] not in (None, "") else None
+    if "undergraduate_enabled" in data:
+        event.undergraduate_enabled = data["undergraduate_enabled"] in (True, 'true', 'True', 'on', 1, '1')
+    if "registration_fee_undergraduate" in data:
+        event.registration_fee_undergraduate = (
+            int(data["registration_fee_undergraduate"])
+            if data["registration_fee_undergraduate"] not in (None, "") else None
+        )
+    if "graduate_enabled" in data:
+        event.graduate_enabled = data["graduate_enabled"] in (True, 'true', 'True', 'on', 1, '1')
+    if "registration_fee_graduate" in data:
+        event.registration_fee_graduate = (
+            int(data["registration_fee_graduate"])
+            if data["registration_fee_graduate"] not in (None, "") else None
+        )
     if "accepts_abstract" in data:
         event.accepts_abstract = as_bool(data["accepts_abstract"])
     if "published" in data:
@@ -826,7 +840,7 @@ def check_registration_status(request, event_id: int):
     # Check payment status if event has a fee
     # A registration is considered paid if there's at least one completed payment
     payment_status = None
-    if event.registration_fee and event.registration_fee > 0:
+    if event.fee_for(attendee.student_status) > 0:
         payments = PaymentHistory.objects.filter(attendee=attendee)
         if payments.filter(status='completed').exists():
             payment_status = 'completed'
@@ -1118,9 +1132,16 @@ def register_event(request, event_id: int):
             status=400,
         )
 
+    # Only accept a tier the event actually offers, otherwise someone could post
+    # 'undergraduate' at a event that does not discount it and pay the lower price.
+    student_status = data.get("student_status", "pi_non_academic")
+    if not event.is_tier_enabled(student_status):
+        student_status = 'pi_non_academic'
+
     attendee = Attendee.objects.create(
         user=user,
         event=event,
+        student_status=student_status,
         first_name=data.get("first_name", ""),
         middle_initial=data.get("middle_initial", ""),
         last_name=data.get("last_name", ""),
@@ -2696,8 +2717,9 @@ def confirm_toss_payment(request, data: TossPaymentConfirmSchema):
         )
 
     # Verify amount matches event registration fee
-    if data.amount != event.registration_fee:
-        logger.warning(f"Amount mismatch: expected {event.registration_fee}, got {data.amount}")
+    expected_fee = event.fee_for(attendee.student_status)
+    if data.amount != expected_fee:
+        logger.warning(f"Amount mismatch: expected {expected_fee}, got {data.amount}")
         return api.create_response(
             request,
             {"code": "amount_mismatch", "message": "Payment amount does not match registration fee."},
@@ -2927,8 +2949,8 @@ def create_paypal_order(request, data: PayPalCreateOrderSchema):
             status=400,
         )
 
-    # Verify amount matches event registration fee
-    if data.amount != event.registration_fee:
+    # Verify amount matches the fee for this attendee's tier
+    if data.amount != event.fee_for(attendee.student_status):
         return api.create_response(
             request,
             {"code": "amount_mismatch", "message": "Payment amount does not match registration fee."},
@@ -3195,7 +3217,7 @@ def capture_paypal_order(request, data: PayPalCaptureOrderSchema):
     # PaymentHistory.amount is KRW everywhere else (Toss, NicePay); the PayPal
     # charge is the USD conversion of exactly this fee, so store the fee rather
     # than a USD figure truncated to whole dollars.
-    amount = event.registration_fee
+    amount = event.fee_for(attendee.student_status)
     paid_usd = capture_data.get("amount", {}).get("value")
 
     # Create PaymentHistory record
@@ -3291,7 +3313,7 @@ def prepare_nicepay_payment(request, data: NicePayPrepareSchema):
             status=400,
         )
 
-    amount = event.registration_fee or 0
+    amount = event.fee_for(attendee.student_status)
     if amount <= 0:
         return api.create_response(
             request,

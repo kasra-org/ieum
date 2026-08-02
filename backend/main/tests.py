@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from main import nicepay
-from main.models import Attendee, Event, NicePayTransaction, PaymentHistory, PaymentSettings
+from main.models import Attendee, Institution, EmailTemplate, Event, NicePayTransaction, PaymentHistory, PaymentSettings
 
 User = get_user_model()
 
@@ -520,3 +520,101 @@ class GuestPasswordResetTests(TestCase):
             data={'password': 'BrandNewPw!987'}, content_type='application/json',
         )
         self.assertEqual(response.status_code, 404)
+
+
+@nicepay_settings
+class TieredRegistrationFeeTests(TestCase):
+    """Per-tier pricing. The server must price from the stored tier, never the client."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='stud@example.com', email='stud@example.com', password='pw12345!aA',
+        )
+        self.event = Event.objects.create(
+            name='Tiered Event', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100,
+            registration_fee=200000,
+            undergraduate_enabled=True, registration_fee_undergraduate=50000,
+            graduate_enabled=True, registration_fee_graduate=100000,
+        )
+        # Registration sends a confirmation mail, so the template must exist.
+        self.event.email_template_registration = EmailTemplate.objects.create(
+            subject='Registered', body='Thanks',
+        )
+        self.event.save()
+        self.client.force_login(self.user)
+
+    def test_fee_per_tier(self):
+        self.assertEqual(self.event.fee_for('undergraduate'), 50000)
+        self.assertEqual(self.event.fee_for('graduate'), 100000)
+        self.assertEqual(self.event.fee_for('pi_non_academic'), 200000)
+
+    def test_unknown_tier_falls_back_to_standard_not_free(self):
+        self.assertEqual(self.event.fee_for('nonsense'), 200000)
+
+    def test_disabled_tier_is_charged_the_standard_fee(self):
+        self.event.undergraduate_enabled = False
+        self.event.save()
+        self.assertEqual(self.event.fee_for('undergraduate'), 200000)
+
+    def test_event_without_tiers_charges_everyone_the_same(self):
+        plain = Event.objects.create(
+            name='Flat', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, registration_fee=30000,
+        )
+        self.assertFalse(plain.has_tiered_fees)
+        for tier in ('undergraduate', 'graduate', 'pi_non_academic'):
+            self.assertEqual(plain.fee_for(tier), 30000)
+
+    def register(self, **extra):
+        payload = {
+            'first_name': 'Stu', 'last_name': 'Dent', 'nationality': 1,
+            'institute': Institution.objects.create(name_en='PNU').id,
+            'job_title': 'Student',
+        }
+        payload.update(extra)
+        return self.client.post(
+            f'/api/event/{self.event.id}/register',
+            data=payload, content_type='application/json',
+        )
+
+    def test_registering_records_the_reported_tier(self):
+        self.register(student_status='graduate')
+        attendee = Attendee.objects.get(event=self.event, user=self.user)
+        self.assertEqual(attendee.student_status, 'graduate')
+        self.assertEqual(self.event.fee_for(attendee.student_status), 100000)
+
+    def test_tier_the_event_does_not_offer_is_refused(self):
+        self.event.undergraduate_enabled = False
+        self.event.save()
+        # Claiming a tier that is switched off must not buy the lower price.
+        self.register(student_status='undergraduate')
+        attendee = Attendee.objects.get(event=self.event, user=self.user)
+        self.assertEqual(attendee.student_status, 'pi_non_academic')
+        self.assertEqual(self.event.fee_for(attendee.student_status), 200000)
+
+    @patch('main.apis.requests.post')
+    def test_payment_below_the_tier_price_is_rejected(self, mock_post):
+        self.register(student_status='graduate')
+        response = self.client.post(
+            '/api/payment/confirm',
+            data={'paymentKey': 'k', 'orderId': 'o', 'amount': 50000, 'eventId': self.event.id},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'amount_mismatch')
+        mock_post.assert_not_called()
+
+    @patch('main.apis.requests.post')
+    def test_payment_matching_the_tier_price_is_accepted(self, mock_post):
+        mock_post.return_value.ok = True
+        mock_post.return_value.json.return_value = {'method': '카드'}
+        self.register(student_status='graduate')
+        response = self.client.post(
+            '/api/payment/confirm',
+            data={'paymentKey': 'k', 'orderId': 'o', 'amount': 100000, 'eventId': self.event.id},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        payment = PaymentHistory.objects.get(event=self.event)
+        self.assertEqual(payment.amount, 100000)

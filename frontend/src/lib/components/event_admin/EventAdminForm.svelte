@@ -21,6 +21,10 @@
         deadline: '',
         capacity: 0,
         registration_fee: null,
+        undergraduate_enabled: false,
+        registration_fee_undergraduate: null,
+        graduate_enabled: false,
+        registration_fee_graduate: null,
         invitation_code: '',
         accepts_abstract: false,
         abstract_submission_type: 'internal',
@@ -29,6 +33,11 @@
         capacity_abstract: 0,
         max_votes: 2,
     }) } = $props();
+
+    // Local so the price field can appear only when its tier is enabled; the
+    // checkboxes still post their own values.
+    let undergraduate_enabled = $state(data.undergraduate_enabled ?? false);
+    let graduate_enabled = $state(data.graduate_enabled ?? false);
 
     // Create local reactive state for properties to enable two-way binding
     let description = $state(data.description ?? '');
@@ -160,9 +169,41 @@
     <span class="text-sm">* {m.eventForm_registrationCapacityHelp()}</span>
 </div>
 <div class="mb-6">
-    <Label for="registration_fee" class="block mb-2">{m.eventForm_registrationFee()}</Label>
+    <Label for="registration_fee" class="block mb-2">{m.eventForm_registrationFeeStandard()}</Label>
     <Input type="number" id="registration_fee" name="registration_fee" value={data.registration_fee} step="1" min="0" placeholder="0" />
-    <span class="text-sm">* {m.eventForm_registrationFeeHelp()}</span>
+    <span class="text-sm">* {m.eventForm_registrationFeeStandardHelp()}</span>
+</div>
+<div class="mb-6 rounded-lg border border-gray-200 p-4">
+    <p class="mb-1 text-sm font-medium">{m.eventForm_studentTiers()}</p>
+    <p class="mb-4 text-sm text-gray-500">{m.eventForm_studentTiersHelp()}</p>
+
+    <div class="mb-4">
+        <label class="flex cursor-pointer items-center gap-2">
+            <input type="checkbox" name="undergraduate_enabled" bind:checked={undergraduate_enabled}
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <span class="text-sm font-medium">{m.eventForm_tierUndergraduate()}</span>
+        </label>
+        {#if undergraduate_enabled}
+            <div class="mt-2 ps-6">
+                <Input type="number" id="registration_fee_undergraduate" name="registration_fee_undergraduate"
+                    value={data.registration_fee_undergraduate} step="1" min="0" placeholder="0" />
+            </div>
+        {/if}
+    </div>
+
+    <div>
+        <label class="flex cursor-pointer items-center gap-2">
+            <input type="checkbox" name="graduate_enabled" bind:checked={graduate_enabled}
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <span class="text-sm font-medium">{m.eventForm_tierGraduate()}</span>
+        </label>
+        {#if graduate_enabled}
+            <div class="mt-2 ps-6">
+                <Input type="number" id="registration_fee_graduate" name="registration_fee_graduate"
+                    value={data.registration_fee_graduate} step="1" min="0" placeholder="0" />
+            </div>
+        {/if}
+    </div>
 </div>
 <div class="mb-6">
     <Label for="invitation_code" class="block mb-2">{m.eventForm_invitationCode()}</Label>
