@@ -251,3 +251,23 @@ export function getPresentationTypeLabel(abstract, m) {
         default: return m.presentationType_poster();
     }
 }
+
+/**
+ * Today's date (YYYY-MM-DD) in the given IANA time zone.
+ *
+ * The backend decides whether on-site registration is open using the business
+ * time zone, so anything gating the same window has to agree. Using UTC here
+ * put the two out of step for the hours where the local date is ahead of UTC:
+ * on the event's first morning in Seoul the page turned walk-ins away even
+ * though the API would have accepted them.
+ */
+export function todayInTimeZone(timeZone = 'Asia/Seoul') {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).formatToParts(new Date());
+    const part = (type) => parts.find((p) => p.type === type)?.value;
+    return `${part('year')}-${part('month')}-${part('day')}`;
+}
