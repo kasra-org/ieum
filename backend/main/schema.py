@@ -43,6 +43,11 @@ class GuestUserCreateSchema(Schema):
     institute: Optional[int] = None
 
 
+class GuestPasswordSchema(Schema):
+    """Direct password set for an admin-created guest account"""
+    password: str
+
+
 class InstitutionCreateSchema(Schema):
     name_en: str
     name_ko: str = ""

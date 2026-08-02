@@ -255,6 +255,19 @@ export const actions = {
             throw error(response.status, response.data);
         }
     },
+    'set_guest_password': async ({ cookies, request }) => {
+        let formdata = await request.formData();
+        const response = await post(
+            `api/admin/user/${formdata.get('user_id')}/set-password`,
+            { password: formdata.get('password') },
+            cookies,
+        );
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            throw error(response.status, response.data);
+        }
+    },
     'add_guest_user': async ({ cookies, request }) => {
         let formdata = await request.formData();
         const institute = formdata.get('institute');

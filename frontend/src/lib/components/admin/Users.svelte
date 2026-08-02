@@ -1,7 +1,7 @@
 <script>
     import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
     import { Modal, Button, Alert } from '$lib/components/ui';
-    import { UserPen } from '@lucide/svelte';
+    import { KeyRound, UserPen } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
@@ -53,6 +53,36 @@
         guest.last_name = stamp.slice(-4).toUpperCase();
         guest.password = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
     }
+
+    // Direct password set, guests only (no email round-trip).
+    let pw_modal = $state(false);
+    let pw_target = $state(null);
+    let pw_value = $state('');
+    let pw_error = $state('');
+    let pw_done = $state(false);
+
+    const openPasswordModal = (user) => {
+        pw_target = user;
+        pw_value = '';
+        pw_error = '';
+        pw_done = false;
+        pw_modal = true;
+    };
+
+    function generatePassword() {
+        pw_value = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+    }
+
+    const afterPasswordSet = () => {
+        return async ({ result }) => {
+            if (result.type === "success") {
+                pw_done = true;
+                pw_error = '';
+            } else {
+                pw_error = result.error?.message || 'An error occurred';
+            }
+        }
+    };
 
     const afterGuestCreate = () => {
         return async ({ result, update }) => {
@@ -134,10 +164,15 @@
                     </form>
                 </TableBodyCell>
                 <TableBodyCell>
-                    <div class="flex justify-center">
-                        <Button color="none" size="none" onclick={() => openUserEditModal(user)}>
+                    <div class="flex justify-center gap-2">
+                        <Button color="none" size="none" onclick={() => openUserEditModal(user)} title={m.admin_editUser()}>
                             <UserPen class="w-5 h-5" />
                         </Button>
+                        {#if user.is_guest}
+                            <Button color="none" size="none" onclick={() => openPasswordModal(user)} title={m.admin_guestUser_setPassword()}>
+                                <KeyRound class="w-5 h-5" />
+                            </Button>
+                        {/if}
                     </div>
                 </TableBodyCell>
             </TableBodyRow>
@@ -149,6 +184,48 @@
         {/if}
     </TableBody>
 </TableSearch>
+
+<Modal id="guest_password_modal" size="sm" title={m.admin_guestUser_setPassword()} bind:open={pw_modal} outsideclose>
+    {#if pw_done}
+        <Alert color="green" class="mb-4">{m.admin_guestUser_passwordUpdated()}</Alert>
+        <div class="mb-6 rounded-lg bg-gray-50 p-4 text-sm">
+            <div class="flex justify-between py-1">
+                <span class="text-gray-600">{m.admin_tableEmail()}</span>
+                <span class="font-mono font-medium">{pw_target?.email}</span>
+            </div>
+            <div class="flex justify-between py-1">
+                <span class="text-gray-600">{m.admin_guestUser_password()}</span>
+                <span class="font-mono font-medium">{pw_value}</span>
+            </div>
+        </div>
+        <p class="mb-6 text-sm text-gray-500">{m.admin_guestUser_passwordOnce()}</p>
+        <div class="flex justify-center">
+            <Button color="primary" onclick={() => (pw_modal = false)}>{m.admin_guestUser_close()}</Button>
+        </div>
+    {:else}
+        <form method="post" action="?/set_guest_password" use:enhance={afterPasswordSet}>
+            <input type="hidden" name="user_id" value={pw_target?.id} />
+            <p class="mb-4 text-sm text-gray-600">
+                {m.admin_guestUser_setPasswordFor()} <span class="font-medium">{pw_target?.email}</span>
+            </p>
+            <div class="mb-4">
+                <div class="mb-2 flex items-center justify-between">
+                    <label for="pw_value" class="text-sm font-medium">{m.admin_guestUser_password()} <span class="text-red-500">*</span></label>
+                    <Button color="alternative" size="xs" type="button" onclick={generatePassword}>{m.admin_guestUser_generate()}</Button>
+                </div>
+                <input id="pw_value" name="password" type="text" required bind:value={pw_value}
+                    class="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 font-mono text-sm" />
+            </div>
+            {#if pw_error}
+                <Alert color="red" class="mb-4">{pw_error}</Alert>
+            {/if}
+            <div class="flex justify-center gap-2">
+                <Button color="primary" type="submit">{m.admin_guestUser_setPasswordSubmit()}</Button>
+                <Button color="alternative" type="button" onclick={() => (pw_modal = false)}>{m.organizers_cancel()}</Button>
+            </div>
+        </form>
+    {/if}
+</Modal>
 
 <Modal id="guest_user_modal" size="lg" title={m.admin_guestUser_title()} bind:open={guest_modal} outsideclose>
     {#if guest_created}

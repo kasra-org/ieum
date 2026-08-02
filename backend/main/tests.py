@@ -448,3 +448,75 @@ class GuestUserTests(TestCase):
 
     def test_regular_users_are_not_marked_as_guests(self):
         self.assertFalse(self.plain.is_guest)
+
+
+class GuestPasswordResetTests(TestCase):
+    """Direct password set, restricted to guest accounts."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username='admin2@example.com', email='admin2@example.com',
+            password='pw12345!aA', is_staff=True,
+        )
+        self.guest = User.objects.create_user(
+            username='g@example.com', email='g@example.com',
+            password='OldGuestPw!234', is_guest=True,
+        )
+        self.real = User.objects.create_user(
+            username='real@example.com', email='real@example.com', password='RealPw!2345',
+        )
+        self.superuser = User.objects.create_superuser(
+            username='root@example.com', email='root@example.com', password='RootPw!2345',
+        )
+
+    def set_password(self, user, password='BrandNewPw!987'):
+        return self.client.post(
+            f'/api/admin/user/{user.id}/set-password',
+            data={'password': password}, content_type='application/json',
+        )
+
+    def test_staff_can_set_a_guest_password(self):
+        self.client.force_login(self.staff)
+        response = self.set_password(self.guest)
+        self.assertEqual(response.status_code, 200)
+
+        self.client.logout()
+        self.assertTrue(self.client.login(username='g@example.com', password='BrandNewPw!987'))
+
+    def test_real_account_password_cannot_be_set_directly(self):
+        self.client.force_login(self.staff)
+        response = self.set_password(self.real)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'not_a_guest')
+        self.real.refresh_from_db()
+        self.assertTrue(self.real.check_password('RealPw!2345'))
+
+    def test_superuser_cannot_be_taken_over(self):
+        self.client.force_login(self.staff)
+        response = self.set_password(self.superuser)
+        self.assertEqual(response.status_code, 400)
+        self.superuser.refresh_from_db()
+        self.assertTrue(self.superuser.check_password('RootPw!2345'))
+
+    def test_non_staff_cannot_set_passwords(self):
+        self.client.force_login(self.real)
+        response = self.set_password(self.guest)
+        self.assertEqual(response.status_code, 403)
+        self.guest.refresh_from_db()
+        self.assertTrue(self.guest.check_password('OldGuestPw!234'))
+
+    def test_weak_password_is_rejected(self):
+        self.client.force_login(self.staff)
+        response = self.set_password(self.guest, password='123')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'weak_password')
+        self.guest.refresh_from_db()
+        self.assertTrue(self.guest.check_password('OldGuestPw!234'))
+
+    def test_unknown_user_is_404(self):
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            '/api/admin/user/999999/set-password',
+            data={'password': 'BrandNewPw!987'}, content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 404)

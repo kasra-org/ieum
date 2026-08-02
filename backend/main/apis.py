@@ -1723,6 +1723,53 @@ def add_guest_user(request, data: GuestUserCreateSchema):
     return user
 
 
+@api.post("/admin/user/{user_id}/set-password", response=MessageSchema)
+@ensure_staff
+def set_guest_password(request, user_id: int, data: GuestPasswordSchema):
+    """
+    Set a guest account's password directly, without an email round-trip.
+
+    Deliberately limited to guest accounts. Letting an admin silently rewrite
+    any user's password would be an account-takeover path - including against a
+    superuser - so real accounts keep the emailed reset flow.
+    """
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return api.create_response(
+            request,
+            {"code": "not_found", "message": "User not found."},
+            status=404,
+        )
+
+    if not user.is_guest:
+        logger.warning(
+            f"Refused direct password set on non-guest user {user_id} by {request.user.id}"
+        )
+        return api.create_response(
+            request,
+            {"code": "not_a_guest",
+             "message": "Only guest accounts can have their password set directly."},
+            status=400,
+        )
+
+    try:
+        validate_password(data.password, user=user)
+    except DjangoValidationError as e:
+        return api.create_response(
+            request,
+            {"code": "weak_password", "message": " ".join(e.messages)},
+            status=400,
+        )
+
+    # Rotates the session auth hash, so any existing guest session is dropped.
+    user.set_password(data.password)
+    user.save()
+
+    logger.info(f"Guest password set by {request.user.id} for {user.email}")
+    return {"code": "success", "message": "Password updated."}
+
+
 @api.post("/admin/user/{user_id}/toggle-active", response=MessageSchema)
 @ensure_staff
 def toggle_user_active(request, user_id: int):
