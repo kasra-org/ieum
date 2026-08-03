@@ -659,6 +659,15 @@
                         <!-- Personal Information -->
                         <h3 class="text-lg font-semibold text-gray-900 mb-4">{m.eventRegister_personalInfo()}</h3>
                         <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {#if event.has_tiered_fees}
+                                <div>
+                                    <dt class="text-sm font-medium text-gray-500">{m.eventRegister_selectTier()}</dt>
+                                    <dd class="mt-1 text-sm text-gray-900">
+                                        {tierOptions.find(o => o.value === studentStatus)?.label ?? ''}
+                                        <span class="text-gray-500">({formatFee(selectedFee)})</span>
+                                    </dd>
+                                </div>
+                            {/if}
                             {#if hasEnglish}
                                 <div>
                                     <dt class="text-sm font-medium text-gray-500">{m.profile_firstName()}</dt>

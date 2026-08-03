@@ -83,8 +83,10 @@ class Attendee(models.Model):
     student_status = models.CharField(
         max_length=20,
         choices=[
-            ('undergraduate', 'Undergraduate'),
-            ('graduate', 'Graduate'),
+            # Wording matches the UI, since these labels reach attendees through
+            # get_student_status_display() in the confirmation email.
+            ('undergraduate', 'Undergraduate student'),
+            ('graduate', 'Graduate student / Postdoc'),
             ('pi_non_academic', 'PI / Non-academic'),
         ],
         default='pi_non_academic',
@@ -123,8 +125,10 @@ class OnSiteAttendee(models.Model):
     student_status = models.CharField(
         max_length=20,
         choices=[
-            ('undergraduate', 'Undergraduate'),
-            ('graduate', 'Graduate'),
+            # Wording matches the UI, since these labels reach attendees through
+            # get_student_status_display() in the confirmation email.
+            ('undergraduate', 'Undergraduate student'),
+            ('graduate', 'Graduate student / Postdoc'),
             ('pi_non_academic', 'PI / Non-academic'),
         ],
         default='pi_non_academic',
