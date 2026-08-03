@@ -36,8 +36,19 @@
         ...(event.graduate_enabled ? [{ value: 'graduate', label: m.eventRegister_tierGraduate() }] : []),
         { value: 'pi_non_academic', label: m.eventRegister_tierPiNonAcademic() },
     ];
-    let studentStatus = $state(tierOptions[0]?.value ?? 'pi_non_academic');
-    let selectedFee = $derived(feeForTier(studentStatus));
+    // Someone returning to pay already has a tier on record; defaulting to the
+    // first option instead showed them another tier's price - and "free" when
+    // that tier had no price set.
+    let studentStatus = $state(
+        data.my_attendee?.student_status ?? tierOptions[0]?.value ?? 'pi_non_academic'
+    );
+    // Server-computed for a returning payer, so the amount cannot drift from
+    // what the backend will validate.
+    let selectedFee = $derived(
+        startAtPaymentStep && data.my_attendee
+            ? data.my_attendee.registration_fee
+            : feeForTier(studentStatus)
+    );
 
     // With tiers enabled the event is only free if every offered tier is free,
     // so the payment step is still reached when one tier costs money.
@@ -169,7 +180,9 @@
             disability: me?me.disability:'',
             dietary: me?me.dietary:'',
             invitation_code: '',
-            student_status: tierOptions[0]?.value ?? 'pi_non_academic',
+            // Same source as `studentStatus`: felte seeds the inputs from here, so
+            // a different default would visibly override the bound selection.
+            student_status: data.my_attendee?.student_status ?? tierOptions[0]?.value ?? 'pi_non_academic',
         },
         extend: validator({ schema }),
         transform: (values) => ({

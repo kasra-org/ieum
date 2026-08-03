@@ -169,19 +169,12 @@
     <Input type="number" id="capacity" name="capacity" value={data.capacity} />
     <span class="text-sm">* {m.eventForm_registrationCapacityHelp()}</span>
 </div>
-<div class="mb-6">
-    <Label for="registration_fee" class="block mb-2">{m.eventForm_registrationFeeStandard()}</Label>
-    <Input type="number" id="registration_fee" name="registration_fee" value={data.registration_fee} step="1" min="0" placeholder="0" />
-    <span class="text-sm">* {m.eventForm_registrationFeeStandardHelp()}</span>
-</div>
-<div class="mb-6">
-    <Label for="onsite_registration_fee" class="block mb-2">{m.eventForm_onsiteRegistrationFee()}</Label>
-    <Input type="number" id="onsite_registration_fee" name="onsite_registration_fee" value={data.onsite_registration_fee} step="1" min="0" placeholder="0" />
-    <span class="text-sm">* {m.eventForm_onsiteRegistrationFeeHelp()}</span>
-</div>
+<!-- All three categories priced in one block. PI/non-academic used to sit in a
+     separate "standard fee" field, which made it easy to price the student tiers
+     and leave PI at zero without noticing. -->
 <div class="mb-6 rounded-lg border border-gray-200 p-4">
-    <p class="mb-1 text-sm font-medium">{m.eventForm_studentTiers()}</p>
-    <p class="mb-4 text-sm text-gray-500">{m.eventForm_studentTiersHelp()}</p>
+    <p class="mb-1 text-sm font-medium">{m.eventForm_registrationFees()}</p>
+    <p class="mb-4 text-sm text-gray-500">{m.eventForm_registrationFeesHelp()}</p>
 
     <div class="mb-4">
         <label class="flex cursor-pointer items-center gap-2">
@@ -197,7 +190,7 @@
         {/if}
     </div>
 
-    <div>
+    <div class="mb-4">
         <label class="flex cursor-pointer items-center gap-2">
             <input type="checkbox" name="graduate_enabled" bind:checked={graduate_enabled}
                 class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
@@ -210,7 +203,21 @@
             </div>
         {/if}
     </div>
+
+    <div>
+        <p class="mb-2 text-sm font-medium">{m.eventForm_tierPiNonAcademic()}</p>
+        <div class="ps-6">
+            <Input type="number" id="registration_fee" name="registration_fee" value={data.registration_fee} step="1" min="0" placeholder="0" />
+            <p class="mt-1 text-sm text-gray-500">{m.eventForm_tierPiNonAcademicHelp()}</p>
+        </div>
+    </div>
 </div>
+<div class="mb-6">
+    <Label for="onsite_registration_fee" class="block mb-2">{m.eventForm_onsiteRegistrationFee()}</Label>
+    <Input type="number" id="onsite_registration_fee" name="onsite_registration_fee" value={data.onsite_registration_fee} step="1" min="0" placeholder="0" />
+    <span class="text-sm">* {m.eventForm_onsiteRegistrationFeeHelp()}</span>
+</div>
+
 <div class="mb-6">
     <Label for="invitation_code" class="block mb-2">{m.eventForm_invitationCode()}</Label>
     <Input type="text" id="invitation_code" name="invitation_code" bind:value={invitation_code} oninput={(e) => { invitation_code = e.target.value.toUpperCase(); }} placeholder="" class="uppercase" />

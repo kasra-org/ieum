@@ -260,8 +260,9 @@ def get_registration_history(request):
             attendee_name = f"{attendee_name} ({attendee.korean_name})" if attendee_name else attendee.korean_name
         attendee_institute = attendee.institute or ''
 
-        # Determine payment status
-        registration_fee = event.registration_fee or 0
+        # Determine payment status. Priced from this attendee's tier, otherwise a
+        # student sees the standard fee in their registration history.
+        registration_fee = event.fee_for(attendee.student_status)
         if registration_fee == 0:
             payment_status = 'free'
         else:

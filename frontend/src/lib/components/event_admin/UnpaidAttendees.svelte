@@ -5,7 +5,7 @@
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
-    import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
+    import { getDisplayInstitute, getDisplayName, getStudentStatusLabel } from '$lib/utils.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
@@ -25,6 +25,7 @@
                 email: a.user?.email || a.user_email || '',
                 institute: getDisplayInstitute(a),
                 registered_at: a.registered_at,
+                student_status: a.student_status,
                 // Fields the edit form binds to
                 first_name: a.first_name,
                 middle_initial: a.middle_initial,
@@ -172,6 +173,7 @@
             </TableHeadCell>
             <TableHeadCell class="w-1">{m.unpaidAttendees_id()}</TableHeadCell>
             <TableHeadCell>{m.unpaidAttendees_name()}</TableHeadCell>
+            <TableHeadCell>{m.attendees_tier()}</TableHeadCell>
             <TableHeadCell>{m.unpaidAttendees_email()}</TableHeadCell>
             <TableHeadCell>{m.unpaidAttendees_institute()}</TableHeadCell>
             <TableHeadCell>{m.unpaidAttendees_registeredAt()}</TableHeadCell>
@@ -193,6 +195,7 @@
                     </TableBodyCell>
                     <TableBodyCell>{row.nametag_id}</TableBodyCell>
                     <TableBodyCell>{row.name}</TableBodyCell>
+                    <TableBodyCell>{getStudentStatusLabel(row.student_status, m)}</TableBodyCell>
                     <TableBodyCell>{row.email}</TableBodyCell>
                     <TableBodyCell>{row.institute}</TableBodyCell>
                     <TableBodyCell>{formatDate(row.registered_at)}</TableBodyCell>
@@ -215,7 +218,7 @@
             {/each}
             {#if filtered.length === 0}
                 <TableBodyRow>
-                    <TableBodyCell colspan="8" class="text-center">{m.unpaidAttendees_noRecords()}</TableBodyCell>
+                    <TableBodyCell colspan="9" class="text-center">{m.unpaidAttendees_noRecords()}</TableBodyCell>
                 </TableBodyRow>
             {/if}
         </TableBody>

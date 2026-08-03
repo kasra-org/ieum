@@ -271,3 +271,12 @@ export function todayInTimeZone(timeZone = 'Asia/Seoul') {
     const part = (type) => parts.find((p) => p.type === type)?.value;
     return `${part('year')}-${part('month')}-${part('day')}`;
 }
+
+/** Human label for an attendee's registration category. */
+export function getStudentStatusLabel(status, m) {
+    switch (status) {
+        case 'undergraduate': return m.eventRegister_tierUndergraduate();
+        case 'graduate': return m.eventRegister_tierGraduate();
+        default: return m.eventRegister_tierPiNonAcademic();
+    }
+}

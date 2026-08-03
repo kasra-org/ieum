@@ -9,6 +9,7 @@
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
+    import { getStudentStatusLabel } from '$lib/utils.js';
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
@@ -67,6 +68,7 @@
             const row = {
                 id: item.id,
                 attendee_nametag_id: item.attendee_nametag_id,
+                student_status: item.student_status,
                 name: getDisplayName(item),
                 first_name: item.first_name,
                 middle_initial: item.middle_initial,
@@ -663,6 +665,7 @@
         <TableHeadCell>{m.attendees_id()}</TableHeadCell>
         <TableHeadCell class="w-1">{m.attendees_attended()}</TableHeadCell>
         <TableHeadCell>{m.attendees_name()}</TableHeadCell>
+        <TableHeadCell>{m.attendees_tier()}</TableHeadCell>
         <TableHeadCell>{m.attendees_email()}</TableHeadCell>
         <TableHeadCell>{m.attendees_nationality()}</TableHeadCell>
         <TableHeadCell>{m.attendees_institute()}</TableHeadCell>
@@ -695,6 +698,7 @@
                     </button>
                 </TableBodyCell>
                 <TableBodyCell>{row.name}</TableBodyCell>
+                <TableBodyCell>{getStudentStatusLabel(row.student_status, m)}</TableBodyCell>
                 <TableBodyCell>{row.email}</TableBodyCell>
                 <TableBodyCell>{stringify_nationality(row.nationality)}</TableBodyCell>
                 <TableBodyCell>{row.institute}</TableBodyCell>

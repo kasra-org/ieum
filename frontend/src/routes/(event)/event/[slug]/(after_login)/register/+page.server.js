@@ -16,11 +16,18 @@ export async function load({ parent, params, cookies }) {
         // Check if already registered
         if (rtn.registered) {
             // If registered but payment is pending, allow access for payment
-            const hasPendingPayment = rtn.event.registration_fee > 0 && rtn.payment_status === 'pending';
+            // payment_status is already computed from this attendee's tier, so
+            // checking the standard fee as well would strand anyone whose tier
+            // costs money on an event whose standard fee is 0.
+            const hasPendingPayment = rtn.payment_status === 'pending';
             if (hasPendingPayment) {
                 // Set flag to start at payment step
                 rtn.startAtPaymentStep = true;
                 rtn.questions = [];
+                // The payment step must price from the tier this person actually
+                // registered under, not from whatever the selector defaults to.
+                const mine = await get(`api/event/${params.slug}/registration`, cookies);
+                rtn.my_attendee = mine.ok && mine.status === 200 ? mine.data : null;
                 return rtn;
             }
             // If fully registered, redirect to event page

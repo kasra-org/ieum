@@ -534,6 +534,7 @@
         <TableHeadCell>{m.onsiteAttendees_id()}</TableHeadCell>
         <TableHeadCell class="w-1">{m.onsiteAttendees_confirmed()}</TableHeadCell>
         <TableHeadCell>{m.onsiteAttendees_name()}</TableHeadCell>
+        <TableHeadCell>{m.attendees_tier()}</TableHeadCell>
         <TableHeadCell>{m.onsiteAttendees_email()}</TableHeadCell>
         <TableHeadCell>{m.onsiteAttendees_institute()}</TableHeadCell>
         <TableHeadCell>{m.onsiteAttendees_jobTitle()}</TableHeadCell>
@@ -556,6 +557,8 @@
                     </button>
                 </TableBodyCell>
                 <TableBodyCell>{row.name}</TableBodyCell>
+                <!-- Walk-ins have no student tier; they pay the single on-site fee. -->
+                <TableBodyCell><span class="text-gray-500">{m.attendees_tierOnsite()}</span></TableBodyCell>
                 <TableBodyCell>{row.email}</TableBodyCell>
                 <TableBodyCell>{row.institute}</TableBodyCell>
                 <TableBodyCell>{row.job_title}</TableBodyCell>
