@@ -2,7 +2,7 @@ import { redirect } from '@sveltejs/kit';
 import { todayInTimeZone } from '$lib/utils.js';
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ parent, params }) {
+export async function load({ parent, params, url }) {
     const data = await parent();
     const event = data.event;
 
@@ -11,7 +11,9 @@ export async function load({ parent, params }) {
         throw redirect(303, `/event/${params.slug}`);
     }
 
+    const fee = Number(url.searchParams.get('fee'));
     return {
-        onsiteid: params.onsiteid
+        onsiteid: params.onsiteid,
+        onsite_fee: Number.isFinite(fee) && fee > 0 ? fee : 0,
     };
 }

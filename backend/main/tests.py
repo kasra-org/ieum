@@ -781,6 +781,50 @@ class OnSiteRegistrationFeeTests(TestCase):
             content_type='application/json',
         )
 
+    def test_onsite_tiers_are_priced_separately_from_standard(self):
+        self.event.undergraduate_enabled = True
+        self.event.graduate_enabled = True
+        self.event.registration_fee = 200000
+        self.event.registration_fee_undergraduate = 50000
+        self.event.onsite_registration_fee = 250000
+        self.event.onsite_registration_fee_undergraduate = 80000
+        self.event.save()
+        # Same categories, different prices.
+        self.assertEqual(self.event.fee_for('undergraduate'), 50000)
+        self.assertEqual(self.event.onsite_fee_for('undergraduate'), 80000)
+        self.assertEqual(self.event.onsite_fee_for('pi_non_academic'), 250000)
+
+    def test_walkin_is_charged_their_category(self):
+        self.event.graduate_enabled = True
+        self.event.onsite_registration_fee = 250000
+        self.event.onsite_registration_fee_graduate = 180000
+        self.event.save()
+        response = self.client.post(
+            f'/api/event/{self.event.id}/onsite',
+            data={'code': 'TESTCD', 'name': 'W', 'email': 'g@example.com',
+                  'institute': 'P', 'job_title': 'D', 'student_status': 'graduate'},
+            content_type='application/json',
+        )
+        self.assertEqual(response.json()['fee'], 180000)
+        oa = OnSiteAttendee.objects.get(email='g@example.com')
+        self.assertEqual(oa.student_status, 'graduate')
+        self.assertEqual(oa.registration_fee, 180000)
+
+    def test_walkin_cannot_claim_a_category_the_event_does_not_offer(self):
+        self.event.undergraduate_enabled = False
+        self.event.onsite_registration_fee = 250000
+        self.event.onsite_registration_fee_undergraduate = 10000
+        self.event.save()
+        self.client.post(
+            f'/api/event/{self.event.id}/onsite',
+            data={'code': 'TESTCD', 'name': 'W', 'email': 'x@example.com',
+                  'institute': 'P', 'job_title': 'D', 'student_status': 'undergraduate'},
+            content_type='application/json',
+        )
+        oa = OnSiteAttendee.objects.get(email='x@example.com')
+        self.assertEqual(oa.student_status, 'pi_non_academic')
+        self.assertEqual(oa.registration_fee, 250000)
+
     def test_registration_reports_the_fee_owed(self):
         response = self.register()
         self.assertEqual(response.status_code, 200)

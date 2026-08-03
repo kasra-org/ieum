@@ -22,6 +22,8 @@
         capacity: 0,
         registration_fee: null,
         onsite_registration_fee: null,
+        onsite_registration_fee_undergraduate: null,
+        onsite_registration_fee_graduate: null,
         undergraduate_enabled: false,
         registration_fee_undergraduate: null,
         graduate_enabled: false,
@@ -212,10 +214,34 @@
         </div>
     </div>
 </div>
-<div class="mb-6">
-    <Label for="onsite_registration_fee" class="block mb-2">{m.eventForm_onsiteRegistrationFee()}</Label>
-    <Input type="number" id="onsite_registration_fee" name="onsite_registration_fee" value={data.onsite_registration_fee} step="1" min="0" placeholder="0" />
-    <span class="text-sm">* {m.eventForm_onsiteRegistrationFeeHelp()}</span>
+<div class="mb-6 rounded-lg border border-gray-200 p-4">
+    <p class="mb-1 text-sm font-medium">{m.eventForm_onsiteRegistrationFee()}</p>
+    <p class="mb-4 text-sm text-gray-500">{m.eventForm_onsiteRegistrationFeeHelp()}</p>
+
+    {#if undergraduate_enabled}
+        <div class="mb-4">
+            <p class="mb-2 text-sm font-medium">{m.eventForm_tierUndergraduate()}</p>
+            <div class="ps-6">
+                <Input type="number" id="onsite_registration_fee_undergraduate" name="onsite_registration_fee_undergraduate"
+                    value={data.onsite_registration_fee_undergraduate} step="1" min="0" placeholder="0" />
+            </div>
+        </div>
+    {/if}
+    {#if graduate_enabled}
+        <div class="mb-4">
+            <p class="mb-2 text-sm font-medium">{m.eventForm_tierGraduate()}</p>
+            <div class="ps-6">
+                <Input type="number" id="onsite_registration_fee_graduate" name="onsite_registration_fee_graduate"
+                    value={data.onsite_registration_fee_graduate} step="1" min="0" placeholder="0" />
+            </div>
+        </div>
+    {/if}
+    <div>
+        <p class="mb-2 text-sm font-medium">{m.eventForm_tierPiNonAcademic()}</p>
+        <div class="ps-6">
+            <Input type="number" id="onsite_registration_fee" name="onsite_registration_fee" value={data.onsite_registration_fee} step="1" min="0" placeholder="0" />
+        </div>
+    </div>
 </div>
 
 <div class="mb-6">

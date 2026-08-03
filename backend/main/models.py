@@ -119,12 +119,25 @@ class OnSiteAttendee(models.Model):
     # fee, confirming is also the acknowledgement that they paid, so it is what
     # completes the registration.
     is_confirmed = models.BooleanField(default=False)
+    # Same categories as normal registration; decides which on-site price applies.
+    student_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('undergraduate', 'Undergraduate'),
+            ('graduate', 'Graduate'),
+            ('pi_non_academic', 'PI / Non-academic'),
+        ],
+        default='pi_non_academic',
+    )
+
+    @property
+    def registration_fee(self):
+        return self.event.onsite_fee_for(self.student_status)
 
     @property
     def is_registration_complete(self):
         """A paid-for on-site registration only counts once staff confirm it."""
-        fee = self.event.onsite_registration_fee or 0
-        return self.is_confirmed if fee > 0 else True
+        return self.is_confirmed if self.registration_fee > 0 else True
 
     class Meta:
         unique_together = [['event', 'onsiteattendee_nametag_id']]
@@ -193,9 +206,12 @@ class Event(models.Model):
     # Standard price, and the one PI / non-academic attendees pay. The two tier
     # fields below override it for students; left blank, everyone pays this.
     registration_fee = models.IntegerField(blank=True, null=True)
-    # Charged to walk-ins at the desk. Blank or 0 means on-site registration is
-    # free and completes immediately.
+    # Charged to walk-ins at the desk. Same categories as normal registration
+    # (the enable flags below are shared), but priced separately. Blank or 0
+    # means on-site registration is free and completes immediately.
     onsite_registration_fee = models.IntegerField(blank=True, null=True)
+    onsite_registration_fee_undergraduate = models.IntegerField(blank=True, null=True)
+    onsite_registration_fee_graduate = models.IntegerField(blank=True, null=True)
     # Each student tier is offered only when the admin enables it; its price is
     # then charged instead of the standard fee.
     undergraduate_enabled = models.BooleanField(default=False)
@@ -241,19 +257,49 @@ class Event(models.Model):
         # PI / non-academic is the standard tier and always available.
         return student_status == 'pi_non_academic'
 
+    def _tiered_fee(self, student_status, undergraduate, graduate, standard):
+        """Resolve one of three prices from a student status.
+
+        A tier that is not enabled falls back to the standard price rather than
+        erroring, so a tier switched off after someone registered still has a
+        defined price - and an unrecognised status costs the standard fee rather
+        than nothing.
+        """
+        if student_status == 'undergraduate' and self.undergraduate_enabled:
+            return undergraduate or 0
+        if student_status == 'graduate' and self.graduate_enabled:
+            return graduate or 0
+        return standard or 0
+
     def fee_for(self, student_status):
         """Registration fee for a student status.
 
         Every price check goes through here so the amount charged, the amount
-        validated and the amount displayed cannot drift apart. A tier that is
-        not enabled falls back to the standard fee rather than erroring, so a
-        tier switched off after someone registered still has a defined price.
+        validated and the amount displayed cannot drift apart.
         """
-        if student_status == 'undergraduate' and self.undergraduate_enabled:
-            return self.registration_fee_undergraduate or 0
-        if student_status == 'graduate' and self.graduate_enabled:
-            return self.registration_fee_graduate or 0
-        return self.registration_fee or 0
+        return self._tiered_fee(
+            student_status,
+            self.registration_fee_undergraduate,
+            self.registration_fee_graduate,
+            self.registration_fee,
+        )
+
+    def onsite_fee_for(self, student_status):
+        """On-site fee for a student status - same categories, own prices."""
+        return self._tiered_fee(
+            student_status,
+            self.onsite_registration_fee_undergraduate,
+            self.onsite_registration_fee_graduate,
+            self.onsite_registration_fee,
+        )
+
+    @property
+    def has_onsite_fee(self):
+        """True when any offered on-site category costs money."""
+        return any(
+            self.onsite_fee_for(t) > 0
+            for t in ('undergraduate', 'graduate', 'pi_non_academic')
+        )
 
     @property
     def organizers_en(self):

@@ -13,13 +13,17 @@
     The step content is shrink-0 so a label can never be squeezed into wrapping;
     only the connectors flex. Capping each segment keeps the group from being
     flung out to the container's edges on wide screens.
+
+    Below `sm` only the current step keeps its label - three Korean labels plus
+    badges do not fit a 320px screen, and letting it scroll pushed the first
+    badge out of view.
 -->
 <ol class="flex w-full items-center justify-center overflow-x-auto text-sm {className}" {...rest}>
     {#each steps as step, i}
         {@const done = i < current}
         {@const active = i === current}
         <li class="flex items-center {i < steps.length - 1 ? 'max-w-[18rem] flex-1' : 'shrink-0'}">
-            <span class="flex shrink-0 items-center gap-2.5">
+            <span class="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
                 <span
                     class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors
                     {active || done ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-400'}"
@@ -40,18 +44,18 @@
                     <button
                         type="button"
                         class="whitespace-nowrap font-medium transition-colors hover:underline
-                        {active ? 'font-semibold text-gray-900' : done ? 'text-gray-700' : 'text-gray-400'}"
+                        {active ? 'font-semibold text-gray-900' : 'hidden sm:inline ' + (done ? 'text-gray-700' : 'text-gray-400')}"
                         onclick={() => onstepclick?.(i)}
                     >{label(step)}</button>
                 {:else}
-                    <span class="whitespace-nowrap font-medium {active ? 'font-semibold text-gray-900' : done ? 'text-gray-700' : 'text-gray-400'}">
+                    <span class="whitespace-nowrap font-medium {active ? 'font-semibold text-gray-900' : 'hidden sm:inline ' + (done ? 'text-gray-700' : 'text-gray-400')}">
                         {label(step)}
                     </span>
                 {/if}
             </span>
             {#if i < steps.length - 1}
                 <span
-                    class="mx-3 h-px min-w-6 flex-1 sm:mx-4 {done ? 'bg-primary-300' : 'bg-gray-200'}"
+                    class="mx-1.5 h-px min-w-3 flex-1 sm:mx-4 sm:min-w-6 {done ? 'bg-primary-300' : 'bg-gray-200'}"
                     aria-hidden="true"
                 ></span>
             {/if}

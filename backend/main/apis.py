@@ -723,11 +723,12 @@ def update_event(request, event_id: int):
         event.capacity = data["capacity"]
     if "registration_fee" in data:
         event.registration_fee = int(data["registration_fee"]) if data["registration_fee"] not in (None, "") else None
-    if "onsite_registration_fee" in data:
-        event.onsite_registration_fee = (
-            int(data["onsite_registration_fee"])
-            if data["onsite_registration_fee"] not in (None, "") else None
-        )
+    for field in ("onsite_registration_fee",
+                  "onsite_registration_fee_undergraduate",
+                  "onsite_registration_fee_graduate"):
+        if field in data:
+            setattr(event, field,
+                    int(data[field]) if data[field] not in (None, "") else None)
     if "undergraduate_enabled" in data:
         event.undergraduate_enabled = data["undergraduate_enabled"] in (True, 'true', 'True', 'on', 1, '1')
     if "registration_fee_undergraduate" in data:
@@ -2207,18 +2208,25 @@ def register_on_site(request, event_id: int):
             status=400,
         )
 
+    # Only accept a category the event actually offers, so a walk-in cannot
+    # claim a cheaper tier the organisers have not enabled.
+    student_status = data.get("student_status", "pi_non_academic")
+    if not event.is_tier_enabled(student_status):
+        student_status = 'pi_non_academic'
+
     oa = OnSiteAttendee.objects.create(
         event=event,
         name=data.get("name"),
         email=email,
         institute=data.get("institute", ""),
-        job_title=data.get("job_title", "")
+        job_title=data.get("job_title", ""),
+        student_status=student_status,
     )
 
     # With an on-site fee the record is held unpaid: the walk-in is registered
     # in the system but the registration is not complete until staff take
-    # payment at the desk and mark it so.
-    fee = event.onsite_registration_fee or 0
+    # payment at the desk and confirm them.
+    fee = oa.registration_fee
     return {
         "code": "success",
         "message": "Successfully registered on-site.",

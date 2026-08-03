@@ -34,6 +34,9 @@ export const actions = {
             throw error(response.status, { error: true, message: 'Failed due to server error. It this persists, please contact the admininistrator.' });
         }
         let rtn = await response.data;
-        return redirect(303, `/event/${params.slug}/onsite/${rtn.onsiteattendee_nametag_id}`);
+        // Carry the amount for display only - the stored registration is what
+        // the desk actually collects against.
+        const fee = rtn.fee ? `?fee=${encodeURIComponent(rtn.fee)}` : '';
+        return redirect(303, `/event/${params.slug}/onsite/${rtn.onsiteattendee_nametag_id}${fee}`);
     },
 };

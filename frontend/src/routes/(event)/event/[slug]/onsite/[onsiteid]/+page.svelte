@@ -10,7 +10,9 @@
 
     // With a fee the registration is not finished yet, so the page must not
     // claim it is; payment is taken at the desk.
-    const onsiteFee = event.onsite_registration_fee || 0;
+    // The category the walk-in chose decides the price, so use the amount the
+    // server charged rather than re-deriving one here.
+    const onsiteFee = data.onsite_fee || 0;
     const formattedFee = onsiteFee
         ? (languageTag() === 'ko'
             ? `${onsiteFee.toLocaleString('ko-KR')} 원`
