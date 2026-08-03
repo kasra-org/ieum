@@ -112,7 +112,7 @@
         </div>
     </div>
 {:else if !isUnpaid && isFree}
-    <div class="pl-8">
+    <div class="pl-8 mt-6 pt-6 border-t border-gray-200">
         <p class="text-gray-600">{m.myRegistration_noPayment()}</p>
     </div>
 {/if}
