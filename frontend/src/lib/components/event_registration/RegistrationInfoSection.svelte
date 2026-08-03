@@ -2,7 +2,6 @@
     import { Button, Checkbox } from '$lib/components/ui';
     import { CircleUser, ClipboardList } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
-    import { getStudentStatusLabel } from '$lib/utils.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { generateCertificatePDF } from '$lib/pdfUtils.js';
 
@@ -116,12 +115,6 @@
             <p class="text-sm font-medium text-gray-500">{m.form_nationality()}</p>
             <p class="text-base text-gray-900">{getNationalityText(attendee.nationality)}</p>
         </div>
-        {#if event?.has_tiered_fees}
-            <div>
-                <p class="text-sm font-medium text-gray-500">{m.eventRegister_selectTier()}</p>
-                <p class="text-base text-gray-900">{getStudentStatusLabel(attendee.student_status, m)}</p>
-            </div>
-        {/if}
         <div>
             <p class="text-sm font-medium text-gray-500">{m.form_institute()}</p>
             <p class="text-base text-gray-900">{currentLang === 'ko' && attendee.institute_ko ? attendee.institute_ko : attendee.institute}</p>

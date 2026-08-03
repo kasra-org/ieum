@@ -507,7 +507,10 @@
         </div>
     </div>
 
-    {#if deadline && deadline < now}
+    <!-- The deadline closes new sign-ups, but someone who registered in time and
+         still owes money must be able to finish paying, or their registration is
+         stranded with no way to complete it. -->
+    {#if deadline && deadline < now && !startAtPaymentStep}
         <!-- Registration Closed -->
         <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
             <Alert color="red">

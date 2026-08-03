@@ -144,7 +144,7 @@
                     {/if}
 
                     {#if sidebar_selected === 'payment_info'}
-                        <PaymentInfoSection {payment} />
+                        <PaymentInfoSection {payment} {attendee} {event} />
                     {/if}
                 </div>
             </div>

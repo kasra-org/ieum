@@ -875,6 +875,7 @@
 	"myRegistration_paymentDate": "Payment Date",
 	"myRegistration_receiptNumber": "Receipt Number",
 	"myRegistration_paymentAmount": "Payment Amount",
+	"myRegistration_paymentPendingNotice": "Your registration is not complete until payment is made.",
 	"myRegistration_paymentStatus": "Payment Status",
 	"myRegistration_noPayment": "No payment information available for this registration.",
 	"myRegistration_noAbstractsAccepted": "This event does not accept abstracts.",

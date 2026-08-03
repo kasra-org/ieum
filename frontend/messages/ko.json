@@ -875,6 +875,7 @@
 	"myRegistration_paymentDate": "결제일",
 	"myRegistration_receiptNumber": "영수증 번호",
 	"myRegistration_paymentAmount": "결제 금액",
+	"myRegistration_paymentPendingNotice": "결제가 완료되어야 등록이 확정됩니다.",
 	"myRegistration_paymentStatus": "결제 상태",
 	"myRegistration_noPayment": "이 등록에 대한 결제 정보가 없습니다.",
 	"myRegistration_noAbstractsAccepted": "이 행사는 초록을 접수하지 않습니다.",
