@@ -78,6 +78,29 @@
         return deadline < now;
     });
 
+    const formatFee = (fee) => {
+        if (!fee) return m.eventDetail_registrationFeeFree();
+        const amount = fee.toLocaleString('ko-KR', { maximumFractionDigits: 0 });
+        return languageTag() === 'ko' ? `${amount} 원` : `KRW ${amount}`;
+    };
+
+    // One row per category the event offers, so the price someone will actually
+    // pay is visible before they start registering rather than only the standard
+    // rate. Empty when the event has a single price for everyone.
+    let feeRows = $derived(
+        event.has_tiered_fees
+            ? [
+                ...(event.undergraduate_enabled
+                    ? [{ label: m.eventRegister_tierUndergraduate(), amount: formatFee(event.registration_fee_undergraduate || 0) }]
+                    : []),
+                ...(event.graduate_enabled
+                    ? [{ label: m.eventRegister_tierGraduate(), amount: formatFee(event.registration_fee_graduate || 0) }]
+                    : []),
+                { label: m.eventRegister_tierPiNonAcademic(), amount: formatFee(event.registration_fee || 0) },
+              ]
+            : []
+    );
+
     // Format registration fee based on language
     let formattedRegistrationFee = $derived.by(() => {
         const fee = event.registration_fee || 0;
@@ -134,6 +157,27 @@
     <meta property="og:title" content="{event.name} | {data.site_settings?.site_name ?? 'IEUM'}" />
     <meta property="twitter:title" content="{event.name} | {data.site_settings?.site_name ?? 'IEUM'}" />
 </svelte:head>
+
+{#snippet feeBlock()}
+    {#if feeRows.length > 0}
+        <div>
+            <span class="text-base font-medium text-gray-700">{m.eventDetail_registrationFee()}</span>
+            <div class="mt-2 space-y-1">
+                {#each feeRows as row}
+                    <div class="flex items-baseline justify-between gap-3">
+                        <span class="text-sm text-gray-600">{row.label}</span>
+                        <span class="text-base font-bold text-gray-900">{row.amount}</span>
+                    </div>
+                {/each}
+            </div>
+        </div>
+    {:else}
+        <div class="flex items-center justify-between">
+            <span class="text-base font-medium text-gray-700">{m.eventDetail_registrationFee()}</span>
+            <span class="{languageTag() === 'ko' ? 'text-xl' : 'text-lg'} font-bold text-gray-900">{formattedRegistrationFee}</span>
+        </div>
+    {/if}
+{/snippet}
 
 <div class="container mx-auto my-10 px-3 sm:px-7">
     <!-- Page Header Card -->
@@ -229,10 +273,7 @@
                                 <p class="font-semibold">{m.eventDetail_paymentPending()}</p>
                                 <p class="text-sm mt-1">{m.eventDetail_paymentPendingDescription()}</p>
                             </div>
-                            <div class="flex justify-between items-center">
-                                <span class="text-base font-medium text-gray-700">{m.eventDetail_registrationFee()}</span>
-                                <span class="{languageTag() === 'ko' ? 'text-xl' : 'text-lg'} font-bold text-gray-900">{formattedRegistrationFee}</span>
-                            </div>
+                            {@render feeBlock()}
                             <Button href="/event/{event.id}/register" color="primary" class="w-full">
                                 {m.eventRegister_payNow()}
                             </Button>
@@ -270,18 +311,12 @@
                                 <p class="font-semibold">{m.eventRegister_closed()}</p>
                             </div>
                         {:else if user}
-                            <div class="flex justify-between items-center">
-                                <span class="text-base font-medium text-gray-700">{m.eventDetail_registrationFee()}</span>
-                                <span class="{languageTag() === 'ko' ? 'text-xl' : 'text-lg'} font-bold text-gray-900">{formattedRegistrationFee}</span>
-                            </div>
+                            {@render feeBlock()}
                             <Button href="/event/{event.id}/register" color="primary" class="w-full">
                                 {m.eventDetail_registerNow()}
                             </Button>
                         {:else}
-                            <div class="flex justify-between items-center">
-                                <span class="text-base font-medium text-gray-700">{m.eventDetail_registrationFee()}</span>
-                                <span class="{languageTag() === 'ko' ? 'text-xl' : 'text-lg'} font-bold text-gray-900">{formattedRegistrationFee}</span>
-                            </div>
+                            {@render feeBlock()}
                             <Button href="/login?next={encodeURIComponent(`/event/${event.id}`)}" color="primary" class="w-full">
                                 {m.eventDetail_loginToRegister()}
                             </Button>

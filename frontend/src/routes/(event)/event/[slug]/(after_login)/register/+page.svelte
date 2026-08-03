@@ -50,11 +50,10 @@
             : feeForTier(studentStatus)
     );
 
-    // With tiers enabled the event is only free if every offered tier is free,
-    // so the payment step is still reached when one tier costs money.
-    const isFreeEvent = event.has_tiered_fees
-        ? tierOptions.every(o => feeForTier(o.value) === 0)
-        : (event.registration_fee === null || event.registration_fee === 0);
+    // Free is decided per attendee, not per event: someone whose category costs
+    // nothing registers straight away and never sees the payment step, even when
+    // other categories are charged.
+    let isFreeEvent = $derived(selectedFee === 0);
     const startAtPaymentStep = data.startAtPaymentStep || false;
 
     // Stepper state and configuration
