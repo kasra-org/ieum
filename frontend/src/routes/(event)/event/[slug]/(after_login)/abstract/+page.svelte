@@ -14,6 +14,11 @@
     let abstract = data.abstract;
     let me = data.user;
 
+    // The API refuses submissions from unpaid registrations; mirror that here so
+    // the form is never offered when it cannot succeed. An already-submitted
+    // abstract still shows, so a later refund does not hide someone's own work.
+    const paymentPending = $derived(data.payment_status === 'pending');
+
     // DOMPurify for XSS protection
     let DOMPurify = $state(null);
     $effect(() => {
@@ -160,7 +165,23 @@
 
     <!-- Main Content -->
     <div>
-        {#if data.abstract_submitted}
+        {#if paymentPending && !data.abstract_submitted}
+            <!-- Payment Required -->
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
+                <Alert color="yellow">
+                    <p class="font-semibold">{m.abstractSubmission_paymentRequired()}</p>
+                    <p class="text-sm mt-1">{m.abstractSubmission_paymentRequiredDescription()}</p>
+                </Alert>
+                <div class="flex flex-col sm:flex-row gap-4 mt-6">
+                    <Button href="/event/{event.id}/register" color="primary" size="lg" class="flex-1">
+                        {m.eventRegister_payNow()}
+                    </Button>
+                    <Button href="/event/{event.id}" color="alternative" size="lg" class="flex-1">
+                        {m.abstractSubmission_goBack()}
+                    </Button>
+                </div>
+            </div>
+        {:else if data.abstract_submitted}
             <!-- Abstract Preview -->
             <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
                 <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-6">

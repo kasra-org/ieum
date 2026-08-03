@@ -335,20 +335,11 @@ class AttendeeSchema(Schema):
 
     @staticmethod
     def resolve_registration_fee(da: Attendee) -> int:
-        return da.event.fee_for(da.student_status) if da.event_id else 0
+        return da.registration_fee
 
     @staticmethod
     def resolve_payment_status(da: Attendee) -> str:
-        """'free' when this attendee's tier costs nothing, else 'paid'/'pending'.
-
-        Reads the prefetched payments rather than filtering, so listing a whole
-        event does not run a query per attendee.
-        """
-        fee = da.event.fee_for(da.student_status) if da.event_id else None
-        if not fee or fee <= 0:
-            return 'free'
-        paid = any(p.status == 'completed' for p in da.payments.all())
-        return 'paid' if paid else 'pending'
+        return da.payment_status
 
     @staticmethod
     def resolve_registered_at(da: Attendee) -> str:

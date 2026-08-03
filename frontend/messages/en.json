@@ -883,6 +883,8 @@
 	"abstractSubmission_title": "Abstract Submission",
 	"abstractSubmission_description": "Please fill the following form to submit an abstract.",
 	"abstractSubmission_thankYou": "Thank you for submitting your abstract. You can preview your submission below. If you need to make any changes, please contact the event organizers.",
+	"abstractSubmission_paymentRequired": "Payment required",
+	"abstractSubmission_paymentRequiredDescription": "Please complete your registration payment before submitting an abstract.",
 	"abstractSubmission_presentedBy": "Presented by",
 	"abstractSubmission_downloadSubmission": "Download Submission",
 	"abstractSubmission_abstractTitle": "Abstract Title",

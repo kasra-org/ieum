@@ -140,7 +140,7 @@
                     {/if}
 
                     {#if sidebar_selected === 'abstract_info'}
-                        <AbstractInfoSection {event} {my_abstract} />
+                        <AbstractInfoSection {event} {my_abstract} {attendee} />
                     {/if}
 
                     {#if sidebar_selected === 'payment_info'}

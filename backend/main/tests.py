@@ -859,3 +859,87 @@ class OnSiteRegistrationFeeTests(TestCase):
         self.register()
         oa = OnSiteAttendee.objects.get(event=self.event, email='w@example.com')
         self.assertTrue(oa.is_registration_complete)
+
+
+class AbstractPaymentGateTests(TestCase):
+    """An unpaid registration cannot submit an abstract."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='sub@example.com', email='sub@example.com', password='pw12345!aA',
+        )
+        self.event = Event.objects.create(
+            name='Gated Event', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, capacity_abstract=100,
+            accepts_abstract=True, registration_fee=100000,
+        )
+        self.event.email_template_abstract_submission = EmailTemplate.objects.create(
+            subject='Submitted', body='Thanks',
+        )
+        self.event.save()
+        self.attendee = Attendee.objects.create(
+            user=self.user, event=self.event, first_name='Sub', last_name='Mitter',
+            nationality=1, institute='PNU', job_title='Student',
+        )
+        self.client.force_login(self.user)
+
+    def submit(self):
+        # A real .docx: a zip whose first entry is the OOXML content type part.
+        import base64, io, zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w') as z:
+            z.writestr('[Content_Types].xml', '<?xml version="1.0"?><Types/>')
+            z.writestr('word/document.xml', '<?xml version="1.0"?><document/>')
+        payload = base64.b64encode(buf.getvalue()).decode()
+        return self.client.post(
+            f'/api/event/{self.event.id}/abstract',
+            data={
+                'title': 'My Abstract',
+                'presentation_type': 'poster',
+                'file_name': 'a.docx',
+                'file_content': f'data:application/octet-stream;base64,{payload}',
+            },
+            content_type='application/json',
+        )
+
+    def test_unpaid_registration_cannot_submit(self):
+        self.assertTrue(self.attendee.has_outstanding_payment)
+        response = self.submit()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'payment_required')
+        self.assertFalse(Abstract.objects.filter(event=self.event).exists())
+
+    def test_paid_registration_can_submit(self):
+        PaymentHistory.objects.create(
+            attendee=self.attendee, event=self.event, amount=100000, status='completed',
+        )
+        self.assertFalse(self.attendee.has_outstanding_payment)
+        response = self.submit()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Abstract.objects.filter(event=self.event).exists())
+
+    def test_free_event_is_not_gated(self):
+        self.event.registration_fee = 0
+        self.event.save()
+        self.assertEqual(self.attendee.payment_status, 'free')
+        response = self.submit()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Abstract.objects.filter(event=self.event).exists())
+
+    def test_a_cancelled_payment_does_not_count_as_paid(self):
+        PaymentHistory.objects.create(
+            attendee=self.attendee, event=self.event, amount=100000, status='cancelled',
+        )
+        self.assertTrue(self.attendee.has_outstanding_payment)
+        self.assertEqual(self.submit().status_code, 400)
+
+    def test_free_tier_attendee_is_not_gated_on_a_paid_event(self):
+        # The gate must read this attendee's tier, not the event's headline fee.
+        self.event.undergraduate_enabled = True
+        self.event.registration_fee_undergraduate = 0
+        self.event.save()
+        self.attendee.student_status = 'undergraduate'
+        self.attendee.save()
+        self.attendee.refresh_from_db()
+        self.assertEqual(self.attendee.payment_status, 'free')
+        self.assertEqual(self.submit().status_code, 200)

@@ -1278,6 +1278,18 @@ def submit_abstract(request, event_id: int):
             status=400,
         )
 
+    # An unpaid registration is not final, so it does not carry submission
+    # rights - otherwise the deadline could be met, and a slot taken, by someone
+    # who never pays. Free tiers are never "outstanding" and so pass straight
+    # through.
+    if attendee.has_outstanding_payment:
+        return api.create_response(
+            request,
+            {"code": "payment_required",
+             "message": "Please complete your registration payment before submitting an abstract."},
+            status=400,
+        )
+
     data = json.loads(request.body)
     if event.abstract_deadline is not None and datetime.now().date() > event.abstract_deadline:
         return api.create_response(

@@ -883,6 +883,8 @@
 	"abstractSubmission_title": "초록 제출",
 	"abstractSubmission_description": "아래 양식을 작성하여 초록을 제출해 주세요.",
 	"abstractSubmission_thankYou": "초록을 제출해 주셔서 감사합니다. 아래에서 제출 내용을 미리 볼 수 있습니다. 수정이 필요한 경우 행사 주최측에 문의해 주세요.",
+	"abstractSubmission_paymentRequired": "결제가 필요합니다",
+	"abstractSubmission_paymentRequiredDescription": "초록을 제출하기 전에 등록비 결제를 완료해 주세요.",
 	"abstractSubmission_presentedBy": "발표자",
 	"abstractSubmission_downloadSubmission": "제출물 다운로드",
 	"abstractSubmission_abstractTitle": "초록 제목",

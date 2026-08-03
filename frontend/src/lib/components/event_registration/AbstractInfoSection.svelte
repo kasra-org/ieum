@@ -4,7 +4,11 @@
     import * as m from '$lib/paraglide/messages.js';
     import { getPresentationTypeLabel } from '$lib/utils.js';
 
-    let { event, my_abstract } = $props();
+    let { event, my_abstract, attendee = null } = $props();
+
+    // Matches the API gate on abstract submission: an unpaid registration
+    // cannot submit, so point at payment instead of a form that would 400.
+    const paymentPending = $derived(attendee?.payment_status === 'pending');
 </script>
 
 <div class="flex items-center gap-2 mb-6">
@@ -39,7 +43,12 @@
     {:else}
         <div class="pl-8">
             <p class="text-gray-600 mb-4">{m.myRegistration_noAbstract()}</p>
-            <Button color="primary" href="/event/{event.id}/abstract">{m.myRegistration_submitAbstract()}</Button>
+            {#if paymentPending}
+                <p class="text-gray-600 mb-4">{m.abstractSubmission_paymentRequiredDescription()}</p>
+                <Button color="primary" href="/event/{event.id}/register">{m.eventRegister_payNow()}</Button>
+            {:else}
+                <Button color="primary" href="/event/{event.id}/abstract">{m.myRegistration_submitAbstract()}</Button>
+            {/if}
         </div>
     {/if}
 {:else}

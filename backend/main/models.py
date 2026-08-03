@@ -107,6 +107,31 @@ class Attendee(models.Model):
     def name(self):
         return f'{self.first_name}{" " + self.middle_initial if self.middle_initial else ""} {self.last_name}'
 
+    @property
+    def registration_fee(self):
+        return self.event.fee_for(self.student_status) if self.event_id else 0
+
+    @property
+    def payment_status(self):
+        """'free' when this attendee's tier costs nothing, else 'paid'/'pending'.
+
+        Iterates the related payments rather than filtering, so a prefetched
+        queryset does not run a query per attendee when listing a whole event.
+        """
+        if self.registration_fee <= 0:
+            return 'free'
+        paid = any(p.status == 'completed' for p in self.payments.all())
+        return 'paid' if paid else 'pending'
+
+    @property
+    def has_outstanding_payment(self):
+        """True when this registration is not yet paid for.
+
+        A registration in this state is not final, so it carries none of the
+        rights a completed one does - see submit_abstract.
+        """
+        return self.payment_status == 'pending'
+
 class OnSiteAttendee(models.Model):
     """
     OnSiteAttendee model
