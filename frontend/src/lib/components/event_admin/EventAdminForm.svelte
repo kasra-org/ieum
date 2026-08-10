@@ -1,6 +1,7 @@
 <script>
     import { Label, Input, Select, Checkbox } from '$lib/components/ui';
     import * as m from '$lib/paraglide/messages.js';
+    import { ChevronUp, ChevronDown, Plus, Trash2 } from '@lucide/svelte';
     import MarkdownEditor from '$lib/components/MarkdownEditor.svelte';
     import VenueSelector from '$lib/components/VenueSelector.svelte';
 
@@ -20,14 +21,7 @@
         end_date: '',
         deadline: '',
         capacity: 0,
-        registration_fee: null,
-        onsite_registration_fee: null,
-        onsite_registration_fee_undergraduate: null,
-        onsite_registration_fee_graduate: null,
-        undergraduate_enabled: false,
-        registration_fee_undergraduate: null,
-        graduate_enabled: false,
-        registration_fee_graduate: null,
+        registration_categories: [],
         invitation_code: '',
         accepts_abstract: false,
         abstract_submission_type: 'internal',
@@ -37,10 +31,41 @@
         max_votes: 2,
     }) } = $props();
 
-    // Local so the price field can appear only when its tier is enabled; the
-    // checkboxes still post their own values.
-    let undergraduate_enabled = $state(data.undergraduate_enabled ?? false);
-    let graduate_enabled = $state(data.graduate_enabled ?? false);
+    // The whole list posts as one JSON field, so adds, renames, reorders and
+    // removals all arrive together and the server can tell what was dropped.
+    let categories = $state(
+        (data.registration_categories ?? []).map(c => ({
+            id: c.id ?? null,
+            name: c.name ?? '',
+            name_ko: c.name_ko ?? '',
+            fee: c.fee ?? 0,
+            onsite_fee: c.onsite_fee ?? null,
+        }))
+    );
+    // A brand new event has none yet; start it on the standard three.
+    if (categories.length === 0) {
+        categories = [
+            { id: null, name: 'Undergraduate student', name_ko: '학부생', fee: 0, onsite_fee: null },
+            { id: null, name: 'Graduate student / Postdoc', name_ko: '대학원생/박사후연구원', fee: 0, onsite_fee: null },
+            { id: null, name: 'PI / Non-academic', name_ko: 'PI / 일반', fee: 0, onsite_fee: null },
+        ];
+    }
+
+    function addCategory() {
+        categories = [...categories, { id: null, name: '', name_ko: '', fee: 0, onsite_fee: null }];
+    }
+
+    function removeCategory(index) {
+        categories = categories.filter((_, i) => i !== index);
+    }
+
+    function moveCategory(index, delta) {
+        const target = index + delta;
+        if (target < 0 || target >= categories.length) return;
+        const next = [...categories];
+        [next[index], next[target]] = [next[target], next[index]];
+        categories = next;
+    }
 
     // Create local reactive state for properties to enable two-way binding
     let description = $state(data.description ?? '');
@@ -171,77 +196,58 @@
     <Input type="number" id="capacity" name="capacity" value={data.capacity} />
     <span class="text-sm">* {m.eventForm_registrationCapacityHelp()}</span>
 </div>
-<!-- All three categories priced in one block. PI/non-academic used to sit in a
-     separate "standard fee" field, which made it easy to price the student tiers
-     and leave PI at zero without noticing. -->
+<!-- One row per category: its names, what it costs, and what a walk-in pays.
+     The whole list is submitted together as JSON. -->
 <div class="mb-6 rounded-lg border border-gray-200 p-4">
-    <p class="mb-1 text-sm font-medium">{m.eventForm_registrationFees()}</p>
-    <p class="mb-4 text-sm text-gray-500">{m.eventForm_registrationFeesHelp()}</p>
+    <p class="mb-1 text-sm font-medium">{m.eventForm_categories()}</p>
+    <p class="mb-4 text-sm text-gray-500">{m.eventForm_categoriesHelp()}</p>
 
-    <div class="mb-4">
-        <label class="flex cursor-pointer items-center gap-2">
-            <input type="checkbox" name="undergraduate_enabled" bind:checked={undergraduate_enabled}
-                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-            <span class="text-sm font-medium">{m.eventForm_tierUndergraduate()}</span>
-        </label>
-        {#if undergraduate_enabled}
-            <div class="mt-2 ps-6">
-                <Input type="number" id="registration_fee_undergraduate" name="registration_fee_undergraduate"
-                    value={data.registration_fee_undergraduate} step="1" min="0" placeholder="0" />
+    <input type="hidden" name="registration_categories" value={JSON.stringify(categories)} />
+
+    <div class="space-y-3">
+        {#each categories as category, index (index)}
+            <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                        <Label class="mb-1 block text-xs">{m.eventForm_categoryName()}</Label>
+                        <Input type="text" bind:value={category.name} placeholder="Undergraduate student" />
+                    </div>
+                    <div>
+                        <Label class="mb-1 block text-xs">{m.eventForm_categoryNameKo()}</Label>
+                        <Input type="text" bind:value={category.name_ko} placeholder="학부생" />
+                    </div>
+                    <div>
+                        <Label class="mb-1 block text-xs">{m.eventForm_categoryFee()}</Label>
+                        <Input type="number" bind:value={category.fee} step="1" min="0" placeholder="0" />
+                    </div>
+                    <div>
+                        <Label class="mb-1 block text-xs">{m.eventForm_categoryOnsiteFee()}</Label>
+                        <Input type="number" bind:value={category.onsite_fee} step="1" min="0" placeholder="0" />
+                    </div>
+                </div>
+                <div class="mt-2 flex items-center justify-end gap-2">
+                    <button type="button" class="cursor-pointer rounded px-2 py-1 text-sm text-gray-600 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+                        onclick={() => moveCategory(index, -1)} disabled={index === 0} aria-label={m.eventForm_categoryMoveUp()}>
+                        <ChevronUp class="h-4 w-4" />
+                    </button>
+                    <button type="button" class="cursor-pointer rounded px-2 py-1 text-sm text-gray-600 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+                        onclick={() => moveCategory(index, 1)} disabled={index === categories.length - 1} aria-label={m.eventForm_categoryMoveDown()}>
+                        <ChevronDown class="h-4 w-4" />
+                    </button>
+                    <button type="button" class="cursor-pointer rounded px-2 py-1 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        onclick={() => removeCategory(index)} disabled={categories.length <= 1}>
+                        <Trash2 class="mr-1 inline h-4 w-4" />{m.eventForm_categoryRemove()}
+                    </button>
+                </div>
             </div>
-        {/if}
+        {/each}
     </div>
 
-    <div class="mb-4">
-        <label class="flex cursor-pointer items-center gap-2">
-            <input type="checkbox" name="graduate_enabled" bind:checked={graduate_enabled}
-                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-            <span class="text-sm font-medium">{m.eventForm_tierGraduate()}</span>
-        </label>
-        {#if graduate_enabled}
-            <div class="mt-2 ps-6">
-                <Input type="number" id="registration_fee_graduate" name="registration_fee_graduate"
-                    value={data.registration_fee_graduate} step="1" min="0" placeholder="0" />
-            </div>
-        {/if}
-    </div>
-
-    <div>
-        <p class="mb-2 text-sm font-medium">{m.eventForm_tierPiNonAcademic()}</p>
-        <div class="ps-6">
-            <Input type="number" id="registration_fee" name="registration_fee" value={data.registration_fee} step="1" min="0" placeholder="0" />
-            <p class="mt-1 text-sm text-gray-500">{m.eventForm_tierPiNonAcademicHelp()}</p>
-        </div>
-    </div>
-</div>
-<div class="mb-6 rounded-lg border border-gray-200 p-4">
-    <p class="mb-1 text-sm font-medium">{m.eventForm_onsiteRegistrationFee()}</p>
-    <p class="mb-4 text-sm text-gray-500">{m.eventForm_onsiteRegistrationFeeHelp()}</p>
-
-    {#if undergraduate_enabled}
-        <div class="mb-4">
-            <p class="mb-2 text-sm font-medium">{m.eventForm_tierUndergraduate()}</p>
-            <div class="ps-6">
-                <Input type="number" id="onsite_registration_fee_undergraduate" name="onsite_registration_fee_undergraduate"
-                    value={data.onsite_registration_fee_undergraduate} step="1" min="0" placeholder="0" />
-            </div>
-        </div>
-    {/if}
-    {#if graduate_enabled}
-        <div class="mb-4">
-            <p class="mb-2 text-sm font-medium">{m.eventForm_tierGraduate()}</p>
-            <div class="ps-6">
-                <Input type="number" id="onsite_registration_fee_graduate" name="onsite_registration_fee_graduate"
-                    value={data.onsite_registration_fee_graduate} step="1" min="0" placeholder="0" />
-            </div>
-        </div>
-    {/if}
-    <div>
-        <p class="mb-2 text-sm font-medium">{m.eventForm_tierPiNonAcademic()}</p>
-        <div class="ps-6">
-            <Input type="number" id="onsite_registration_fee" name="onsite_registration_fee" value={data.onsite_registration_fee} step="1" min="0" placeholder="0" />
-        </div>
-    </div>
+    <button type="button" class="mt-3 cursor-pointer rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        onclick={addCategory}>
+        <Plus class="mr-1 inline h-4 w-4" />{m.eventForm_categoryAdd()}
+    </button>
+    <p class="mt-3 text-sm text-gray-500">{m.eventForm_categoryRemoveNote()}</p>
 </div>
 
 <div class="mb-6">

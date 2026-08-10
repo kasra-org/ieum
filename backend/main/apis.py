@@ -26,7 +26,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from main.models import ApiKey, User, Event, EmailTemplate, Attendee, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings
+from main.models import ApiKey, User, Event, EmailTemplate, Attendee, RegistrationCategory, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings
 from main.schema import *
 from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id, render_email_template
 from main import nicepay
@@ -260,9 +260,9 @@ def get_registration_history(request):
             attendee_name = f"{attendee_name} ({attendee.korean_name})" if attendee_name else attendee.korean_name
         attendee_institute = attendee.institute or ''
 
-        # Determine payment status. Priced from this attendee's tier, otherwise a
-        # student sees the standard fee in their registration history.
-        registration_fee = event.fee_for(attendee.student_status)
+        # Determine payment status. Priced from this attendee's category,
+        # otherwise a student sees the wrong fee in their registration history.
+        registration_fee = attendee.registration_fee
         if registration_fee == 0:
             payment_status = 'free'
         else:
@@ -533,7 +533,7 @@ def add_event(request):
             " - Venue: {{ event.venue }}\n"
             " - Official Website: {{ event.link_info }}\n"
             " - Registration: " + settings.HEADLESS_URL_ROOT + "/event/{{ event.id }}/register\n"
-            "{% if event.has_tiered_fees %} - Registration Category: {{ attendee.get_student_status_display }}\n{% endif %}"
+            "{% if event.has_tiered_fees %} - Registration Category: {{ attendee.category_name }}\n{% endif %}"
             "\n"
             "If you have any questions, please contact us at: " + settings.EMAIL_FROM + "\n\n"
             "We look forward to seeing you at the event!\n\n"
@@ -596,6 +596,12 @@ def add_event(request):
         onsite_code=generate_onsite_code(),
     )
 
+    # Every event starts from the standard three categories; the form may send
+    # its own set, which replaces them.
+    event.seed_default_categories()
+    if data.get("registration_categories"):
+        replace_registration_categories(event, data["registration_categories"])
+
     # Add organizers (already validated above)
     for org in organizers_data:
         Organizer.objects.create(
@@ -620,6 +626,75 @@ def add_event(request):
         event.save()
 
     return {"code": "success", "message": "Event added."}
+
+def _fee_or(value, default):
+    """Parse a price. Blank means "not set", which is `default`, not an error."""
+    if value in (None, ""):
+        return default
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def replace_registration_categories(event, payload):
+    """Apply the organiser's full category list to an event.
+
+    The form sends every category it wants the event to have, in display order,
+    so one call covers renames, repricing, reordering, additions and removals.
+    Entries carrying an `id` update that category; the rest are new.
+
+    A category left out of the list is removed - but only really deleted when
+    nobody registered under it. Anyone already registered is priced by their
+    category, so dropping the row would change what they owe; those are
+    deactivated instead, which takes them off the form without touching anyone's
+    registration.
+
+    Returns an error message, or None when applied.
+    """
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return "registration_categories must be a list of categories."
+    if not isinstance(payload, list) or any(not isinstance(c, dict) for c in payload):
+        return "registration_categories must be a list of categories."
+
+    named = [c for c in payload if str(c.get("name") or "").strip()]
+    if not named:
+        # An event with no categories has no price at all, and nobody could
+        # register; keeping the current set is the safer reading of empty input.
+        return "An event needs at least one registration category."
+
+    existing = {c.id: c for c in event.registration_categories.all()}
+    kept = set()
+    for order, item in enumerate(named):
+        category = existing.get(item.get("id"))
+        if category is None:
+            category = RegistrationCategory(event=event)
+        category.name = str(item["name"]).strip()[:200]
+        category.name_ko = str(item.get("name_ko") or "").strip()[:200]
+        category.fee = _fee_or(item.get("fee"), 0)
+        category.onsite_fee = _fee_or(item.get("onsite_fee"), None)
+        category.order = order
+        category.is_active = True
+        category.save()
+        kept.add(category.id)
+
+    for category in existing.values():
+        if category.id in kept:
+            continue
+        if category.attendees.exists() or category.onsite_attendees.exists():
+            if category.is_active:
+                category.is_active = False
+                category.save(update_fields=["is_active"])
+        else:
+            category.delete()
+
+    if hasattr(event, "_active_categories"):
+        del event._active_categories
+    return None
+
 
 @api.get("/event/{event_id}", response=EventSchema, auth=None)
 def get_event(request, event_id: int):
@@ -723,28 +798,13 @@ def update_event(request, event_id: int):
 
     if "capacity" in data:
         event.capacity = data["capacity"]
-    if "registration_fee" in data:
-        event.registration_fee = int(data["registration_fee"]) if data["registration_fee"] not in (None, "") else None
-    for field in ("onsite_registration_fee",
-                  "onsite_registration_fee_undergraduate",
-                  "onsite_registration_fee_graduate"):
-        if field in data:
-            setattr(event, field,
-                    int(data[field]) if data[field] not in (None, "") else None)
-    if "undergraduate_enabled" in data:
-        event.undergraduate_enabled = data["undergraduate_enabled"] in (True, 'true', 'True', 'on', 1, '1')
-    if "registration_fee_undergraduate" in data:
-        event.registration_fee_undergraduate = (
-            int(data["registration_fee_undergraduate"])
-            if data["registration_fee_undergraduate"] not in (None, "") else None
-        )
-    if "graduate_enabled" in data:
-        event.graduate_enabled = data["graduate_enabled"] in (True, 'true', 'True', 'on', 1, '1')
-    if "registration_fee_graduate" in data:
-        event.registration_fee_graduate = (
-            int(data["registration_fee_graduate"])
-            if data["registration_fee_graduate"] not in (None, "") else None
-        )
+    # Prices live on the event's registration categories, which the form sends
+    # as a whole list so adds, edits, reorders and removals arrive together.
+    if "registration_categories" in data:
+        error_message = replace_registration_categories(event, data["registration_categories"])
+        if error_message:
+            return api.create_response(
+                request, {"code": "invalid_categories", "message": error_message}, status=400)
     if "accepts_abstract" in data:
         event.accepts_abstract = as_bool(data["accepts_abstract"])
     if "published" in data:
@@ -849,7 +909,7 @@ def check_registration_status(request, event_id: int):
     # Check payment status if event has a fee
     # A registration is considered paid if there's at least one completed payment
     payment_status = None
-    if event.fee_for(attendee.student_status) > 0:
+    if attendee.registration_fee > 0:
         payments = PaymentHistory.objects.filter(attendee=attendee)
         if payments.filter(status='completed').exists():
             payment_status = 'completed'
@@ -1141,16 +1201,16 @@ def register_event(request, event_id: int):
             status=400,
         )
 
-    # Only accept a tier the event actually offers, otherwise someone could post
-    # 'undergraduate' at a event that does not discount it and pay the lower price.
-    student_status = data.get("student_status", "pi_non_academic")
-    if not event.is_tier_enabled(student_status):
-        student_status = 'pi_non_academic'
+    # Only accept a category the event actually offers, otherwise someone could
+    # post another event's category id and pay its price.
+    category = event.category_by_id(data.get("category"))
+    if category is None:
+        category = event.active_categories[0] if event.active_categories else None
 
     attendee = Attendee.objects.create(
         user=user,
         event=event,
-        student_status=student_status,
+        category=category,
         first_name=data.get("first_name", ""),
         middle_initial=data.get("middle_initial", ""),
         last_name=data.get("last_name", ""),
@@ -2223,10 +2283,10 @@ def register_on_site(request, event_id: int):
         )
 
     # Only accept a category the event actually offers, so a walk-in cannot
-    # claim a cheaper tier the organisers have not enabled.
-    student_status = data.get("student_status", "pi_non_academic")
-    if not event.is_tier_enabled(student_status):
-        student_status = 'pi_non_academic'
+    # claim a cheaper one the organisers have not enabled.
+    category = event.category_by_id(data.get("category"))
+    if category is None:
+        category = event.active_categories[0] if event.active_categories else None
 
     oa = OnSiteAttendee.objects.create(
         event=event,
@@ -2234,7 +2294,7 @@ def register_on_site(request, event_id: int):
         email=email,
         institute=data.get("institute", ""),
         job_title=data.get("job_title", ""),
-        student_status=student_status,
+        category=category,
     )
 
     # With an on-site fee the record is held unpaid: the walk-in is registered
@@ -2775,7 +2835,7 @@ def confirm_toss_payment(request, data: TossPaymentConfirmSchema):
         )
 
     # Verify amount matches event registration fee
-    expected_fee = event.fee_for(attendee.student_status)
+    expected_fee = attendee.registration_fee
     if data.amount != expected_fee:
         logger.warning(f"Amount mismatch: expected {expected_fee}, got {data.amount}")
         return api.create_response(
@@ -3008,7 +3068,7 @@ def create_paypal_order(request, data: PayPalCreateOrderSchema):
         )
 
     # Verify amount matches the fee for this attendee's tier
-    if data.amount != event.fee_for(attendee.student_status):
+    if data.amount != attendee.registration_fee:
         return api.create_response(
             request,
             {"code": "amount_mismatch", "message": "Payment amount does not match registration fee."},
@@ -3275,7 +3335,7 @@ def capture_paypal_order(request, data: PayPalCaptureOrderSchema):
     # PaymentHistory.amount is KRW everywhere else (Toss, NicePay); the PayPal
     # charge is the USD conversion of exactly this fee, so store the fee rather
     # than a USD figure truncated to whole dollars.
-    amount = event.fee_for(attendee.student_status)
+    amount = attendee.registration_fee
     paid_usd = capture_data.get("amount", {}).get("value")
 
     # Create PaymentHistory record
@@ -3371,7 +3431,7 @@ def prepare_nicepay_payment(request, data: NicePayPrepareSchema):
             status=400,
         )
 
-    amount = event.fee_for(attendee.student_status)
+    amount = attendee.registration_fee
     if amount <= 0:
         return api.create_response(
             request,

@@ -8,7 +8,8 @@
     import { Award, CircleCheck, Tag, UserMinus, UserPen } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
-    import { getStudentStatusLabel } from '$lib/utils.js';
+    import { getCategoryLabel } from '$lib/utils.js';
+    import { languageTag } from '$lib/paraglide/runtime.js';
 
     import OnSiteRegistrationForm from '$lib/components/OnSiteRegistrationForm.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
@@ -558,7 +559,7 @@
                     </button>
                 </TableBodyCell>
                 <TableBodyCell>{row.name}</TableBodyCell>
-                <TableBodyCell>{getStudentStatusLabel(row.student_status, m)}</TableBodyCell>
+                <TableBodyCell>{getCategoryLabel(row, languageTag())}</TableBodyCell>
                 <TableBodyCell>{row.email}</TableBodyCell>
                 <TableBodyCell>{row.institute}</TableBodyCell>
                 <TableBodyCell>{row.job_title}</TableBodyCell>

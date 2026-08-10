@@ -5,7 +5,7 @@
     import { formatDate } from '$lib/utils.js';
     import ReceiptButtons from '$lib/components/ReceiptButtons.svelte';
     import { Button } from '$lib/components/ui';
-    import { getStudentStatusLabel } from '$lib/utils.js';
+    import { getCategoryLabel } from '$lib/utils.js';
 
     let { payment, attendee = null, event = null } = $props();
 
@@ -58,7 +58,7 @@
         {#if event?.has_tiered_fees}
             <div>
                 <p class="text-sm font-medium text-gray-500">{m.eventRegister_selectTier()}</p>
-                <p class="text-base text-gray-900">{getStudentStatusLabel(attendee?.student_status, m)}</p>
+                <p class="text-base text-gray-900">{getCategoryLabel(attendee, languageTag())}</p>
             </div>
         {/if}
         <div>

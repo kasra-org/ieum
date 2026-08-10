@@ -273,10 +273,19 @@ export function todayInTimeZone(timeZone = 'Asia/Seoul') {
 }
 
 /** Human label for an attendee's registration category. */
-export function getStudentStatusLabel(status, m) {
-    switch (status) {
-        case 'undergraduate': return m.eventRegister_tierUndergraduate();
-        case 'graduate': return m.eventRegister_tierGraduate();
-        default: return m.eventRegister_tierPiNonAcademic();
-    }
+/**
+ * Display name for a registration category.
+ *
+ * Categories are organiser-defined, so their names are data rather than
+ * translatable strings: the Korean name is used when there is one, and the
+ * English name is the fallback for every other case.
+ *
+ * Accepts either a category object or a record carrying the denormalised
+ * `category_name` / `category_name_ko` pair that the attendee schemas send.
+ */
+export function getCategoryLabel(category, lang) {
+    if (!category) return '';
+    const ko = category.name_ko ?? category.category_name_ko ?? '';
+    const en = category.name ?? category.category_name ?? '';
+    return (lang === 'ko' && ko) ? ko : (en || ko);
 }

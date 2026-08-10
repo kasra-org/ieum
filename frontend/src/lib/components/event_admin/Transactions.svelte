@@ -5,6 +5,7 @@
     import { CircleX, Pencil, Plus } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
+    import { getCategoryLabel } from '$lib/utils.js';
 
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ConfirmModal from '$lib/components/ConfirmModal.svelte';
@@ -184,33 +185,30 @@
     let registration_fee = $derived(data.event.registration_fee || 0);
     let payment_amount = $state(0);
 
-    // Mirrors Event.fee_for(): which category the attendee falls into decides
-    // the price, so recording a manual payment has to offer the same choice.
-    const feeForTier = (tier) => {
-        if (tier === 'undergraduate' && data.event.undergraduate_enabled) return data.event.registration_fee_undergraduate || 0;
-        if (tier === 'graduate' && data.event.graduate_enabled) return data.event.registration_fee_graduate || 0;
-        return data.event.registration_fee || 0;
-    };
-    const tierOptions = $derived([
-        ...(data.event.undergraduate_enabled ? [{ value: 'undergraduate', label: m.eventRegister_tierUndergraduate() }] : []),
-        ...(data.event.graduate_enabled ? [{ value: 'graduate', label: m.eventRegister_tierGraduate() }] : []),
-        { value: 'pi_non_academic', label: m.eventRegister_tierPiNonAcademic() },
-    ]);
-    let payment_tier = $state('pi_non_academic');
+    // Which category the attendee registered under decides the price, so
+    // recording a manual payment offers the same choice.
+    const feeForCategory = (id) =>
+        (data.event.registration_categories ?? []).find(c => c.id === id)?.fee || 0;
+    const categoryOptions = $derived(
+        (data.event.registration_categories ?? []).map(c => ({
+            value: c.id,
+            label: getCategoryLabel(c, languageTag()),
+        }))
+    );
+    let payment_category = $state(null);
 
     // Picking someone pre-selects the category they registered under, so the
     // common case needs no thought; the admin can still override it.
     $effect(() => {
         const attendee = data.attendees.find(a => a.id === selected_attendee_id);
         if (!attendee) return;
-        const tier = attendee.student_status || 'pi_non_academic';
-        payment_tier = tier;
-        payment_amount = feeForTier(tier);
+        payment_category = attendee.category ?? data.event.registration_categories?.[0]?.id ?? null;
+        payment_amount = feeForCategory(payment_category);
     });
 
-    const onTierChange = (tier) => {
-        payment_tier = tier;
-        payment_amount = feeForTier(tier);
+    const onCategoryChange = (id) => {
+        payment_category = id;
+        payment_amount = feeForCategory(id);
     };
     let payment_type = $state('card');
     let payment_note = $state('');
@@ -241,7 +239,7 @@
 
     const showCreateModal = () => {
         selected_attendee_id = null;
-        payment_tier = 'pi_non_academic';
+        payment_category = data.event.registration_categories?.[0]?.id ?? null;
         payment_amount = registration_fee;
         payment_type = 'card';
         payment_note = '';
@@ -545,20 +543,20 @@
             <div class="mb-4">
                 <Label class="block mb-2">{m.transactions_category()}</Label>
                 <div class="grid grid-cols-1 gap-2 md:grid-cols-3">
-                    {#each tierOptions as option}
+                    {#each categoryOptions as option}
                         <label class="flex cursor-pointer items-start gap-2 rounded-lg border-2 p-2 transition-colors
-                            {payment_tier === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
+                            {payment_category === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
                             <input
                                 type="radio"
-                                name="student_status"
+                                name="category"
                                 value={option.value}
-                                checked={payment_tier === option.value}
-                                onchange={() => onTierChange(option.value)}
+                                checked={payment_category === option.value}
+                                onchange={() => onCategoryChange(option.value)}
                                 class="mt-1 h-4 w-4"
                             />
                             <span>
                                 <span class="block text-sm font-medium text-gray-900">{option.label}</span>
-                                <span class="block text-xs text-gray-500">{formatAmount(feeForTier(option.value))}</span>
+                                <span class="block text-xs text-gray-500">{formatAmount(feeForCategory(option.value))}</span>
                             </span>
                         </label>
                     {/each}

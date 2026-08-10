@@ -181,6 +181,16 @@ class OrganizerSchema(Schema):
     order: int
 
 
+class RegistrationCategorySchema(Schema):
+    id: int
+    name: str
+    name_ko: str
+    fee: int
+    onsite_fee: Union[int, None]
+    order: int
+    is_active: bool
+
+
 class EventSchema(Schema):
     id: int
     name: str
@@ -202,14 +212,9 @@ class EventSchema(Schema):
     registration_deadline: Union[date, None]
     registration_fee: Union[int, None]
     onsite_registration_fee: Union[int, None]
-    onsite_registration_fee_undergraduate: Union[int, None]
-    onsite_registration_fee_graduate: Union[int, None]
     has_onsite_fee: bool
-    undergraduate_enabled: bool
-    registration_fee_undergraduate: Union[int, None]
-    graduate_enabled: bool
-    registration_fee_graduate: Union[int, None]
     has_tiered_fees: bool
+    registration_categories: List[RegistrationCategorySchema]
     accepts_abstract: bool
     abstract_submission_type: str
     external_abstract_url: str
@@ -224,6 +229,11 @@ class EventSchema(Schema):
     @staticmethod
     def resolve_organizers(obj):
         return obj.organizer_set.all()
+
+    @staticmethod
+    def resolve_registration_categories(event) -> list:
+        # Only what is on offer; retired categories stay on their attendees.
+        return event.active_categories
 
 class PaginatedEventsSchema(Schema):
     events: List[EventSchema]
@@ -261,14 +271,9 @@ class EventAdminSchema(Schema):
     capacity: int
     registration_fee: Union[int, None]
     onsite_registration_fee: Union[int, None]
-    onsite_registration_fee_undergraduate: Union[int, None]
-    onsite_registration_fee_graduate: Union[int, None]
     has_onsite_fee: bool
-    undergraduate_enabled: bool
-    registration_fee_undergraduate: Union[int, None]
-    graduate_enabled: bool
-    registration_fee_graduate: Union[int, None]
     has_tiered_fees: bool
+    registration_categories: List[RegistrationCategorySchema]
     accepts_abstract: bool
     abstract_submission_type: str
     external_abstract_url: str
@@ -290,6 +295,11 @@ class EventAdminSchema(Schema):
     @staticmethod
     def resolve_organizers(obj):
         return obj.organizer_set.all()
+
+    @staticmethod
+    def resolve_registration_categories(event) -> list:
+        # Only what is on offer; retired categories stay on their attendees.
+        return event.active_categories
 
 class RegistrationStatusSchema(Schema):
     registered: bool
@@ -327,11 +337,17 @@ class AttendeeSchema(Schema):
     dietary: str
     user_email: str
     is_attended: bool
-    student_status: str
+    category: Union[int, None] = None
+    category_name: str
+    category_name_ko: str
     registration_fee: int
     payment_status: str
     registered_at: str
     custom_answers: List[AnswerSchema]
+
+    @staticmethod
+    def resolve_category(da: Attendee):
+        return da.category_id
 
     @staticmethod
     def resolve_registration_fee(da: Attendee) -> int:
@@ -461,9 +477,15 @@ class OnSiteAttendeeSchema(Schema):
     institute: str
     job_title: str
     is_confirmed: bool
-    student_status: str
+    category: Union[int, None] = None
+    category_name: str
+    category_name_ko: str
     registration_fee: int
     is_registration_complete: bool
+
+    @staticmethod
+    def resolve_category(oa: OnSiteAttendee):
+        return oa.category_id
 
 class PaymentHistorySchema(Schema):
     number: str

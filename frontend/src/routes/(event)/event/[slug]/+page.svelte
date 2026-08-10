@@ -6,7 +6,7 @@
     import LinkedinIcon from '$lib/components/icons/LinkedinIcon.svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
-    import { getDisplayVenue, getDisplayVenueAddress, getDisplayOrganizers, formatDate, formatDateRange } from '$lib/utils.js';
+    import { getDisplayVenue, getDisplayVenueAddress, getDisplayOrganizers, formatDate, formatDateRange, getCategoryLabel } from '$lib/utils.js';
     import { marked } from 'marked';
     import { browser } from '$app/environment';
     import VenueMapWidget from '$lib/components/VenueMapWidget.svelte';
@@ -89,15 +89,10 @@
     // rate. Empty when the event has a single price for everyone.
     let feeRows = $derived(
         event.has_tiered_fees
-            ? [
-                ...(event.undergraduate_enabled
-                    ? [{ label: m.eventRegister_tierUndergraduate(), amount: formatFee(event.registration_fee_undergraduate || 0) }]
-                    : []),
-                ...(event.graduate_enabled
-                    ? [{ label: m.eventRegister_tierGraduate(), amount: formatFee(event.registration_fee_graduate || 0) }]
-                    : []),
-                { label: m.eventRegister_tierPiNonAcademic(), amount: formatFee(event.registration_fee || 0) },
-              ]
+            ? (event.registration_categories ?? []).map(c => ({
+                label: getCategoryLabel(c, languageTag()),
+                amount: formatFee(c.fee || 0),
+              }))
             : []
     );
 

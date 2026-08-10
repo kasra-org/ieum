@@ -17,37 +17,35 @@
     import { requestNicePayPayment } from '$lib/nicepayPayments.js';
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
-    import { formatDateRange, onlyLatinChars, generateOrderId } from '$lib/utils.js';
+    import { formatDateRange, onlyLatinChars, generateOrderId, getCategoryLabel } from '$lib/utils.js';
     import 'academicons';
 
     let { data, form } = $props();
 
     let event = data.event;
 
-    // Mirrors Event.fee_for() on the server, which remains the authority: the
-    // backend recomputes the price from the stored tier before charging.
-    const feeForTier = (tier) => {
-        if (tier === 'undergraduate' && event.undergraduate_enabled) return event.registration_fee_undergraduate || 0;
-        if (tier === 'graduate' && event.graduate_enabled) return event.registration_fee_graduate || 0;
-        return event.registration_fee || 0;
-    };
-    const tierOptions = [
-        ...(event.undergraduate_enabled ? [{ value: 'undergraduate', label: m.eventRegister_tierUndergraduate() }] : []),
-        ...(event.graduate_enabled ? [{ value: 'graduate', label: m.eventRegister_tierGraduate() }] : []),
-        { value: 'pi_non_academic', label: m.eventRegister_tierPiNonAcademic() },
-    ];
-    // Someone returning to pay already has a tier on record; defaulting to the
-    // first option instead showed them another tier's price - and "free" when
-    // that tier had no price set.
-    let studentStatus = $state(
-        data.my_attendee?.student_status ?? tierOptions[0]?.value ?? 'pi_non_academic'
+    // The organiser's categories, in their order. The server recomputes the
+    // price from the stored category before charging, so this is display only.
+    const categoryOptions = $derived(
+        (event.registration_categories ?? []).map(c => ({
+            value: c.id,
+            label: getCategoryLabel(c, languageTag()),
+            fee: c.fee || 0,
+        }))
     );
+    // Someone returning to pay already has a category on record; defaulting to
+    // the first option instead showed them another category's price.
+    let categoryId = $state(
+        data.my_attendee?.category ?? event.registration_categories?.[0]?.id ?? null
+    );
+    const feeForCategory = (id) =>
+        (event.registration_categories ?? []).find(c => c.id === id)?.fee || 0;
     // Server-computed for a returning payer, so the amount cannot drift from
     // what the backend will validate.
     let selectedFee = $derived(
         startAtPaymentStep && data.my_attendee
             ? data.my_attendee.registration_fee
-            : feeForTier(studentStatus)
+            : feeForCategory(categoryId)
     );
 
     // Free is decided per attendee, not per event: someone whose category costs
@@ -179,9 +177,9 @@
             disability: me?me.disability:'',
             dietary: me?me.dietary:'',
             invitation_code: '',
-            // Same source as `studentStatus`: felte seeds the inputs from here, so
+            // Same source as `categoryId`: felte seeds the inputs from here, so
             // a different default would visibly override the bound selection.
-            student_status: data.my_attendee?.student_status ?? tierOptions[0]?.value ?? 'pi_non_academic',
+            category: data.my_attendee?.category ?? event.registration_categories?.[0]?.id ?? null,
         },
         extend: validator({ schema }),
         transform: (values) => ({
@@ -587,20 +585,20 @@
                                 {m.eventRegister_selectTier()} <span class="text-red-500">*</span>
                             </p>
                             <p class="mb-4 text-sm text-gray-500">{m.eventRegister_selectTierHelp()}</p>
-                            <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-                                {#each tierOptions as option}
+                            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                                {#each categoryOptions as option}
                                     <label class="flex cursor-pointer items-start gap-3 rounded-lg border-2 p-3 transition-colors
-                                        {studentStatus === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
+                                        {categoryId === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
                                         <input
                                             type="radio"
-                                            name="student_status"
+                                            name="category"
                                             value={option.value}
-                                            bind:group={studentStatus}
+                                            bind:group={categoryId}
                                             class="mt-1 h-4 w-4"
                                         />
                                         <span>
                                             <span class="block text-sm font-medium text-gray-900">{option.label}</span>
-                                            <span class="block text-sm text-gray-600">{formatFee(feeForTier(option.value))}</span>
+                                            <span class="block text-sm text-gray-600">{formatFee(option.fee)}</span>
                                         </span>
                                     </label>
                                 {/each}
@@ -666,7 +664,7 @@
                                 <div>
                                     <dt class="text-sm font-medium text-gray-500">{m.eventRegister_selectTier()}</dt>
                                     <dd class="mt-1 text-sm text-gray-900">
-                                        {tierOptions.find(o => o.value === studentStatus)?.label ?? ''}
+                                        {categoryOptions.find(o => o.value === categoryId)?.label ?? ''}
                                         <span class="text-gray-500">({formatFee(selectedFee)})</span>
                                     </dd>
                                 </div>

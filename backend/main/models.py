@@ -57,6 +57,52 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.username
+DEFAULT_REGISTRATION_CATEGORIES = [
+    # Seeded on every new event. They are only a starting point - organisers
+    # rename, reprice, reorder, add and remove them per event.
+    {'name': 'Undergraduate student', 'name_ko': '학부생'},
+    {'name': 'Graduate student / Postdoc', 'name_ko': '대학원생/박사후연구원'},
+    {'name': 'PI / Non-academic', 'name_ko': 'PI / 일반'},
+]
+
+
+class RegistrationCategory(models.Model):
+    """A registration tier an organiser defines, and what it costs.
+
+    Replaces the three hardcoded student_status tiers. An event's categories are
+    the only source of truth for what a registration costs: Event.registration_fee
+    and friends are derived from them.
+
+    Removing a category that people already registered under would change what
+    they owe, so the delete endpoint deactivates those instead of dropping them
+    (and the FK is RESTRICT so nothing else can either).
+    """
+    event = models.ForeignKey('Event', on_delete=models.CASCADE, related_name='registration_categories')
+    name = models.CharField(max_length=200)  # English / default
+    name_ko = models.CharField(max_length=200, blank=True)
+    fee = models.IntegerField(default=0)
+    # Charged to walk-ins at the desk instead of `fee`. Blank means free.
+    onsite_fee = models.IntegerField(blank=True, null=True)
+    order = models.IntegerField(default=0)
+    # A retired category stays for the people already registered under it, but
+    # is no longer offered to new registrants.
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['order', 'id']
+        verbose_name_plural = 'registration categories'
+
+    def __str__(self):
+        return f'{self.name} ({self.event_id})'
+
+    def label(self, language='en'):
+        """The name to show, falling back to English when no Korean is set."""
+        if language == 'ko' and self.name_ko:
+            return self.name_ko
+        return self.name
+
+
+
 class Attendee(models.Model):
     """
     Attendee model
@@ -79,17 +125,12 @@ class Attendee(models.Model):
     user_deleted_at = models.DateTimeField(null=True, blank=True)  # When the associated user was deleted
     user_email = models.EmailField(blank=True)  # Preserved email after user deletion
     is_attended = models.BooleanField(default=False)
-    # Self-reported at registration; selects which fee tier applies.
-    student_status = models.CharField(
-        max_length=20,
-        choices=[
-            # Wording matches the UI, since these labels reach attendees through
-            # get_student_status_display() in the confirmation email.
-            ('undergraduate', 'Undergraduate student'),
-            ('graduate', 'Graduate student / Postdoc'),
-            ('pi_non_academic', 'PI / Non-academic'),
-        ],
-        default='pi_non_academic',
+    # Self-reported at registration; decides which price applies. RESTRICT so a
+    # category cannot be deleted out from under a registration that is priced by
+    # it - deleting the whole event still cascades through.
+    category = models.ForeignKey(
+        'RegistrationCategory', on_delete=models.RESTRICT,
+        null=True, blank=True, related_name='attendees',
     )
 
     class Meta:
@@ -109,7 +150,16 @@ class Attendee(models.Model):
 
     @property
     def registration_fee(self):
-        return self.event.fee_for(self.student_status) if self.event_id else 0
+        return self.category.fee if self.category_id else 0
+
+    @property
+    def category_name(self):
+        """English label. Used by the confirmation email, which is English."""
+        return self.category.name if self.category_id else ''
+
+    @property
+    def category_name_ko(self):
+        return (self.category.name_ko or self.category.name) if self.category_id else ''
 
     @property
     def payment_status(self):
@@ -146,22 +196,23 @@ class OnSiteAttendee(models.Model):
     # fee, confirming is also the acknowledgement that they paid, so it is what
     # completes the registration.
     is_confirmed = models.BooleanField(default=False)
-    # Same categories as normal registration; decides which on-site price applies.
-    student_status = models.CharField(
-        max_length=20,
-        choices=[
-            # Wording matches the UI, since these labels reach attendees through
-            # get_student_status_display() in the confirmation email.
-            ('undergraduate', 'Undergraduate student'),
-            ('graduate', 'Graduate student / Postdoc'),
-            ('pi_non_academic', 'PI / Non-academic'),
-        ],
-        default='pi_non_academic',
+    # Same categories as normal registration, priced by their on-site fee.
+    category = models.ForeignKey(
+        'RegistrationCategory', on_delete=models.RESTRICT,
+        null=True, blank=True, related_name='onsite_attendees',
     )
 
     @property
     def registration_fee(self):
-        return self.event.onsite_fee_for(self.student_status)
+        return (self.category.onsite_fee or 0) if self.category_id else 0
+
+    @property
+    def category_name(self):
+        return self.category.name if self.category_id else ''
+
+    @property
+    def category_name_ko(self):
+        return (self.category.name_ko or self.category.name) if self.category_id else ''
 
     @property
     def is_registration_complete(self):
@@ -232,21 +283,9 @@ class Event(models.Model):
     main_languages = models.JSONField(default=default_main_languages)  # Array of language codes: ['ko', 'en']
     registration_deadline = models.DateField(blank=True, null=True)
     capacity = models.IntegerField()
-    # Standard price, and the one PI / non-academic attendees pay. The two tier
-    # fields below override it for students; left blank, everyone pays this.
-    registration_fee = models.IntegerField(blank=True, null=True)
-    # Charged to walk-ins at the desk. Same categories as normal registration
-    # (the enable flags below are shared), but priced separately. Blank or 0
-    # means on-site registration is free and completes immediately.
-    onsite_registration_fee = models.IntegerField(blank=True, null=True)
-    onsite_registration_fee_undergraduate = models.IntegerField(blank=True, null=True)
-    onsite_registration_fee_graduate = models.IntegerField(blank=True, null=True)
-    # Each student tier is offered only when the admin enables it; its price is
-    # then charged instead of the standard fee.
-    undergraduate_enabled = models.BooleanField(default=False)
-    registration_fee_undergraduate = models.IntegerField(blank=True, null=True)
-    graduate_enabled = models.BooleanField(default=False)
-    registration_fee_graduate = models.IntegerField(blank=True, null=True)
+    # Prices live on RegistrationCategory, one row per tier the organiser offers.
+    # The fee fields that used to sit here are derived from them below, so a
+    # price can only ever be changed in one place.
     accepts_abstract = models.BooleanField(default=False)
     abstract_submission_type = models.CharField(max_length=10, choices=[('internal', 'Internal'), ('external', 'External')], default='internal')
     external_abstract_url = models.URLField(max_length=500, blank=True)
@@ -275,60 +314,60 @@ class Event(models.Model):
 
     @property
     def has_tiered_fees(self):
-        """True when the attendee is offered a choice of tier at registration."""
-        return self.undergraduate_enabled or self.graduate_enabled
+        """True when the attendee is offered a choice of category."""
+        return len(self.active_categories) > 1
 
-    def is_tier_enabled(self, student_status):
-        if student_status == 'undergraduate':
-            return self.undergraduate_enabled
-        if student_status == 'graduate':
-            return self.graduate_enabled
-        # PI / non-academic is the standard tier and always available.
-        return student_status == 'pi_non_academic'
+    @property
+    def active_categories(self):
+        """Categories on offer to new registrants, in the organiser's order.
 
-    def _tiered_fee(self, student_status, undergraduate, graduate, standard):
-        """Resolve one of three prices from a student status.
-
-        A tier that is not enabled falls back to the standard price rather than
-        erroring, so a tier switched off after someone registered still has a
-        defined price - and an unrecognised status costs the standard fee rather
-        than nothing.
+        Cached on the instance and evaluated as a list, so the several callers
+        that ask per attendee while rendering a list do not each hit the DB.
         """
-        if student_status == 'undergraduate' and self.undergraduate_enabled:
-            return undergraduate or 0
-        if student_status == 'graduate' and self.graduate_enabled:
-            return graduate or 0
-        return standard or 0
+        if not hasattr(self, '_active_categories'):
+            self._active_categories = list(self.registration_categories.filter(is_active=True))
+        return self._active_categories
 
-    def fee_for(self, student_status):
-        """Registration fee for a student status.
+    def category_by_id(self, category_id):
+        """The offered category with this id, or None if it is not on offer.
 
-        Every price check goes through here so the amount charged, the amount
-        validated and the amount displayed cannot drift apart.
+        Registration goes through here so a client cannot name another event's
+        category, or one that has been retired, to buy a different price.
         """
-        return self._tiered_fee(
-            student_status,
-            self.registration_fee_undergraduate,
-            self.registration_fee_graduate,
-            self.registration_fee,
-        )
+        try:
+            category_id = int(category_id)
+        except (TypeError, ValueError):
+            return None
+        return next((c for c in self.active_categories if c.id == category_id), None)
 
-    def onsite_fee_for(self, student_status):
-        """On-site fee for a student status - same categories, own prices."""
-        return self._tiered_fee(
-            student_status,
-            self.onsite_registration_fee_undergraduate,
-            self.onsite_registration_fee_graduate,
-            self.onsite_registration_fee,
-        )
+    @property
+    def registration_fee(self):
+        """Headline price: the cheapest category on offer.
+
+        Kept as the summary the event list and cards have always shown; the
+        per-category prices are what anyone actually pays.
+        """
+        fees = [c.fee or 0 for c in self.active_categories]
+        return min(fees) if fees else 0
+
+    @property
+    def onsite_registration_fee(self):
+        fees = [c.onsite_fee or 0 for c in self.active_categories]
+        return min(fees) if fees else 0
 
     @property
     def has_onsite_fee(self):
         """True when any offered on-site category costs money."""
-        return any(
-            self.onsite_fee_for(t) > 0
-            for t in ('undergraduate', 'graduate', 'pi_non_academic')
-        )
+        return any((c.onsite_fee or 0) > 0 for c in self.active_categories)
+
+    def seed_default_categories(self):
+        """Give a new event the standard three categories to start from."""
+        if self.registration_categories.exists():
+            return
+        RegistrationCategory.objects.bulk_create([
+            RegistrationCategory(event=self, order=i, **defaults)
+            for i, defaults in enumerate(DEFAULT_REGISTRATION_CATEGORIES)
+        ])
 
     @property
     def organizers_en(self):

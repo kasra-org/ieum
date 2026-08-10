@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 
 from main import nicepay
 from main.utils import render_email_template
-from main.models import Abstract, AbstractVote, Attendee, Institution, EmailTemplate, Event, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings
+from main.models import Abstract, AbstractVote, Attendee, Institution, EmailTemplate, Event, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory
 
 User = get_user_model()
 
@@ -14,6 +14,17 @@ User = get_user_model()
 # (https://developers.nicepay.co.kr/manual-auth.php).
 TEST_MID = 'nicepay00m'
 TEST_MERCHANT_KEY = 'EYzu8jGGMfqaDEp76gSckuvnaHHu+bC4opsSN6lHv3b2lurNYkVXrZ7Z1AoqQnXI3eLuaUFyoRNC6FkrzVjceg=='
+
+def add_categories(event, *specs):
+    """Give an event its priced categories. Each spec is (name, fee[, onsite_fee])."""
+    created = []
+    for order, spec in enumerate(specs):
+        name, fee = spec[0], spec[1]
+        onsite_fee = spec[2] if len(spec) > 2 else None
+        created.append(RegistrationCategory.objects.create(
+            event=event, order=order, name=name, fee=fee, onsite_fee=onsite_fee))
+    return created
+
 
 nicepay_settings = override_settings(
     NICEPAY_MID=TEST_MID,
@@ -80,11 +91,12 @@ class NicePayCallbackTests(TestCase):
         )
         self.event = Event.objects.create(
             name='Test Conference', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
-            venue='Seoul', capacity=100, registration_fee=1004,
+            venue='Seoul', capacity=100,
         )
+        category, = add_categories(self.event, ('Standard', 1004))
         self.attendee = Attendee.objects.create(
             user=self.user, event=self.event, first_name='Test', last_name='Payer',
-            nationality=410, institute='KASRA',
+            nationality=410, institute='KASRA', category=category,
         )
         self.transaction = NicePayTransaction.objects.create(
             order_id='order123', attendee=self.attendee, event=self.event,
@@ -274,11 +286,12 @@ class PaymentProviderSelectionTests(TestCase):
         )
         self.event = Event.objects.create(
             name='Paid Event', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
-            venue='Seoul', capacity=100, registration_fee=1004,
+            venue='Seoul', capacity=100,
         )
+        category, = add_categories(self.event, ('Standard', 1004))
         Attendee.objects.create(
             user=self.user, event=self.event, first_name='Buy', last_name='Er',
-            nationality=410, institute='KASRA',
+            nationality=410, institute='KASRA', category=category,
         )
         self.client.force_login(self.user)
 
@@ -524,8 +537,9 @@ class GuestPasswordResetTests(TestCase):
 
 
 @nicepay_settings
-class TieredRegistrationFeeTests(TestCase):
-    """Per-tier pricing. The server must price from the stored tier, never the client."""
+class RegistrationCategoryTests(TestCase):
+    """Organiser-defined categories. The server prices from the stored category,
+    never from what the client claims."""
 
     def setUp(self):
         self.user = User.objects.create_user(
@@ -534,9 +548,12 @@ class TieredRegistrationFeeTests(TestCase):
         self.event = Event.objects.create(
             name='Tiered Event', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
             venue='Seoul', capacity=100,
-            registration_fee=200000,
-            undergraduate_enabled=True, registration_fee_undergraduate=50000,
-            graduate_enabled=True, registration_fee_graduate=100000,
+        )
+        self.undergrad, self.grad, self.standard = add_categories(
+            self.event,
+            ('Undergraduate student', 50000),
+            ('Graduate student / Postdoc', 100000),
+            ('PI / Non-academic', 200000),
         )
         # Registration sends a confirmation mail, so the template must exist.
         self.event.email_template_registration = EmailTemplate.objects.create(
@@ -545,27 +562,47 @@ class TieredRegistrationFeeTests(TestCase):
         self.event.save()
         self.client.force_login(self.user)
 
-    def test_fee_per_tier(self):
-        self.assertEqual(self.event.fee_for('undergraduate'), 50000)
-        self.assertEqual(self.event.fee_for('graduate'), 100000)
-        self.assertEqual(self.event.fee_for('pi_non_academic'), 200000)
+    def test_each_category_carries_its_own_price(self):
+        self.assertEqual(self.undergrad.fee, 50000)
+        self.assertEqual(self.grad.fee, 100000)
+        self.assertEqual(self.standard.fee, 200000)
 
-    def test_unknown_tier_falls_back_to_standard_not_free(self):
-        self.assertEqual(self.event.fee_for('nonsense'), 200000)
+    def test_headline_fee_is_the_cheapest_on_offer(self):
+        self.assertEqual(self.event.registration_fee, 50000)
 
-    def test_disabled_tier_is_charged_the_standard_fee(self):
-        self.event.undergraduate_enabled = False
-        self.event.save()
-        self.assertEqual(self.event.fee_for('undergraduate'), 200000)
-
-    def test_event_without_tiers_charges_everyone_the_same(self):
+    def test_a_single_category_is_not_a_choice(self):
         plain = Event.objects.create(
             name='Flat', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
-            venue='Seoul', capacity=10, registration_fee=30000,
+            venue='Seoul', capacity=10,
         )
+        add_categories(plain, ('Standard', 30000))
         self.assertFalse(plain.has_tiered_fees)
-        for tier in ('undergraduate', 'graduate', 'pi_non_academic'):
-            self.assertEqual(plain.fee_for(tier), 30000)
+        self.assertEqual(plain.registration_fee, 30000)
+
+    def test_more_than_one_category_is_a_choice(self):
+        self.assertTrue(self.event.has_tiered_fees)
+
+    def test_a_deactivated_category_is_no_longer_offered(self):
+        self.undergrad.is_active = False
+        self.undergrad.save()
+        event = Event.objects.get(id=self.event.id)
+        self.assertEqual([c.id for c in event.active_categories],
+                         [self.grad.id, self.standard.id])
+        self.assertIsNone(event.category_by_id(self.undergrad.id))
+
+    def test_another_events_category_is_not_accepted(self):
+        other = Event.objects.create(
+            name='Other', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Busan', capacity=10,
+        )
+        cheap, = add_categories(other, ('Cheap', 1))
+        self.assertIsNone(self.event.category_by_id(cheap.id))
+
+    def test_label_falls_back_to_english(self):
+        self.undergrad.name_ko = '학부생'
+        self.assertEqual(self.undergrad.label('ko'), '학부생')
+        self.assertEqual(self.undergrad.label('en'), 'Undergraduate student')
+        self.assertEqual(self.grad.label('ko'), 'Graduate student / Postdoc')
 
     def register(self, **extra):
         payload = {
@@ -579,24 +616,29 @@ class TieredRegistrationFeeTests(TestCase):
             data=payload, content_type='application/json',
         )
 
-    def test_registering_records_the_reported_tier(self):
-        self.register(student_status='graduate')
+    def test_registering_records_the_chosen_category(self):
+        self.register(category=self.grad.id)
         attendee = Attendee.objects.get(event=self.event, user=self.user)
-        self.assertEqual(attendee.student_status, 'graduate')
-        self.assertEqual(self.event.fee_for(attendee.student_status), 100000)
+        self.assertEqual(attendee.category, self.grad)
+        self.assertEqual(attendee.registration_fee, 100000)
 
-    def test_tier_the_event_does_not_offer_is_refused(self):
-        self.event.undergraduate_enabled = False
-        self.event.save()
-        # Claiming a tier that is switched off must not buy the lower price.
-        self.register(student_status='undergraduate')
+    def test_a_category_the_event_does_not_offer_is_refused(self):
+        self.grad.is_active = False
+        self.grad.save()
+        # Claiming a retired category must not buy its price.
+        self.register(category=self.grad.id)
         attendee = Attendee.objects.get(event=self.event, user=self.user)
-        self.assertEqual(attendee.student_status, 'pi_non_academic')
-        self.assertEqual(self.event.fee_for(attendee.student_status), 200000)
+        self.assertEqual(attendee.category, self.undergrad)
+        self.assertEqual(attendee.registration_fee, 50000)
+
+    def test_no_category_falls_back_to_the_first_offered(self):
+        self.register()
+        attendee = Attendee.objects.get(event=self.event, user=self.user)
+        self.assertEqual(attendee.category, self.undergrad)
 
     @patch('main.apis.requests.post')
-    def test_payment_below_the_tier_price_is_rejected(self, mock_post):
-        self.register(student_status='graduate')
+    def test_payment_below_the_category_price_is_rejected(self, mock_post):
+        self.register(category=self.grad.id)
         response = self.client.post(
             '/api/payment/confirm',
             data={'paymentKey': 'k', 'orderId': 'o', 'amount': 50000, 'eventId': self.event.id},
@@ -607,10 +649,10 @@ class TieredRegistrationFeeTests(TestCase):
         mock_post.assert_not_called()
 
     @patch('main.apis.requests.post')
-    def test_payment_matching_the_tier_price_is_accepted(self, mock_post):
+    def test_payment_matching_the_category_price_is_accepted(self, mock_post):
         mock_post.return_value.ok = True
         mock_post.return_value.json.return_value = {'method': '카드'}
-        self.register(student_status='graduate')
+        self.register(category=self.grad.id)
         response = self.client.post(
             '/api/payment/confirm',
             data={'paymentKey': 'k', 'orderId': 'o', 'amount': 100000, 'eventId': self.event.id},
@@ -619,6 +661,110 @@ class TieredRegistrationFeeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payment = PaymentHistory.objects.get(event=self.event)
         self.assertEqual(payment.amount, 100000)
+
+
+class RegistrationCategoryEditingTests(TestCase):
+    """Organisers add, rename, reprice, reorder and remove categories."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Editable', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10,
+        )
+        self.a, self.b = add_categories(self.event, ('A', 1000), ('B', 2000))
+
+    def apply(self, payload):
+        from main.apis import replace_registration_categories
+        return replace_registration_categories(self.event, payload)
+
+    def test_new_events_start_with_the_three_defaults(self):
+        fresh = Event.objects.create(
+            name='Fresh', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10,
+        )
+        fresh.seed_default_categories()
+        self.assertEqual(
+            [c.name for c in fresh.registration_categories.all()],
+            ['Undergraduate student', 'Graduate student / Postdoc', 'PI / Non-academic'],
+        )
+
+    def test_seeding_twice_does_not_duplicate(self):
+        self.event.seed_default_categories()
+        self.assertEqual(self.event.registration_categories.count(), 2)
+
+    def test_rename_and_reprice(self):
+        self.assertIsNone(self.apply([
+            {'id': self.a.id, 'name': 'Student', 'name_ko': '학생', 'fee': 5000, 'onsite_fee': 7000},
+            {'id': self.b.id, 'name': 'B', 'fee': 2000},
+        ]))
+        self.a.refresh_from_db()
+        self.assertEqual((self.a.name, self.a.name_ko, self.a.fee, self.a.onsite_fee),
+                         ('Student', '학생', 5000, 7000))
+
+    def test_adding_a_category(self):
+        self.apply([
+            {'id': self.a.id, 'name': 'A', 'fee': 1000},
+            {'id': self.b.id, 'name': 'B', 'fee': 2000},
+            {'name': 'C', 'fee': 3000},
+        ])
+        self.assertEqual([c.name for c in self.event.registration_categories.all()],
+                         ['A', 'B', 'C'])
+
+    def test_order_follows_the_submitted_list(self):
+        self.apply([
+            {'id': self.b.id, 'name': 'B', 'fee': 2000},
+            {'id': self.a.id, 'name': 'A', 'fee': 1000},
+        ])
+        self.assertEqual([c.name for c in self.event.registration_categories.all()], ['B', 'A'])
+
+    def test_an_unused_category_is_deleted_outright(self):
+        self.apply([{'id': self.a.id, 'name': 'A', 'fee': 1000}])
+        self.assertFalse(RegistrationCategory.objects.filter(id=self.b.id).exists())
+
+    def test_a_category_in_use_is_retired_not_deleted(self):
+        Attendee.objects.create(
+            event=self.event, category=self.b, first_name='In', last_name='Use',
+            nationality=1, institute='PNU',
+        )
+        self.apply([{'id': self.a.id, 'name': 'A', 'fee': 1000}])
+        self.b.refresh_from_db()
+        # Still there, still pricing that registration, but off the form.
+        self.assertFalse(self.b.is_active)
+        self.assertEqual(Attendee.objects.get(event=self.event).registration_fee, 2000)
+
+    def test_an_empty_list_is_refused(self):
+        self.assertIsNotNone(self.apply([]))
+        self.assertEqual(self.event.registration_categories.count(), 2)
+
+    def test_entries_without_a_name_are_ignored(self):
+        self.assertIsNotNone(self.apply([{'name': '  ', 'fee': 1}]))
+
+    def test_a_blank_fee_means_free(self):
+        self.apply([{'id': self.a.id, 'name': 'A', 'fee': ''}])
+        self.a.refresh_from_db()
+        self.assertEqual(self.a.fee, 0)
+
+    def test_a_blank_onsite_fee_means_no_onsite_charge(self):
+        self.apply([{'id': self.a.id, 'name': 'A', 'fee': 100, 'onsite_fee': ''}])
+        self.a.refresh_from_db()
+        self.assertIsNone(self.a.onsite_fee)
+
+    def test_a_category_cannot_be_deleted_while_it_prices_a_registration(self):
+        from django.db.models import RestrictedError
+        Attendee.objects.create(
+            event=self.event, category=self.b, first_name='In', last_name='Use',
+            nationality=1, institute='PNU',
+        )
+        with self.assertRaises(RestrictedError):
+            self.b.delete()
+
+    def test_deleting_the_event_still_works(self):
+        Attendee.objects.create(
+            event=self.event, category=self.b, first_name='In', last_name='Use',
+            nationality=1, institute='PNU',
+        )
+        self.event.delete()
+        self.assertFalse(RegistrationCategory.objects.filter(id=self.b.id).exists())
 
 
 class AbstractPresentationTypeTests(TestCase):
@@ -770,8 +916,8 @@ class OnSiteRegistrationFeeTests(TestCase):
         self.event = Event.objects.create(
             name='Walk-in Event', start_date=today, end_date=today,
             venue='Seoul', capacity=100, onsite_code='TESTCD',
-            onsite_registration_fee=30000,
         )
+        self.standard, = add_categories(self.event, ('Standard', 100000, 30000))
 
     def register(self):
         return self.client.post(
@@ -781,49 +927,36 @@ class OnSiteRegistrationFeeTests(TestCase):
             content_type='application/json',
         )
 
-    def test_onsite_tiers_are_priced_separately_from_standard(self):
-        self.event.undergraduate_enabled = True
-        self.event.graduate_enabled = True
-        self.event.registration_fee = 200000
-        self.event.registration_fee_undergraduate = 50000
-        self.event.onsite_registration_fee = 250000
-        self.event.onsite_registration_fee_undergraduate = 80000
-        self.event.save()
-        # Same categories, different prices.
-        self.assertEqual(self.event.fee_for('undergraduate'), 50000)
-        self.assertEqual(self.event.onsite_fee_for('undergraduate'), 80000)
-        self.assertEqual(self.event.onsite_fee_for('pi_non_academic'), 250000)
+    def test_onsite_price_is_separate_from_the_standard_one(self):
+        self.assertEqual(self.standard.fee, 100000)
+        self.assertEqual(self.standard.onsite_fee, 30000)
 
     def test_walkin_is_charged_their_category(self):
-        self.event.graduate_enabled = True
-        self.event.onsite_registration_fee = 250000
-        self.event.onsite_registration_fee_graduate = 180000
-        self.event.save()
+        grad, = add_categories(self.event, ('Graduate', 200000, 180000))
         response = self.client.post(
             f'/api/event/{self.event.id}/onsite',
             data={'code': 'TESTCD', 'name': 'W', 'email': 'g@example.com',
-                  'institute': 'P', 'job_title': 'D', 'student_status': 'graduate'},
+                  'institute': 'P', 'job_title': 'D', 'category': grad.id},
             content_type='application/json',
         )
         self.assertEqual(response.json()['fee'], 180000)
         oa = OnSiteAttendee.objects.get(email='g@example.com')
-        self.assertEqual(oa.student_status, 'graduate')
+        self.assertEqual(oa.category, grad)
         self.assertEqual(oa.registration_fee, 180000)
 
     def test_walkin_cannot_claim_a_category_the_event_does_not_offer(self):
-        self.event.undergraduate_enabled = False
-        self.event.onsite_registration_fee = 250000
-        self.event.onsite_registration_fee_undergraduate = 10000
-        self.event.save()
+        retired, = add_categories(self.event, ('Retired', 10000, 10000))
+        retired.is_active = False
+        retired.save()
         self.client.post(
             f'/api/event/{self.event.id}/onsite',
             data={'code': 'TESTCD', 'name': 'W', 'email': 'x@example.com',
-                  'institute': 'P', 'job_title': 'D', 'student_status': 'undergraduate'},
+                  'institute': 'P', 'job_title': 'D', 'category': retired.id},
             content_type='application/json',
         )
         oa = OnSiteAttendee.objects.get(email='x@example.com')
-        self.assertEqual(oa.student_status, 'pi_non_academic')
-        self.assertEqual(oa.registration_fee, 250000)
+        self.assertEqual(oa.category, self.standard)
+        self.assertEqual(oa.registration_fee, 30000)
 
     def test_registration_reports_the_fee_owed(self):
         response = self.register()
@@ -843,8 +976,8 @@ class OnSiteRegistrationFeeTests(TestCase):
         self.assertTrue(oa.is_registration_complete)
 
     def test_free_on_site_registration_completes_immediately(self):
-        self.event.onsite_registration_fee = None
-        self.event.save()
+        self.standard.onsite_fee = None
+        self.standard.save()
         response = self.register()
         self.assertFalse(response.json()['payment_required'])
 
@@ -854,8 +987,8 @@ class OnSiteRegistrationFeeTests(TestCase):
         self.assertTrue(oa.is_registration_complete)
 
     def test_zero_fee_is_treated_as_free(self):
-        self.event.onsite_registration_fee = 0
-        self.event.save()
+        self.standard.onsite_fee = 0
+        self.standard.save()
         self.register()
         oa = OnSiteAttendee.objects.get(event=self.event, email='w@example.com')
         self.assertTrue(oa.is_registration_complete)
@@ -871,15 +1004,16 @@ class AbstractPaymentGateTests(TestCase):
         self.event = Event.objects.create(
             name='Gated Event', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
             venue='Seoul', capacity=100, capacity_abstract=100,
-            accepts_abstract=True, registration_fee=100000,
+            accepts_abstract=True,
         )
+        self.category, = add_categories(self.event, ('Standard', 100000))
         self.event.email_template_abstract_submission = EmailTemplate.objects.create(
             subject='Submitted', body='Thanks',
         )
         self.event.save()
         self.attendee = Attendee.objects.create(
             user=self.user, event=self.event, first_name='Sub', last_name='Mitter',
-            nationality=1, institute='PNU', job_title='Student',
+            nationality=1, institute='PNU', job_title='Student', category=self.category,
         )
         self.client.force_login(self.user)
 
@@ -919,8 +1053,8 @@ class AbstractPaymentGateTests(TestCase):
         self.assertTrue(Abstract.objects.filter(event=self.event).exists())
 
     def test_free_event_is_not_gated(self):
-        self.event.registration_fee = 0
-        self.event.save()
+        self.category.fee = 0
+        self.category.save()
         self.assertEqual(self.attendee.payment_status, 'free')
         response = self.submit()
         self.assertEqual(response.status_code, 200)
@@ -933,13 +1067,74 @@ class AbstractPaymentGateTests(TestCase):
         self.assertTrue(self.attendee.has_outstanding_payment)
         self.assertEqual(self.submit().status_code, 400)
 
-    def test_free_tier_attendee_is_not_gated_on_a_paid_event(self):
-        # The gate must read this attendee's tier, not the event's headline fee.
-        self.event.undergraduate_enabled = True
-        self.event.registration_fee_undergraduate = 0
-        self.event.save()
-        self.attendee.student_status = 'undergraduate'
+    def test_free_category_attendee_is_not_gated_on_a_paid_event(self):
+        # The gate must read this attendee's category, not the headline fee.
+        free, = add_categories(self.event, ('Invited speaker', 0))
+        self.attendee.category = free
         self.attendee.save()
         self.attendee.refresh_from_db()
         self.assertEqual(self.attendee.payment_status, 'free')
         self.assertEqual(self.submit().status_code, 200)
+
+
+class CategorySerializationTests(TestCase):
+    """The API must send the category id, not the model instance.
+
+    A plain `category: int` field made ninja hand pydantic the FK object and
+    500 the whole registration endpoint, which no pricing test caught.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='ser@example.com', email='ser@example.com', password='pw12345!aA',
+        )
+        self.event = Event.objects.create(
+            name='Serialized', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, onsite_code='SERCOD', published=True,
+        )
+        self.category, = add_categories(self.event, ('Student', 50000, 60000))
+        self.category.name_ko = '학생'
+        self.category.save()
+        attendee = Attendee.objects.create(
+            user=self.user, event=self.event, first_name='Ser', last_name='Ial',
+            nationality=1, institute='PNU', category=self.category,
+        )
+        # The endpoint looks the attendee up through the M2M, not the FK.
+        self.event.attendees.add(attendee)
+        self.client.force_login(self.user)
+
+    def test_registration_endpoint_serializes(self):
+        response = self.client.get(f'/api/event/{self.event.id}/registration')
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['category'], self.category.id)
+        self.assertEqual(body['category_name'], 'Student')
+        self.assertEqual(body['category_name_ko'], '학생')
+        self.assertEqual(body['registration_fee'], 50000)
+
+    def test_event_endpoint_lists_its_categories(self):
+        response = self.client.get(f'/api/event/{self.event.id}')
+        self.assertEqual(response.status_code, 200)
+        categories = response.json()['registration_categories']
+        self.assertEqual([c['name'] for c in categories], ['Student'])
+        self.assertEqual(categories[0]['fee'], 50000)
+        self.assertEqual(categories[0]['onsite_fee'], 60000)
+
+    def test_retired_categories_are_not_offered_to_clients(self):
+        add_categories(self.event, ('Gone', 1))
+        self.event.registration_categories.filter(name='Gone').update(is_active=False)
+        response = self.client.get(f'/api/event/{self.event.id}')
+        self.assertEqual([c['name'] for c in response.json()['registration_categories']], ['Student'])
+
+    def test_onsite_list_serializes(self):
+        OnSiteAttendee.objects.create(
+            event=self.event, name='Walk In', institute='PNU', category=self.category,
+        )
+        self.user.is_staff = True
+        self.user.save()
+        response = self.client.get(f'/api/event/{self.event.id}/onsite')
+        self.assertEqual(response.status_code, 200)
+        row = response.json()[0]
+        self.assertEqual(row['category'], self.category.id)
+        self.assertEqual(row['category_name_ko'], '학생')
+        self.assertEqual(row['registration_fee'], 60000)

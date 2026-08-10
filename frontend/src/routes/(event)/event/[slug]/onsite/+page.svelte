@@ -8,7 +8,7 @@
     import { validator } from '@felte/validator-yup';
     import * as yup from 'yup';
     import * as m from '$lib/paraglide/messages.js';
-    import { onlyLatinChars } from '$lib/utils.js';
+    import { onlyLatinChars, getCategoryLabel } from '$lib/utils.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
 
     import OnSiteRegistrationForm from '$lib/components/OnSiteRegistrationForm.svelte';
@@ -31,19 +31,18 @@
     let onsite_code_valid = $derived(data.onsite_code_valid);
     let onsite_code = $derived(data.onsite_code);
 
-    // Same categories as normal registration, priced separately for the desk.
-    // Mirrors Event.onsite_fee_for(); the server recomputes before charging.
-    const onsiteFeeForTier = (tier) => {
-        if (tier === 'undergraduate' && event.undergraduate_enabled) return event.onsite_registration_fee_undergraduate || 0;
-        if (tier === 'graduate' && event.graduate_enabled) return event.onsite_registration_fee_graduate || 0;
-        return event.onsite_registration_fee || 0;
-    };
-    const tierOptions = [
-        ...(event.undergraduate_enabled ? [{ value: 'undergraduate', label: m.eventRegister_tierUndergraduate() }] : []),
-        ...(event.graduate_enabled ? [{ value: 'graduate', label: m.eventRegister_tierGraduate() }] : []),
-        { value: 'pi_non_academic', label: m.eventRegister_tierPiNonAcademic() },
-    ];
-    let studentStatus = $state(tierOptions[0]?.value ?? 'pi_non_academic');
+    // The same categories as normal registration, at their on-site price.
+    // The server recomputes from the stored category before charging.
+    const categoryOptions = $derived(
+        (event.registration_categories ?? []).map(c => ({
+            value: c.id,
+            label: getCategoryLabel(c, languageTag()),
+            fee: c.onsite_fee || 0,
+        }))
+    );
+    let categoryId = $state(event.registration_categories?.[0]?.id ?? null);
+    const onsiteFeeForCategory = (id) =>
+        (event.registration_categories ?? []).find(c => c.id === id)?.onsite_fee || 0;
 
     const formatFee = (fee) => fee
         ? (languageTag() === 'ko' ? `${fee.toLocaleString('ko-KR')} 원` : `KRW ${fee.toLocaleString('ko-KR')}`)
@@ -51,15 +50,15 @@
 
     // Payment is taken at the desk, so the amount is stated before the form
     // rather than surprising the walk-in on the next screen.
-    let onsiteFee = $derived(onsiteFeeForTier(studentStatus));
+    let onsiteFee = $derived(onsiteFeeForCategory(categoryId));
     let formattedOnsiteFee = $derived(formatFee(onsiteFee));
     let hasOnsiteFee = $derived(event.has_onsite_fee);
-    let showTierChoice = $derived(hasOnsiteFee && tierOptions.length > 1);
+    let showTierChoice = $derived(hasOnsiteFee && categoryOptions.length > 1);
 
     let error_message = $state('');
     const { form: felteForm, data: formData, errors, isSubmitting } = createForm({
         onSubmit: async (formValues) => {
-            const submitData = { ...formValues, code: onsite_code, student_status: studentStatus };
+            const submitData = { ...formValues, code: onsite_code, category: categoryId };
             const response = await fetch('?/onsiteregister',
                 {
                     method: 'POST',
@@ -121,14 +120,14 @@
                     </p>
                     <p class="mb-4 text-sm text-gray-500">{m.eventRegister_selectTierHelp()}</p>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-                        {#each tierOptions as option}
+                        {#each categoryOptions as option}
                             <label class="flex cursor-pointer items-start gap-3 rounded-lg border-2 p-3 transition-colors
-                                {studentStatus === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
-                                <input type="radio" name="student_status" value={option.value}
-                                    bind:group={studentStatus} class="mt-1 h-4 w-4" />
+                                {categoryId === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
+                                <input type="radio" name="category" value={option.value}
+                                    bind:group={categoryId} class="mt-1 h-4 w-4" />
                                 <span>
                                     <span class="block text-sm font-medium text-gray-900">{option.label}</span>
-                                    <span class="block text-sm text-gray-600">{formatFee(onsiteFeeForTier(option.value)) || m.eventDetail_registrationFeeFree()}</span>
+                                    <span class="block text-sm text-gray-600">{formatFee(option.fee) || m.eventDetail_registrationFeeFree()}</span>
                                 </span>
                             </label>
                         {/each}
