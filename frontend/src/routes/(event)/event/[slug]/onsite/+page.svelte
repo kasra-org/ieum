@@ -119,7 +119,7 @@
                         {m.eventRegister_selectTier()} <span class="text-red-500">*</span>
                     </p>
                     <p class="mb-4 text-sm text-gray-500">{m.eventRegister_selectTierHelp()}</p>
-                    <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div class="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
                         {#each categoryOptions as option}
                             <label class="flex cursor-pointer items-start gap-3 rounded-lg border-2 p-3 transition-colors
                                 {categoryId === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">

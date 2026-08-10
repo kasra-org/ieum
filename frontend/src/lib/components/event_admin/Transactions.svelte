@@ -542,7 +542,7 @@
         {#if data.event.has_tiered_fees}
             <div class="mb-4">
                 <Label class="block mb-2">{m.transactions_category()}</Label>
-                <div class="grid grid-cols-1 gap-2 md:grid-cols-3">
+                <div class="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))]">
                     {#each categoryOptions as option}
                         <label class="flex cursor-pointer items-start gap-2 rounded-lg border-2 p-2 transition-colors
                             {payment_category === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">

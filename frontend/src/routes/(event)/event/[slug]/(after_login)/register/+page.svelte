@@ -541,7 +541,21 @@
                             <li>
                                 <span class="font-medium">{m.eventRegister_eventDates()}</span> {formatDateRange(event.start_date, event.end_date)}
                             </li>
-                            {#if !isFreeEvent}
+                            {#if event.has_tiered_fees}
+                                <!-- Every category's price, not just the selected one: this
+                                     block introduces the event, before any choice is made. -->
+                                <li>
+                                    <span class="font-medium">{m.eventDetail_registrationFee()}</span>
+                                    <ul class="mt-1 ml-4 list-none space-y-0.5">
+                                        {#each categoryOptions as option}
+                                            <li class="flex flex-wrap gap-x-2">
+                                                <span>{option.label}</span>
+                                                <span class="text-gray-600">{formatFee(option.fee)}</span>
+                                            </li>
+                                        {/each}
+                                    </ul>
+                                </li>
+                            {:else if !isFreeEvent}
                                 <li>
                                     <span class="font-medium">{m.eventDetail_registrationFee()}</span> {formattedRegistrationFee()}
                                 </li>
@@ -585,7 +599,7 @@
                                 {m.eventRegister_selectTier()} <span class="text-red-500">*</span>
                             </p>
                             <p class="mb-4 text-sm text-gray-500">{m.eventRegister_selectTierHelp()}</p>
-                            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                            <div class="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
                                 {#each categoryOptions as option}
                                     <label class="flex cursor-pointer items-start gap-3 rounded-lg border-2 p-3 transition-colors
                                         {categoryId === option.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}">
