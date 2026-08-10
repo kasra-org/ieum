@@ -215,7 +215,10 @@ export function openCardReceiptWindow(paymentNumber) {
  * @returns {boolean} - True if payment type is card (카드)
  */
 export function isCardPayment(payment) {
-    return payment && payment.payment_type === '카드';
+    // NicePay records a card payment as '카드' as well, but only Toss exposes a
+    // card slip; asking Toss for a NicePay order just produces an error.
+    return Boolean(payment) && payment.payment_type === '카드'
+        && (payment.provider ?? 'toss') === 'toss';
 }
 
 /**

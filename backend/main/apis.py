@@ -19,7 +19,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.template import Template, Context
 from django.db import IntegrityError
-from django.db.models import Max
+from django.db.models import Max, Q
 
 from django.conf import settings
 import logging
@@ -195,6 +195,7 @@ def get_payment_history(request):
             'organizers_ko': payment.event_organizers_ko,
             'status': payment.status,
             'payment_type': payment.payment_type,
+            'provider': payment.provider,
             'attendee_name': payment.attendee_name,
             'attendee_name_ko': payment.attendee_korean_name,
             'attendee_institute': payment.attendee_institute,
@@ -210,9 +211,14 @@ def get_payment_by_id(request, order_id: str):
     Uses copied fields from PaymentHistory for data preservation.
     """
     user = request.user
-    try:
-        payment = PaymentHistory.objects.select_related('event').get(toss_order_id=order_id, attendee__user=user)
-    except PaymentHistory.DoesNotExist:
+    # `number` below is the order id, or the row id when a payment has none -
+    # so accept either here, or those receipts 404 no matter what is clicked.
+    lookup = Q(toss_order_id=order_id)
+    if order_id.isdigit():
+        lookup |= Q(id=int(order_id))
+    payment = (PaymentHistory.objects.select_related('event')
+               .filter(lookup, attendee__user=user).first())
+    if payment is None:
         return api.create_response(
             request,
             {"code": "not_found", "message": "Payment not found"},
@@ -233,6 +239,7 @@ def get_payment_by_id(request, order_id: str):
         'organizers_ko': payment.event_organizers_ko,
         'status': payment.status,
         'payment_type': payment.payment_type,
+        'provider': payment.provider,
         'attendee_name': payment.attendee_name,
         'attendee_name_ko': payment.attendee_korean_name,
         'attendee_institute': payment.attendee_institute,
@@ -1025,6 +1032,7 @@ def get_my_registration_payment(request, event_id: int):
             'organizers_ko': event.organizers_ko,
             'status': payment.status,
             'payment_type': payment.payment_type,
+            'provider': payment.provider,
             'attendee_name': attendee_name,
             'attendee_name_ko': attendee.korean_name or '',
             'attendee_institute': attendee.institute or '',
@@ -1468,48 +1476,6 @@ def update_speaker(request, event_id: int, speaker_id: int):
     # Covers the email being corrected as well as the tick being changed.
     apply_speaker_exemption(speaker)
     return {"code": "success", "message": "Speaker updated."}
-
-@api.post("/event/{event_id}/speaker/{speaker_id}/invite", response=MessageSchema)
-@ensure_event_staff
-def invite_speaker(request, event_id: int, speaker_id: int):
-    """Email a speaker a link to register for the event.
-
-    Sent on demand rather than when the speaker is added, so an organiser can
-    fill the list in first and invite when the details are settled.
-    """
-    event = Event.objects.get(id=event_id)
-    speaker = event.speakers.get(id=speaker_id)
-
-    if not validate_email_format(speaker.email):
-        return api.create_response(
-            request,
-            {"code": "invalid_email", "message": "This speaker has no usable email address."},
-            status=400,
-        )
-
-    register_url = f"{settings.HEADLESS_URL_ROOT}/event/{event.id}/register"
-    fee_line = (
-        "The registration fee is waived for you - please register and leave the payment to us.\n"
-        if speaker.is_payment_exempt else ""
-    )
-    subject = sanitize_email_header(
-        f"{settings.ACCOUNT_EMAIL_SUBJECT_PREFIX}Invitation to speak at {event.name}")
-    body = (
-        f"Dear {speaker.name},\n\n"
-        f"You are invited to speak at {event.name}.\n\n"
-        f"Event Details:\n"
-        f" - Dates: {event.start_date:%B %d, %Y} - {event.end_date:%B %d, %Y}\n"
-        f" - Venue: {event.venue}\n\n"
-        f"Please complete your registration here:\n{register_url}\n\n"
-        f"{fee_line}"
-        f"\nIf you have any questions, please contact us at: {settings.EMAIL_FROM}\n\n"
-        f"We look forward to your talk.\n\n"
-        f"Warm regards,\n"
-        f"{event.organizers_en}"
-    )
-    reply_to = event.main_admin.email if event.main_admin else None
-    send_mail.delay(subject, body, speaker.email, reply_to=reply_to)
-    return {"code": "success", "message": "Invitation sent."}
 
 @api.post("/event/{event_id}/speaker/{speaker_id}/delete", response=MessageSchema)
 @ensure_event_staff
@@ -2989,6 +2955,16 @@ def get_card_receipt(request, order_id: str):
         return api.create_response(
             request,
             {"code": "not_card", "message": "This payment is not a card payment."},
+            status=400,
+        )
+
+    # The columns are named after Toss but hold NicePay's Moid/TID too, so the
+    # provider - not the field names - decides whose API can answer for it.
+    if payment.provider != 'toss':
+        return api.create_response(
+            request,
+            {"code": "not_supported",
+             "message": "A card slip is only available for card payments made through Toss."},
             status=400,
         )
 

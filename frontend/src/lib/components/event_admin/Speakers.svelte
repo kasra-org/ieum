@@ -2,7 +2,7 @@
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from '$lib/components/ui';
     import { Button, Modal, Label, Input, Select, Textarea, Alert } from '$lib/components/ui';
     import { Tabs, TabItem } from '$lib/components/ui';
-    import { Check, Mail, UserMinus, UserPen } from '@lucide/svelte';
+    import { Check, UserMinus, UserPen } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import * as m from '$lib/paraglide/messages.js';
@@ -68,13 +68,6 @@
         queueMicrotask(() => exemption_form?.requestSubmit());
     };
 
-    let invite_sent_for = $state(null);
-    let invite_form = $state(null);
-    let inviting_speaker = $state(null);
-    const inviteSpeaker = (row) => {
-        inviting_speaker = row;
-        queueMicrotask(() => invite_form?.requestSubmit());
-    };
 
     // Custom getters for SearchableUserList
     function getAttendeeEmail(attendee) {
@@ -240,11 +233,6 @@
                                 <UserPen class="w-5 h-5" />
                             </Button>
                         </ActionTooltip>
-                        <ActionTooltip text={m.speakers_invite()}>
-                            <Button color="none" size="none" onclick={() => inviteSpeaker(row)}>
-                                <Mail class="w-5 h-5 {invite_sent_for === row.id ? 'text-green-600' : ''}" />
-                            </Button>
-                        </ActionTooltip>
                         <ActionTooltip text={m.speakers_removeSpeaker()}>
                             <Button color="none" size="none" onclick={() => removeSpeakerModal(row.id)}>
                                 <UserMinus class="w-5 h-5" />
@@ -371,12 +359,4 @@
     <input type="hidden" name="is_domestic" value={toggling_speaker?.is_domestic ? 'true' : 'false'} />
     <input type="hidden" name="is_payment_exempt" value={toggling_speaker?.is_payment_exempt ? 'true' : 'false'} />
     <input type="hidden" name="type" value={toggling_speaker?.type ?? ''} />
-</form>
-
-<form method="POST" action="?/invite_speaker" bind:this={invite_form} class="hidden"
-    use:enhance={() => async ({ result }) => {
-        if (result.type === 'success') invite_sent_for = inviting_speaker?.id ?? null;
-        inviting_speaker = null;
-    }}>
-    <input type="hidden" name="id" value={inviting_speaker?.id ?? ''} />
 </form>

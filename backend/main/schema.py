@@ -506,6 +506,9 @@ class PaymentHistorySchema(Schema):
     organizers_ko: str
     status: str
     payment_type: str
+    # Toss and NicePay both label a card payment '카드', so the slip button
+    # needs the provider to know whose receipt service to ask.
+    provider: str = "toss"
     attendee_name: str
     attendee_name_ko: str
     attendee_institute: str

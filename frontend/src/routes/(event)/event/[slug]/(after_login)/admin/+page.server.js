@@ -167,17 +167,6 @@ export const actions = {
         }
         return;
     },
-    invite_speaker: async ({ cookies, params, request }) => {
-        let formdata = await request.formData();
-        const response = await post(
-            `api/event/${params.slug}/speaker/${formdata.get('id')}/invite`, {}, cookies);
-        if (response.ok && response.status === 200) {
-            return response.data;
-        } else {
-            error(response.status, response.data);
-        }
-        return;
-    },
     remove_speaker: async ({ cookies, params, request }) => {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/speaker/${formdata.get('id')}/delete`, {

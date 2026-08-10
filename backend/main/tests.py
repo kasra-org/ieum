@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 from main import nicepay
 from main.utils import render_email_template
 from main.models import Abstract, AbstractVote, Attendee, Institution, EmailTemplate, Event, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory
-from main.models import apply_speaker_exemption
+from main.models import apply_speaker_exemption, settle_speaker_payment
 
 User = get_user_model()
 
@@ -1308,30 +1308,117 @@ class SpeakerPaymentExemptionTests(TestCase):
         apply_speaker_exemption(other.speakers.get())
         self.assertEqual(attendee.payment_status, 'pending')
 
-    def test_invitation_email_is_sent(self):
-        self.add_speaker()
-        speaker = self.event.speakers.get()
-        with patch('main.apis.send_mail.delay') as mock_send:
-            response = self.client.post(
-                f'/api/event/{self.event.id}/speaker/{speaker.id}/invite',
-                data={}, content_type='application/json',
-            )
-        self.assertEqual(response.status_code, 200)
-        mock_send.assert_called_once()
-        subject, body, recipient = mock_send.call_args[0][:3]
-        self.assertIn('Symposium', subject)
-        self.assertIn(f'/event/{self.event.id}/register', body)
-        self.assertEqual(recipient, 'spk@example.com')
 
-    def test_invitation_to_a_speaker_with_a_bad_email_is_refused(self):
-        self.add_speaker()
-        speaker = self.event.speakers.get()
-        speaker.email = 'not-an-address'
-        speaker.save(update_fields=['email'])
-        with patch('main.apis.send_mail.delay') as mock_send:
-            response = self.client.post(
-                f'/api/event/{self.event.id}/speaker/{speaker.id}/invite',
-                data={}, content_type='application/json',
-            )
+class ReceiptLookupTests(TestCase):
+    """The receipt link has to resolve for payments with no gateway order id."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='rcp@example.com', email='rcp@example.com', password='pw12345!aA',
+        )
+        self.event = Event.objects.create(
+            name='Receipted', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10,
+        )
+        category, = add_categories(self.event, ('Regular', 200000))
+        self.attendee = Attendee.objects.create(
+            user=self.user, event=self.event, first_name='Rec', last_name='Eipt',
+            nationality=1, institute='PNU', category=category,
+        )
+        self.event.attendees.add(self.attendee)
+        self.client.force_login(self.user)
+
+    def fetch(self, number):
+        return self.client.get(f'/api/me/payment/{number}')
+
+    def test_a_waived_payment_reports_zero_so_the_ui_can_disable_printing(self):
+        payment = settle_speaker_payment(self.event, self.attendee)
+        response = self.fetch(payment.toss_order_id)
+        self.assertEqual(response.status_code, 200)
+        # Nothing was charged, so ReceiptButtons disables both print actions.
+        self.assertEqual(response.json()['amount'], 0)
+
+    def test_a_payment_with_no_order_id_resolves_by_row_id(self):
+        # What `number` falls back to; before, this 404'd for every such record.
+        payment = PaymentHistory.objects.create(
+            attendee=self.attendee, event=self.event, amount=1000, status='completed',
+        )
+        self.assertIsNone(payment.toss_order_id)
+        self.assertEqual(self.fetch(str(payment.id)).status_code, 200)
+
+    def test_another_users_receipt_is_not_readable(self):
+        other = User.objects.create_user(
+            username='ohter@example.com', email='other@example.com', password='pw12345!aA')
+        other_attendee = Attendee.objects.create(
+            user=other, event=self.event, first_name='Ot', last_name='Her',
+            nationality=1, institute='PNU',
+        )
+        payment = PaymentHistory.objects.create(
+            attendee=other_attendee, event=self.event, amount=1000, status='completed',
+        )
+        self.assertEqual(self.fetch(str(payment.id)).status_code, 404)
+
+
+class NicePayReceiptTests(TestCase):
+    """The payment columns are named after Toss but hold NicePay's ids too."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='np@example.com', email='np@example.com', password='pw12345!aA',
+        )
+        self.event = Event.objects.create(
+            name='NicePaid', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10,
+        )
+        category, = add_categories(self.event, ('Regular', 200000))
+        self.attendee = Attendee.objects.create(
+            user=self.user, event=self.event, first_name='Nice', last_name='Pay',
+            nationality=1, institute='PNU', category=category,
+        )
+        self.event.attendees.add(self.attendee)
+        self.client.force_login(self.user)
+
+    def make_payment(self, provider, order_id):
+        payment = PaymentHistory(
+            attendee=self.attendee, event=self.event, amount=200000, status='completed',
+            provider=provider, payment_type='카드', toss_order_id=order_id,
+            toss_payment_key='TID123',
+        )
+        payment.copy_attendee_info(self.attendee)
+        payment.copy_event_info(self.event)
+        payment.save()
+        return payment
+
+    def test_a_nicepay_receipt_is_readable_by_its_moid(self):
+        payment = self.make_payment('nicepay', 'MOID-1')
+        response = self.client.get(f'/api/me/payment/{payment.toss_order_id}')
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['provider'], 'nicepay')
+        self.assertEqual(body['amount'], 200000)
+
+    def test_the_payment_history_list_reports_the_provider(self):
+        self.make_payment('nicepay', 'MOID-2')
+        response = self.client.get('/api/me/payment-history')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([p['provider'] for p in response.json()], ['nicepay'])
+
+    @patch('main.apis.requests.get')
+    def test_a_nicepay_card_slip_never_asks_toss(self, mock_get):
+        """Both providers label a card payment '카드'; only Toss can answer."""
+        payment = self.make_payment('nicepay', 'MOID-3')
+        response = self.client.get(f'/api/payment/{payment.toss_order_id}/card-receipt')
         self.assertEqual(response.status_code, 400)
-        mock_send.assert_not_called()
+        self.assertEqual(response.json()['code'], 'not_supported')
+        mock_get.assert_not_called()
+
+    @override_settings(TOSS_SECRET_KEY='sk_test', TOSS_API_URL='https://api.tosspayments.com/v1')
+    @patch('main.apis.requests.get')
+    def test_a_toss_card_slip_still_works(self, mock_get):
+        mock_get.return_value.ok = True
+        mock_get.return_value.json.return_value = {'receipt': {'url': 'https://receipt.example'}}
+        payment = self.make_payment('toss', 'TOSS-1')
+        response = self.client.get(f'/api/payment/{payment.toss_order_id}/card-receipt')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['receipt_url'], 'https://receipt.example')
+        mock_get.assert_called_once()

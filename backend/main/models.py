@@ -1170,10 +1170,15 @@ def settle_speaker_payment(event, attendee):
     if attendee is None or attendee.payments.filter(status='completed').exists():
         return None
 
+    from main.utils import generate_order_id
+
     payment = PaymentHistory(
         attendee=attendee, event=event, amount=0, status='completed',
         provider='manual', payment_type=SPEAKER_PAYMENT_TYPE,
         note='Speaker: registration fee waived.',
+        # Receipts are looked up by order id, so one is needed even though no
+        # gateway was involved.
+        toss_order_id=generate_order_id(),
     )
     payment.copy_attendee_info(attendee)
     payment.copy_event_info(event)
