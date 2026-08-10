@@ -463,6 +463,10 @@
 	"speakers_sendEmailError": "Failed to send email.",
 	"speakers_addSpeaker": "Add Speaker",
 	"speakers_searchPlaceholder": "Search by First Name",
+	"speakers_paymentExempt": "Fee exempt",
+	"speakers_paymentExemptHelp": "The registration fee is waived. Once this speaker registers, their registration is settled at 0 KRW.",
+	"speakers_invite": "Send invitation email",
+	"speakers_inviteSent": "Invitation sent.",
 	"speakers_name": "Name",
 	"speakers_email": "Email",
 	"speakers_affiliation": "Affiliation",
@@ -489,6 +493,7 @@
 	"speakerType_contributed": "Contributed Talk",
 	"speakerType_short": "Short Talk",
 	"speakerType_poster": "Poster",
+	"speakerType_unknown": "Unknown",
 
 	"attendees_title": "Attendees",
 	"attendees_description": "Below is the list of attendees for this event.",

@@ -138,6 +138,7 @@ export const actions = {
             affiliation: formdata.get('affiliation'),
             affiliation_ko: formdata.get('affiliation_ko') || '',
             is_domestic: formdata.get('is_domestic') === 'true',
+            is_payment_exempt: formdata.get('is_payment_exempt') === 'true',
             type: formdata.get('type'),
         }, cookies);
         if (response.ok && response.status === 200) {
@@ -156,8 +157,20 @@ export const actions = {
             affiliation: formdata.get('affiliation'),
             affiliation_ko: formdata.get('affiliation_ko') || '',
             is_domestic: formdata.get('is_domestic') === 'true',
+            is_payment_exempt: formdata.get('is_payment_exempt') === 'true',
             type: formdata.get('type'),
         }, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            error(response.status, response.data);
+        }
+        return;
+    },
+    invite_speaker: async ({ cookies, params, request }) => {
+        let formdata = await request.formData();
+        const response = await post(
+            `api/event/${params.slug}/speaker/${formdata.get('id')}/invite`, {}, cookies);
         if (response.ok && response.status === 200) {
             return response.data;
         } else {

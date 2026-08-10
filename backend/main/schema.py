@@ -375,7 +375,16 @@ class SpeakerSchema(Schema):
     affiliation: str
     affiliation_ko: str
     is_domestic: bool
+    is_payment_exempt: bool
     type: str
+    # Whether this speaker has registered yet, so the admin table can say so
+    # next to the exemption tick.
+    is_registered: bool = False
+
+    @staticmethod
+    def resolve_is_registered(speaker) -> bool:
+        from main.models import attendees_for_email
+        return bool(attendees_for_email(speaker.event, speaker.email))
 
 class AbstractShortSchema(Schema):
     id: int

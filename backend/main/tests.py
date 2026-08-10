@@ -7,6 +7,7 @@ from django.test import TestCase, override_settings
 from main import nicepay
 from main.utils import render_email_template
 from main.models import Abstract, AbstractVote, Attendee, Institution, EmailTemplate, Event, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory
+from main.models import apply_speaker_exemption
 
 User = get_user_model()
 
@@ -1170,3 +1171,167 @@ class CategorySerializationTests(TestCase):
         self.assertEqual(row['category'], self.category.id)
         self.assertEqual(row['category_name_ko'], '학생')
         self.assertEqual(row['registration_fee'], 60000)
+
+
+class SpeakerPaymentExemptionTests(TestCase):
+    """A speaker on the list is settled at 0 KRW rather than left owing."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='spk@example.com', email='spk@example.com', password='pw12345!aA',
+        )
+        self.event = Event.objects.create(
+            name='Symposium', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, published=True,
+        )
+        self.category, = add_categories(self.event, ('Regular', 200000))
+        self.event.email_template_registration = EmailTemplate.objects.create(
+            subject='Registered', body='Thanks',
+        )
+        self.event.save()
+        self.client.force_login(self.user)
+
+    def make_attendee(self):
+        attendee = Attendee.objects.create(
+            user=self.user, event=self.event, first_name='Spea', last_name='Ker',
+            nationality=1, institute='PNU', category=self.category,
+        )
+        self.event.attendees.add(attendee)
+        return attendee
+
+    def add_speaker(self, **extra):
+        payload = {
+            'name': 'Spea Ker', 'email': 'spk@example.com', 'affiliation': 'PNU',
+            'is_domestic': True, 'type': 'invited',
+        }
+        payload.update(extra)
+        self.user.is_staff = True
+        self.user.save()
+        return self.client.post(
+            f'/api/event/{self.event.id}/speaker/add',
+            data=payload, content_type='application/json',
+        )
+
+    def test_adding_a_speaker_settles_an_existing_registration(self):
+        attendee = self.make_attendee()
+        self.assertEqual(attendee.payment_status, 'pending')
+
+        self.add_speaker()
+        attendee.refresh_from_db()
+        payment = attendee.payments.get()
+        self.assertEqual((payment.amount, payment.status), (0, 'completed'))
+        self.assertEqual(attendee.payment_status, 'paid')
+
+    def test_a_speaker_who_is_not_exempt_still_owes(self):
+        attendee = self.make_attendee()
+        self.add_speaker(is_payment_exempt=False)
+        self.assertEqual(attendee.payment_status, 'pending')
+        self.assertFalse(attendee.payments.exists())
+
+    def test_registering_after_being_listed_is_settled(self):
+        self.add_speaker()
+        response = self.client.post(
+            f'/api/event/{self.event.id}/register',
+            data={'first_name': 'Spea', 'last_name': 'Ker', 'nationality': 1,
+                  'institute': Institution.objects.create(name_en='PNU').id,
+                  'job_title': 'Prof', 'category': self.category.id},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        attendee = Attendee.objects.get(event=self.event, user=self.user)
+        self.assertEqual(attendee.payment_status, 'paid')
+        self.assertEqual(attendee.payments.get().amount, 0)
+
+    def test_matching_is_case_insensitive(self):
+        attendee = self.make_attendee()
+        self.add_speaker(email='SPK@Example.COM')
+        self.assertEqual(attendee.payment_status, 'paid')
+
+    def test_unticking_the_exemption_takes_the_waiver_back(self):
+        attendee = self.make_attendee()
+        self.add_speaker()
+        self.assertEqual(attendee.payment_status, 'paid')
+
+        speaker = self.event.speakers.get()
+        self.client.post(
+            f'/api/event/{self.event.id}/speaker/{speaker.id}/update',
+            data={'name': speaker.name, 'email': speaker.email, 'affiliation': 'PNU',
+                  'is_domestic': True, 'type': 'invited', 'is_payment_exempt': False},
+            content_type='application/json',
+        )
+        self.assertEqual(attendee.payment_status, 'pending')
+        self.assertFalse(attendee.payments.exists())
+
+    def test_removing_the_speaker_takes_the_waiver_back(self):
+        attendee = self.make_attendee()
+        self.add_speaker()
+        speaker = self.event.speakers.get()
+        self.client.post(f'/api/event/{self.event.id}/speaker/{speaker.id}/delete',
+                         data={}, content_type='application/json')
+        self.assertEqual(attendee.payment_status, 'pending')
+
+    def test_a_real_payment_is_never_replaced_or_removed(self):
+        attendee = self.make_attendee()
+        paid = PaymentHistory.objects.create(
+            attendee=attendee, event=self.event, amount=200000, status='completed',
+            provider='toss',
+        )
+        self.add_speaker()
+        # No zero-amount record on top, and the real one survives a removal.
+        self.assertEqual([p.id for p in attendee.payments.all()], [paid.id])
+        speaker = self.event.speakers.get()
+        self.client.post(f'/api/event/{self.event.id}/speaker/{speaker.id}/delete',
+                         data={}, content_type='application/json')
+        paid.refresh_from_db()
+        self.assertEqual(attendee.payment_status, 'paid')
+
+    def test_settling_twice_leaves_one_record(self):
+        attendee = self.make_attendee()
+        self.add_speaker()
+        speaker = self.event.speakers.get()
+        self.client.post(
+            f'/api/event/{self.event.id}/speaker/{speaker.id}/update',
+            data={'name': speaker.name, 'email': speaker.email, 'affiliation': 'KAIST',
+                  'is_domestic': True, 'type': 'keynote', 'is_payment_exempt': True},
+            content_type='application/json',
+        )
+        self.assertEqual(attendee.payments.count(), 1)
+
+    def test_a_speaker_at_another_event_is_not_settled(self):
+        attendee = self.make_attendee()
+        other = Event.objects.create(
+            name='Other', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Busan', capacity=10,
+        )
+        other.speakers.create(name='Spea Ker', email='spk@example.com',
+                              affiliation='PNU', is_domestic=True, type='invited')
+        apply_speaker_exemption(other.speakers.get())
+        self.assertEqual(attendee.payment_status, 'pending')
+
+    def test_invitation_email_is_sent(self):
+        self.add_speaker()
+        speaker = self.event.speakers.get()
+        with patch('main.apis.send_mail.delay') as mock_send:
+            response = self.client.post(
+                f'/api/event/{self.event.id}/speaker/{speaker.id}/invite',
+                data={}, content_type='application/json',
+            )
+        self.assertEqual(response.status_code, 200)
+        mock_send.assert_called_once()
+        subject, body, recipient = mock_send.call_args[0][:3]
+        self.assertIn('Symposium', subject)
+        self.assertIn(f'/event/{self.event.id}/register', body)
+        self.assertEqual(recipient, 'spk@example.com')
+
+    def test_invitation_to_a_speaker_with_a_bad_email_is_refused(self):
+        self.add_speaker()
+        speaker = self.event.speakers.get()
+        speaker.email = 'not-an-address'
+        speaker.save(update_fields=['email'])
+        with patch('main.apis.send_mail.delay') as mock_send:
+            response = self.client.post(
+                f'/api/event/{self.event.id}/speaker/{speaker.id}/invite',
+                data={}, content_type='application/json',
+            )
+        self.assertEqual(response.status_code, 400)
+        mock_send.assert_not_called()

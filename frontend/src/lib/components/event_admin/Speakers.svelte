@@ -2,7 +2,7 @@
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from '$lib/components/ui';
     import { Button, Modal, Label, Input, Select, Textarea, Alert } from '$lib/components/ui';
     import { Tabs, TabItem } from '$lib/components/ui';
-    import { Check, UserMinus, UserPen } from '@lucide/svelte';
+    import { Check, Mail, UserMinus, UserPen } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import * as m from '$lib/paraglide/messages.js';
@@ -55,7 +55,26 @@
     let speakerAffiliation = $state('');
     let speakerAffiliationKo = $state('');
     let speakerIsDomestic = $state(false);
+    let speakerIsPaymentExempt = $state(true);
     let speakerType = $state('invited'); // Default to 'invited' speaker type
+
+    // Toggling the tick in the table posts the speaker unchanged except for the
+    // exemption, so the row is the control rather than a trip through the modal.
+    let exemption_form = $state(null);
+    let toggling_speaker = $state(null);
+    const toggleExemption = (row) => {
+        toggling_speaker = { ...row, is_payment_exempt: !row.is_payment_exempt };
+        // Wait for the hidden inputs to take the new values before submitting.
+        queueMicrotask(() => exemption_form?.requestSubmit());
+    };
+
+    let invite_sent_for = $state(null);
+    let invite_form = $state(null);
+    let inviting_speaker = $state(null);
+    const inviteSpeaker = (row) => {
+        inviting_speaker = row;
+        queueMicrotask(() => invite_form?.requestSubmit());
+    };
 
     // Custom getters for SearchableUserList
     function getAttendeeEmail(attendee) {
@@ -86,6 +105,7 @@
         speakerAffiliation = '';
         speakerAffiliationKo = '';
         speakerIsDomestic = false;
+        speakerIsPaymentExempt = true;
         speakerType = 'invited';
         speaker_modal = true;
     };
@@ -97,6 +117,7 @@
         speakerAffiliation = selected_speaker.affiliation;
         speakerAffiliationKo = selected_speaker.affiliation_ko || '';
         speakerIsDomestic = selected_speaker.is_domestic || false;
+        speakerIsPaymentExempt = selected_speaker.is_payment_exempt ?? true;
         speakerType = selected_speaker.type;
         speaker_modal = true;
     };
@@ -184,6 +205,7 @@
         <TableHeadCell>{m.speakers_affiliation()}</TableHeadCell>
         <TableHeadCell>{m.speakers_domestic()}</TableHeadCell>
         <TableHeadCell>{m.speakers_type()}</TableHeadCell>
+        <TableHeadCell>{m.speakers_paymentExempt()}</TableHeadCell>
         <TableHeadCell class="w-1">{m.speakers_actions()}</TableHeadCell>
     </TableHead>
     <TableBody tableBodyClass="divide-y">
@@ -208,10 +230,19 @@
                 <TableBodyCell>{#if row.is_domestic}<Check class="w-4 h-4 text-green-500 inline mr-2" />{/if}</TableBodyCell>
                 <TableBodyCell>{format_type(row.type)}</TableBodyCell>
                 <TableBodyCell>
+                    <Checkbox checked={row.is_payment_exempt}
+                        onclick={(e) => { e.preventDefault(); toggleExemption(row); }} />
+                </TableBodyCell>
+                <TableBodyCell>
                     <div class="flex justify-center gap-2">
                         <ActionTooltip text={m.speakers_updateSpeaker()}>
                             <Button color="none" size="none" onclick={() => modifySpeakerModal(row.id)}>
                                 <UserPen class="w-5 h-5" />
+                            </Button>
+                        </ActionTooltip>
+                        <ActionTooltip text={m.speakers_invite()}>
+                            <Button color="none" size="none" onclick={() => inviteSpeaker(row)}>
+                                <Mail class="w-5 h-5 {invite_sent_for === row.id ? 'text-green-600' : ''}" />
                             </Button>
                         </ActionTooltip>
                         <ActionTooltip text={m.speakers_removeSpeaker()}>
@@ -225,7 +256,7 @@
         {/each}
         {#if filteredSpeakers.length === 0}
             <TableBodyRow>
-                <TableBodyCell colspan="7" class="text-center">{m.speakers_noRecords()}</TableBodyCell>
+                <TableBodyCell colspan="8" class="text-center">{m.speakers_noRecords()}</TableBodyCell>
             </TableBodyRow>
         {/if}
     </TableBody>
@@ -281,6 +312,13 @@
             </Checkbox>
             <input type="hidden" name="is_domestic" value={speakerIsDomestic ? 'true' : 'false'} />
         </div>
+        <div class="mb-4">
+            <Checkbox bind:checked={speakerIsPaymentExempt}>
+                {m.speakers_paymentExempt()}
+            </Checkbox>
+            <p class="mt-1 text-sm text-gray-500">{m.speakers_paymentExemptHelp()}</p>
+            <input type="hidden" name="is_payment_exempt" value={speakerIsPaymentExempt ? 'true' : 'false'} />
+        </div>
         <div class="mb-6">
             <Label for="type" class="block mb-2">{m.speakers_type()}</Label>
             <Select id="type" name="type" items={[
@@ -315,3 +353,30 @@
 </Modal>
 
 <SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
+
+<!-- Row controls post through these rather than opening the edit modal. The
+     update action needs the whole speaker, so every field rides along and only
+     the exemption differs. -->
+<form method="POST" action="?/update_speaker" bind:this={exemption_form} class="hidden"
+    use:enhance={() => async ({ result, update }) => {
+        if (result.type === 'success') await update({ reset: false });
+        toggling_speaker = null;
+    }}>
+    <input type="hidden" name="id" value={toggling_speaker?.id ?? ''} />
+    <input type="hidden" name="name" value={toggling_speaker?.name ?? ''} />
+    <input type="hidden" name="korean_name" value={toggling_speaker?.korean_name ?? ''} />
+    <input type="hidden" name="email" value={toggling_speaker?.email ?? ''} />
+    <input type="hidden" name="affiliation" value={toggling_speaker?.affiliation ?? ''} />
+    <input type="hidden" name="affiliation_ko" value={toggling_speaker?.affiliation_ko ?? ''} />
+    <input type="hidden" name="is_domestic" value={toggling_speaker?.is_domestic ? 'true' : 'false'} />
+    <input type="hidden" name="is_payment_exempt" value={toggling_speaker?.is_payment_exempt ? 'true' : 'false'} />
+    <input type="hidden" name="type" value={toggling_speaker?.type ?? ''} />
+</form>
+
+<form method="POST" action="?/invite_speaker" bind:this={invite_form} class="hidden"
+    use:enhance={() => async ({ result }) => {
+        if (result.type === 'success') invite_sent_for = inviting_speaker?.id ?? null;
+        inviting_speaker = null;
+    }}>
+    <input type="hidden" name="id" value={inviting_speaker?.id ?? ''} />
+</form>

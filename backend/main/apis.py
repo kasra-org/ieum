@@ -26,7 +26,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from main.models import ApiKey, User, Event, EmailTemplate, Attendee, RegistrationCategory, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings
+from main.models import (ApiKey, User, Event, EmailTemplate, Attendee, RegistrationCategory,
+    apply_speaker_exemption, attendees_for_email, settle_if_exempt_speaker, withdraw_speaker_payment, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings)
 from main.schema import *
 from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id, render_email_template
 from main import nicepay
@@ -1236,6 +1237,7 @@ def register_event(request, event_id: int):
         )
 
     event.attendees.add(attendee)
+    settle_if_exempt_speaker(event, attendee)
 
     reply_to = event.main_admin.email if event.main_admin else None
     send_mail.delay(
@@ -1441,7 +1443,10 @@ def add_speaker(request, event_id: int):
         affiliation_ko=data.get("affiliation_ko", ""),
         is_domestic=data["is_domestic"],
         type=data["type"],
+        is_payment_exempt=_as_bool(data.get("is_payment_exempt", True)),
     )
+    # They may already have registered and paid nothing yet; settle it now.
+    apply_speaker_exemption(speaker)
     return {"code": "success", "message": "Speaker added."}
 
 @api.post("/event/{event_id}/speaker/{speaker_id}/update", response=MessageSchema)
@@ -1457,14 +1462,64 @@ def update_speaker(request, event_id: int, speaker_id: int):
     speaker.affiliation_ko = data.get("affiliation_ko", "")
     speaker.is_domestic = data["is_domestic"]
     speaker.type = data["type"]
+    if "is_payment_exempt" in data:
+        speaker.is_payment_exempt = _as_bool(data["is_payment_exempt"])
     speaker.save()
+    # Covers the email being corrected as well as the tick being changed.
+    apply_speaker_exemption(speaker)
     return {"code": "success", "message": "Speaker updated."}
+
+@api.post("/event/{event_id}/speaker/{speaker_id}/invite", response=MessageSchema)
+@ensure_event_staff
+def invite_speaker(request, event_id: int, speaker_id: int):
+    """Email a speaker a link to register for the event.
+
+    Sent on demand rather than when the speaker is added, so an organiser can
+    fill the list in first and invite when the details are settled.
+    """
+    event = Event.objects.get(id=event_id)
+    speaker = event.speakers.get(id=speaker_id)
+
+    if not validate_email_format(speaker.email):
+        return api.create_response(
+            request,
+            {"code": "invalid_email", "message": "This speaker has no usable email address."},
+            status=400,
+        )
+
+    register_url = f"{settings.HEADLESS_URL_ROOT}/event/{event.id}/register"
+    fee_line = (
+        "The registration fee is waived for you - please register and leave the payment to us.\n"
+        if speaker.is_payment_exempt else ""
+    )
+    subject = sanitize_email_header(
+        f"{settings.ACCOUNT_EMAIL_SUBJECT_PREFIX}Invitation to speak at {event.name}")
+    body = (
+        f"Dear {speaker.name},\n\n"
+        f"You are invited to speak at {event.name}.\n\n"
+        f"Event Details:\n"
+        f" - Dates: {event.start_date:%B %d, %Y} - {event.end_date:%B %d, %Y}\n"
+        f" - Venue: {event.venue}\n\n"
+        f"Please complete your registration here:\n{register_url}\n\n"
+        f"{fee_line}"
+        f"\nIf you have any questions, please contact us at: {settings.EMAIL_FROM}\n\n"
+        f"We look forward to your talk.\n\n"
+        f"Warm regards,\n"
+        f"{event.organizers_en}"
+    )
+    reply_to = event.main_admin.email if event.main_admin else None
+    send_mail.delay(subject, body, speaker.email, reply_to=reply_to)
+    return {"code": "success", "message": "Invitation sent."}
 
 @api.post("/event/{event_id}/speaker/{speaker_id}/delete", response=MessageSchema)
 @ensure_event_staff
 def delete_speaker(request, event_id: int, speaker_id: int):
     event = Event.objects.get(id=event_id)
     speaker = event.speakers.get(id=speaker_id)
+    # Take the waiver back before the row goes, or the registration stays
+    # settled at 0 with nothing left to explain it.
+    for attendee in attendees_for_email(event, speaker.email):
+        withdraw_speaker_payment(event, attendee)
     speaker.delete()
     return {"code": "success", "message": "Speaker deleted."}
 

@@ -149,6 +149,11 @@ class Attendee(models.Model):
         return f'{self.first_name}{" " + self.middle_initial if self.middle_initial else ""} {self.last_name}'
 
     @property
+    def email(self):
+        """The attendee's address; user_email survives the user being deleted."""
+        return ((self.user.email if self.user_id else '') or self.user_email or '').strip()
+
+    @property
     def registration_fee(self):
         return self.category.fee if self.category_id else 0
 
@@ -441,6 +446,9 @@ class Speaker(models.Model):
     affiliation = models.CharField(max_length=1000, blank=True)
     affiliation_ko = models.CharField(max_length=1000, blank=True, default='')
     is_domestic = models.BooleanField(default=False)
+    # Speakers are usually not charged. Ticking this settles their registration
+    # at 0 KRW instead of leaving it outstanding - see settle_speaker_payment.
+    is_payment_exempt = models.BooleanField(default=True)
     type = models.CharField(max_length=1000, choices=[
         ('keynote', 'Keynote Talk'),
         ('invited', 'Invited Talk'),
@@ -1141,3 +1149,93 @@ class ApiKey(models.Model):
         self.revoked_at = None
         self.save(update_fields=['prefix', 'key_hash', 'revoked_at'])
         return raw
+
+
+# A speaker's registration is settled with a zero-amount payment rather than a
+# free category: the organiser does not have to change what the person picked,
+# and 결제 관리 shows why nothing was collected.
+SPEAKER_PAYMENT_TYPE = '연사'
+
+
+def settle_speaker_payment(event, attendee):
+    """Record `attendee`'s registration as paid at 0 KRW, if it is not already.
+
+    Called from both directions - a speaker added after registering, and someone
+    already on the speaker list registering - so the order of those two events
+    does not matter.
+
+    An existing completed payment is left alone: someone who actually paid keeps
+    their real record, and their receipt, even if they are made a speaker later.
+    """
+    if attendee is None or attendee.payments.filter(status='completed').exists():
+        return None
+
+    payment = PaymentHistory(
+        attendee=attendee, event=event, amount=0, status='completed',
+        provider='manual', payment_type=SPEAKER_PAYMENT_TYPE,
+        note='Speaker: registration fee waived.',
+    )
+    payment.copy_attendee_info(attendee)
+    payment.copy_event_info(event)
+    payment.save()
+    return payment
+
+
+def withdraw_speaker_payment(event, attendee):
+    """Undo a waiver when the speaker is removed or the exemption unticked.
+
+    Only ever deletes the zero-amount record this module wrote, so a real
+    payment - or a manual one an admin entered - is never touched.
+    """
+    if attendee is None:
+        return 0
+    deleted, _ = attendee.payments.filter(
+        event=event, amount=0, payment_type=SPEAKER_PAYMENT_TYPE,
+    ).delete()
+    return deleted
+
+
+def attendees_for_email(event, email):
+    """Registrations on `event` belonging to this address.
+
+    Matched case-insensitively against both the account address and the copy
+    kept on the registration, so a speaker is still recognised after their user
+    account is deleted.
+    """
+    email = (email or '').strip()
+    if not email:
+        return []
+    return list(
+        event.attendees
+        .filter(models.Q(user__email__iexact=email) | models.Q(user_email__iexact=email))
+        .select_related('event')
+        .prefetch_related('payments')
+    )
+
+
+def apply_speaker_exemption(speaker):
+    """Bring this speaker's registration in line with their exemption tick.
+
+    Safe to call on every save: settling is a no-op once settled, and
+    withdrawing is a no-op when there is nothing to withdraw.
+    """
+    event = speaker.event
+    for attendee in attendees_for_email(event, speaker.email):
+        if speaker.is_payment_exempt:
+            settle_speaker_payment(event, attendee)
+        else:
+            withdraw_speaker_payment(event, attendee)
+
+
+def settle_if_exempt_speaker(event, attendee):
+    """Waive the fee when the person registering is already an exempt speaker.
+
+    The other half of apply_speaker_exemption: covers the case where the speaker
+    was listed first and registers afterwards.
+    """
+    email = attendee.email
+    if not email:
+        return None
+    if event.speakers.filter(email__iexact=email, is_payment_exempt=True).exists():
+        return settle_speaker_payment(event, attendee)
+    return None
