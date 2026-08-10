@@ -42,8 +42,9 @@
             onsite_fee: c.onsite_fee ?? null,
         }))
     );
-    // A brand new event has none yet; start it on the standard three.
-    if (categories.length === 0) {
+    // A brand new event has none yet; start it on the standard three. An
+    // existing event that has had them all removed is free, and stays that way.
+    if (categories.length === 0 && data.id === undefined) {
         categories = [
             { id: null, name: 'Undergraduate student', name_ko: '학부생', fee: 0, onsite_fee: null },
             { id: null, name: 'Graduate student / Postdoc', name_ko: '대학원생/박사후연구원', fee: 0, onsite_fee: null },
@@ -235,7 +236,7 @@
                         <ChevronDown class="h-4 w-4" />
                     </button>
                     <button type="button" class="cursor-pointer rounded px-2 py-1 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                        onclick={() => removeCategory(index)} disabled={categories.length <= 1}>
+                        onclick={() => removeCategory(index)}>
                         <Trash2 class="mr-1 inline h-4 w-4" />{m.eventForm_categoryRemove()}
                     </button>
                 </div>
@@ -247,6 +248,9 @@
         onclick={addCategory}>
         <Plus class="mr-1 inline h-4 w-4" />{m.eventForm_categoryAdd()}
     </button>
+    {#if categories.length === 0}
+        <p class="mt-3 text-sm text-gray-500">{m.eventForm_categoriesNoneIsFree()}</p>
+    {/if}
     <p class="mt-3 text-sm text-gray-500">{m.eventForm_categoryRemoveNote()}</p>
 </div>
 

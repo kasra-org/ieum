@@ -70,8 +70,8 @@ class RegistrationCategory(models.Model):
     """A registration tier an organiser defines, and what it costs.
 
     Replaces the three hardcoded student_status tiers. An event's categories are
-    the only source of truth for what a registration costs: Event.registration_fee
-    and friends are derived from them.
+    the only source of truth for what a registration costs. An event with no
+    categories charges nothing.
 
     Removing a category that people already registered under would change what
     they owe, so the delete endpoint deactivates those instead of dropping them
@@ -314,7 +314,11 @@ class Event(models.Model):
 
     @property
     def has_tiered_fees(self):
-        """True when the attendee is offered a choice of category."""
+        """True when the attendee is offered a choice of category.
+
+        An event with no categories at all is free, and one with a single
+        category has nothing to choose - neither is asked to pick.
+        """
         return len(self.active_categories) > 1
 
     @property
@@ -339,21 +343,6 @@ class Event(models.Model):
         except (TypeError, ValueError):
             return None
         return next((c for c in self.active_categories if c.id == category_id), None)
-
-    @property
-    def registration_fee(self):
-        """Headline price: the cheapest category on offer.
-
-        Kept as the summary the event list and cards have always shown; the
-        per-category prices are what anyone actually pays.
-        """
-        fees = [c.fee or 0 for c in self.active_categories]
-        return min(fees) if fees else 0
-
-    @property
-    def onsite_registration_fee(self):
-        fees = [c.onsite_fee or 0 for c in self.active_categories]
-        return min(fees) if fees else 0
 
     @property
     def has_onsite_fee(self):

@@ -357,6 +357,7 @@
 	"eventForm_registrationCapacity": "Registration Capacity (0 for unlimited)",
 	"eventForm_registrationCapacityHelp": "Registration is automatically disabled after this number is reached.",
 	"eventForm_categories": "Registration categories",
+	"eventForm_categoriesNoneIsFree": "No categories: this event is free and attendees are not asked to choose.",
 	"eventForm_categoriesHelp": "Define the categories attendees choose from and what each costs. Leave a fee at 0 for a free category. Add as many as you need; with only one, attendees are not asked to choose.",
 	"eventForm_categoryName": "Name (English)",
 	"eventForm_categoryNameKo": "Name (Korean)",

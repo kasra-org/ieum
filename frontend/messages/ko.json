@@ -357,6 +357,7 @@
 	"eventForm_registrationCapacity": "등록 정원 (0은 무제한)",
 	"eventForm_registrationCapacityHelp": "이 인원에 도달하면 등록이 자동으로 비활성화됩니다.",
 	"eventForm_categories": "등록 구분",
+	"eventForm_categoriesNoneIsFree": "구분이 없으면 무료 행사이며, 참가자에게 선택을 요청하지 않습니다.",
 	"eventForm_categoriesHelp": "참가자가 선택할 등록 구분과 금액을 설정합니다. 무료 구분은 0으로 두세요. 필요한 만큼 추가할 수 있으며, 구분이 하나면 참가자에게 선택을 요청하지 않습니다.",
 	"eventForm_categoryName": "이름 (영문)",
 	"eventForm_categoryNameKo": "이름 (한글)",

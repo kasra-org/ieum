@@ -660,11 +660,8 @@ def replace_registration_categories(event, payload):
     if not isinstance(payload, list) or any(not isinstance(c, dict) for c in payload):
         return "registration_categories must be a list of categories."
 
+    # An empty list is meaningful: an event with no categories charges nothing.
     named = [c for c in payload if str(c.get("name") or "").strip()]
-    if not named:
-        # An event with no categories has no price at all, and nobody could
-        # register; keeping the current set is the safer reading of empty input.
-        return "An event needs at least one registration category."
 
     existing = {c.id: c for c in event.registration_categories.all()}
     kept = set()
@@ -966,12 +963,14 @@ def get_event_attendees(request, event_id: int, all: bool = False):
     event = Event.objects.get(id=event_id)
     # select_related/prefetch feed AttendeeSchema.resolve_payment_status without
     # a query per attendee.
-    attendees = event.attendees.select_related('event').prefetch_related('payments')
+    attendees = event.attendees.select_related('event', 'category').prefetch_related('payments')
 
-    # If event has a registration fee, filter to only those with completed payments
-    # Unless all=True is passed (for admin use like manual payment creation)
-    if not all and event.registration_fee and event.registration_fee > 0:
-        attendees = attendees.filter(payments__status='completed').distinct()
+    # Hide registrations that are not paid for, unless all=True (admin views that
+    # need the incomplete ones too). Whether money is owed is per attendee, not
+    # per event: someone in a free category owes nothing and belongs on the list
+    # even when other categories are charged.
+    if not all:
+        return [a for a in attendees if not a.has_outstanding_payment]
 
     return attendees
 

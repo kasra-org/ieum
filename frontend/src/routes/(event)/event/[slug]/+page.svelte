@@ -40,12 +40,7 @@
     let abstract_submitted = $derived(data.abstract_submitted);
 
     // Check if user needs to pay (registered for paid event but hasn't paid)
-    let needsPayment = $derived(
-        registered &&
-        event.registration_fee &&
-        event.registration_fee > 0 &&
-        payment_status === 'pending'
-    );
+    let needsPayment = $derived(registered && payment_status === 'pending');
 
     // Import DOMPurify only in browser
     $effect(() => {
@@ -84,27 +79,15 @@
         return languageTag() === 'ko' ? `${amount} 원` : `KRW ${amount}`;
     };
 
-    // One row per category the event offers, so the price someone will actually
-    // pay is visible before they start registering rather than only the standard
-    // rate. Empty when the event has a single price for everyone.
+    // One row per category the event offers, so every price someone could pay is
+    // visible before they start registering. Empty when the event has no
+    // categories, which means it charges nothing.
     let feeRows = $derived(
-        event.has_tiered_fees
-            ? (event.registration_categories ?? []).map(c => ({
-                label: getCategoryLabel(c, languageTag()),
-                amount: formatFee(c.fee || 0),
-              }))
-            : []
+        (event.registration_categories ?? []).map(c => ({
+            label: getCategoryLabel(c, languageTag()),
+            amount: formatFee(c.fee || 0),
+        }))
     );
-
-    // Format registration fee based on language
-    let formattedRegistrationFee = $derived.by(() => {
-        const fee = event.registration_fee || 0;
-        if (fee === 0) {
-            return m.eventDetail_registrationFeeFree();
-        }
-        const formattedAmount = fee.toLocaleString('ko-KR', {maximumFractionDigits: 0});
-        return languageTag() === 'ko' ? `${formattedAmount} 원` : `KRW ${formattedAmount}`;
-    });
 
     // Get current page URL for sharing
     let pageUrl = $state('');
@@ -167,9 +150,10 @@
             </div>
         </div>
     {:else}
+        <!-- No categories at all: nothing to pay. -->
         <div class="flex items-center justify-between">
             <span class="text-base font-medium text-gray-700">{m.eventDetail_registrationFee()}</span>
-            <span class="{languageTag() === 'ko' ? 'text-xl' : 'text-lg'} font-bold text-gray-900">{formattedRegistrationFee}</span>
+            <span class="{languageTag() === 'ko' ? 'text-xl' : 'text-lg'} font-bold text-gray-900">{m.eventDetail_registrationFeeFree()}</span>
         </div>
     {/if}
 {/snippet}

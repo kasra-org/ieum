@@ -210,8 +210,6 @@ class EventSchema(Schema):
     organizers_ko: str
     main_languages: List[str]
     registration_deadline: Union[date, None]
-    registration_fee: Union[int, None]
-    onsite_registration_fee: Union[int, None]
     has_onsite_fee: bool
     has_tiered_fees: bool
     registration_categories: List[RegistrationCategorySchema]
@@ -269,8 +267,6 @@ class EventAdminSchema(Schema):
     main_languages: List[str]
     registration_deadline: Union[date, None]
     capacity: int
-    registration_fee: Union[int, None]
-    onsite_registration_fee: Union[int, None]
     has_onsite_fee: bool
     has_tiered_fees: bool
     registration_categories: List[RegistrationCategorySchema]

@@ -182,7 +182,6 @@
     let create_modal = $state(false);
     let create_error = $state('');
     let selected_attendee_id = $state(null);
-    let registration_fee = $derived(data.event.registration_fee || 0);
     let payment_amount = $state(0);
 
     // Which category the attendee registered under decides the price, so
@@ -240,12 +239,12 @@
     const showCreateModal = () => {
         selected_attendee_id = null;
         payment_category = data.event.registration_categories?.[0]?.id ?? null;
-        payment_amount = registration_fee;
+        payment_amount = feeForCategory(payment_category);
         payment_type = 'card';
         payment_note = '';
         // Reset common fields
-        card_supply_amount = calculateSuppliedAmount(registration_fee);
-        card_vat = calculateVat(registration_fee);
+        card_supply_amount = calculateSuppliedAmount(payment_amount);
+        card_vat = calculateVat(payment_amount);
         // Reset card fields
         card_type = '';
         card_number = '';

@@ -26,6 +26,7 @@
                 institute: getDisplayInstitute(a),
                 registered_at: a.registered_at,
                 category: a.category,
+                registration_fee: a.registration_fee,
                 category_name: a.category_name,
                 category_name_ko: a.category_name_ko,
                 // Fields the edit form binds to
@@ -85,6 +86,13 @@
         const d = new Date(iso);
         return d.toLocaleDateString(languageTag() === 'ko' ? 'ko-KR' : 'en-US');
     }
+
+    // event.registration_fee is the cheapest category, so it says nothing about
+    // whether the event charges: a free category alongside paid ones would have
+    // hidden every unpaid attendee behind the "free event" notice.
+    const eventCharges = $derived(
+        (data.event.registration_categories ?? []).some(c => (c.fee || 0) > 0)
+    );
 
     function formatFee(fee) {
         if (!fee) return '';
@@ -152,7 +160,7 @@
 <Heading tag="h2" class="text-xl font-bold mb-3">{m.unpaidAttendees_title()}</Heading>
 <p class="font-light mb-6">{m.unpaidAttendees_description()}</p>
 
-{#if !data.event.registration_fee || data.event.registration_fee <= 0}
+{#if !eventCharges}
     <Alert color="blue">{m.unpaidAttendees_freeEvent()}</Alert>
 {:else}
     <div class="flex flex-wrap justify-end gap-2 mb-4">
@@ -201,7 +209,7 @@
                     <TableBodyCell>{row.email}</TableBodyCell>
                     <TableBodyCell>{row.institute}</TableBodyCell>
                     <TableBodyCell>{formatDate(row.registered_at)}</TableBodyCell>
-                    <TableBodyCell>{formatFee(data.event.registration_fee)}</TableBodyCell>
+                    <TableBodyCell>{formatFee(row.registration_fee)}</TableBodyCell>
                     <TableBodyCell>
                         <div class="flex justify-center gap-2">
                             <ActionTooltip text={m.unpaidAttendees_edit()}>

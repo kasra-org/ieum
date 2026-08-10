@@ -567,9 +567,6 @@ class RegistrationCategoryTests(TestCase):
         self.assertEqual(self.grad.fee, 100000)
         self.assertEqual(self.standard.fee, 200000)
 
-    def test_headline_fee_is_the_cheapest_on_offer(self):
-        self.assertEqual(self.event.registration_fee, 50000)
-
     def test_a_single_category_is_not_a_choice(self):
         plain = Event.objects.create(
             name='Flat', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
@@ -577,7 +574,20 @@ class RegistrationCategoryTests(TestCase):
         )
         add_categories(plain, ('Standard', 30000))
         self.assertFalse(plain.has_tiered_fees)
-        self.assertEqual(plain.registration_fee, 30000)
+
+    def test_an_event_with_no_categories_is_free(self):
+        free = Event.objects.create(
+            name='Free', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10,
+        )
+        self.assertEqual(free.active_categories, [])
+        self.assertFalse(free.has_tiered_fees)
+        self.assertFalse(free.has_onsite_fee)
+        attendee = Attendee.objects.create(
+            event=free, first_name='No', last_name='Fee', nationality=1, institute='PNU',
+        )
+        self.assertEqual(attendee.registration_fee, 0)
+        self.assertEqual(attendee.payment_status, 'free')
 
     def test_more_than_one_category_is_a_choice(self):
         self.assertTrue(self.event.has_tiered_fees)
@@ -635,6 +645,14 @@ class RegistrationCategoryTests(TestCase):
         self.register()
         attendee = Attendee.objects.get(event=self.event, user=self.user)
         self.assertEqual(attendee.category, self.undergrad)
+
+    def test_registering_for_an_event_with_no_categories_is_free(self):
+        self.event.registration_categories.all().delete()
+        self.register()
+        attendee = Attendee.objects.get(event=self.event, user=self.user)
+        self.assertIsNone(attendee.category)
+        self.assertEqual(attendee.registration_fee, 0)
+        self.assertEqual(attendee.payment_status, 'free')
 
     @patch('main.apis.requests.post')
     def test_payment_below_the_category_price_is_rejected(self, mock_post):
@@ -732,12 +750,26 @@ class RegistrationCategoryEditingTests(TestCase):
         self.assertFalse(self.b.is_active)
         self.assertEqual(Attendee.objects.get(event=self.event).registration_fee, 2000)
 
-    def test_an_empty_list_is_refused(self):
-        self.assertIsNotNone(self.apply([]))
-        self.assertEqual(self.event.registration_categories.count(), 2)
+    def test_removing_every_category_makes_the_event_free(self):
+        self.assertIsNone(self.apply([]))
+        self.assertEqual(self.event.registration_categories.count(), 0)
+        self.assertEqual(Event.objects.get(id=self.event.id).active_categories, [])
 
-    def test_entries_without_a_name_are_ignored(self):
-        self.assertIsNotNone(self.apply([{'name': '  ', 'fee': 1}]))
+    def test_removing_every_category_keeps_the_ones_in_use(self):
+        Attendee.objects.create(
+            event=self.event, category=self.b, first_name='In', last_name='Use',
+            nationality=1, institute='PNU',
+        )
+        self.apply([])
+        self.b.refresh_from_db()
+        # Retired, so nobody is offered it, but it still prices that registration.
+        self.assertFalse(self.b.is_active)
+        self.assertEqual(Attendee.objects.get(event=self.event).registration_fee, 2000)
+        self.assertEqual(Event.objects.get(id=self.event.id).active_categories, [])
+
+    def test_entries_without_a_name_are_dropped(self):
+        self.assertIsNone(self.apply([{'name': '  ', 'fee': 1}]))
+        self.assertEqual(self.event.registration_categories.count(), 0)
 
     def test_a_blank_fee_means_free(self):
         self.apply([{'id': self.a.id, 'name': 'A', 'fee': ''}])
