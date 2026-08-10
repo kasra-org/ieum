@@ -541,21 +541,9 @@
                             <li>
                                 <span class="font-medium">{m.eventRegister_eventDates()}</span> {formatDateRange(event.start_date, event.end_date)}
                             </li>
-                            {#if event.has_tiered_fees}
-                                <!-- Every category's price, not just the selected one: this
-                                     block introduces the event, before any choice is made. -->
-                                <li>
-                                    <span class="font-medium">{m.eventDetail_registrationFee()}</span>
-                                    <ul class="mt-1 ml-4 list-none space-y-0.5">
-                                        {#each categoryOptions as option}
-                                            <li class="flex flex-wrap gap-x-2">
-                                                <span>{option.label}</span>
-                                                <span class="text-gray-600">{formatFee(option.fee)}</span>
-                                            </li>
-                                        {/each}
-                                    </ul>
-                                </li>
-                            {:else if !isFreeEvent}
+                            <!-- No fee here when there are categories to choose from: the
+                                 selector below states each one's price. -->
+                            {#if !event.has_tiered_fees && !isFreeEvent}
                                 <li>
                                     <span class="font-medium">{m.eventDetail_registrationFee()}</span> {formattedRegistrationFee()}
                                 </li>
