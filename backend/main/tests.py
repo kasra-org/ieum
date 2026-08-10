@@ -1422,3 +1422,83 @@ class NicePayReceiptTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['receipt_url'], 'https://receipt.example')
         mock_get.assert_called_once()
+
+
+class DuplicateSpeakerTests(TestCase):
+    """One row per person: email is the identity the fee waiver matches on."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='dup@example.com', email='dup@example.com', password='pw12345!aA',
+            is_staff=True,
+        )
+        self.event = Event.objects.create(
+            name='Duplicated', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10,
+        )
+        self.client.force_login(self.user)
+
+    def add(self, email='spk@example.com', name='Spea Ker'):
+        return self.client.post(
+            f'/api/event/{self.event.id}/speaker/add',
+            data={'name': name, 'email': email, 'affiliation': 'PNU',
+                  'is_domestic': True, 'type': 'invited'},
+            content_type='application/json',
+        )
+
+    def test_the_same_person_cannot_be_added_twice(self):
+        self.assertEqual(self.add().status_code, 200)
+        response = self.add()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'duplicate_speaker')
+        self.assertEqual(self.event.speakers.count(), 1)
+
+    def test_duplicate_detection_ignores_case_and_padding(self):
+        self.add()
+        self.assertEqual(self.add(email='  SPK@Example.COM  ').status_code, 400)
+        self.assertEqual(self.event.speakers.count(), 1)
+
+    def test_a_different_person_is_still_accepted(self):
+        self.add()
+        self.assertEqual(self.add(email='other@example.com', name='Oth Er').status_code, 200)
+        self.assertEqual(self.event.speakers.count(), 2)
+
+    def test_the_same_person_may_speak_at_another_event(self):
+        self.add()
+        other = Event.objects.create(
+            name='Other', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Busan', capacity=10,
+        )
+        response = self.client.post(
+            f'/api/event/{other.id}/speaker/add',
+            data={'name': 'Spea Ker', 'email': 'spk@example.com', 'affiliation': 'PNU',
+                  'is_domestic': True, 'type': 'invited'},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_editing_a_speaker_onto_another_speakers_email_is_refused(self):
+        self.add()
+        self.add(email='other@example.com', name='Oth Er')
+        second = self.event.speakers.get(email='other@example.com')
+        response = self.client.post(
+            f'/api/event/{self.event.id}/speaker/{second.id}/update',
+            data={'name': 'Oth Er', 'email': 'spk@example.com', 'affiliation': 'PNU',
+                  'is_domestic': True, 'type': 'invited'},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'duplicate_speaker')
+
+    def test_editing_a_speaker_keeping_their_own_email_is_fine(self):
+        self.add()
+        speaker = self.event.speakers.get()
+        response = self.client.post(
+            f'/api/event/{self.event.id}/speaker/{speaker.id}/update',
+            data={'name': 'Renamed', 'email': 'spk@example.com', 'affiliation': 'KAIST',
+                  'is_domestic': True, 'type': 'keynote'},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        speaker.refresh_from_db()
+        self.assertEqual(speaker.name, 'Renamed')

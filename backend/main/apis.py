@@ -1443,6 +1443,17 @@ def add_speaker(request, event_id: int):
             status=400,
         )
 
+    # One entry per person. Email is the identity here - it is what the fee
+    # waiver matches on - so a second row for the same address would give the
+    # event two speakers that are really one.
+    if event.speakers.filter(email__iexact=data["email"].strip()).exists():
+        return api.create_response(
+            request,
+            {"code": "duplicate_speaker",
+             "message": "This person is already on the speaker list."},
+            status=400,
+        )
+
     speaker = event.speakers.create(
         name=data["name"],
         korean_name=data.get("korean_name", ""),
@@ -1463,6 +1474,15 @@ def update_speaker(request, event_id: int, speaker_id: int):
     event = Event.objects.get(id=event_id)
     speaker = event.speakers.get(id=speaker_id)
     data = json.loads(request.body)
+
+    if event.speakers.filter(email__iexact=data["email"].strip()).exclude(id=speaker.id).exists():
+        return api.create_response(
+            request,
+            {"code": "duplicate_speaker",
+             "message": "Another speaker on this event already uses that email address."},
+            status=400,
+        )
+
     speaker.name = data["name"]
     speaker.korean_name = data.get("korean_name", "")
     speaker.email = data["email"]

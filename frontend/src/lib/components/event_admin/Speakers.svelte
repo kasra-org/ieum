@@ -82,6 +82,18 @@
         return attendee.korean_name || '';
     }
 
+    // Anyone already on the list is not offered again - picking them would only
+    // produce a duplicate, which the API refuses anyway.
+    const listedEmails = $derived(
+        new Set(data.speakers.map(s => (s.email || '').trim().toLowerCase()))
+    );
+    const selectableAttendees = $derived(
+        data.attendees.filter(a => {
+            const email = (a.user?.email || a.user_email || '').trim().toLowerCase();
+            return email && !listedEmails.has(email);
+        })
+    );
+
     function selectAttendeeForSpeaker(attendee) {
         speakerName = attendee.name || '';
         speakerKoreanName = attendee.korean_name || '';
@@ -260,7 +272,7 @@
             <div class="mb-6">
                 <Label class="block mb-2">{m.speakers_selectAttendee()}</Label>
                 <SearchableUserList
-                    items={data.attendees}
+                    items={selectableAttendees}
                     maxHeight="max-h-60"
                     showChangeButton={false}
                     getItemSecondaryName={getAttendeeSecondaryName}
