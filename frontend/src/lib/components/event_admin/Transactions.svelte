@@ -15,8 +15,6 @@
 
     let { data } = $props();
 
-    // Matches main.models.SPEAKER_PAYMENT_TYPE.
-    const SPEAKER_PAYMENT_TYPE = '연사';
 
     function formatAmount(amount) {
         const formattedAmount = amount.toLocaleString('ko-KR', { maximumFractionDigits: 0 });
@@ -86,10 +84,6 @@
     }
 
     function getPaymentTypeText(payment) {
-        // A waived speaker fee was never charged to anything.
-        if (payment.payment_type === SPEAKER_PAYMENT_TYPE) {
-            return m.transactions_providerWaived();
-        }
         if (payment.provider === 'manual' && payment.manual_payment_type) {
             return `${m.transactions_providerManual()} - ${getManualPaymentTypeText(payment.manual_payment_type)}`;
         }
@@ -102,9 +96,6 @@
     }
 
     function getPaymentTypeBadgeColor(payment) {
-        if (payment.payment_type === SPEAKER_PAYMENT_TYPE) {
-            return 'purple';
-        }
         switch (payment.provider) {
             case 'manual':  return 'yellow';
             case 'paypal':  return 'green';

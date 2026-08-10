@@ -1096,7 +1096,6 @@
 	"transactions_providerNicePay": "나이스페이",
 	"transactions_providerPayPal": "페이팔",
 	"transactions_providerManual": "직접입력",
-	"transactions_providerWaived": "연사 면제",
 	"transactions_amount": "금액",
 	"transactions_status": "상태",
 	"transactions_note": "메모",

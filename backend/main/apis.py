@@ -27,7 +27,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from main.models import (ApiKey, User, Event, EmailTemplate, Attendee, RegistrationCategory,
-    apply_speaker_exemption, attendees_for_email, settle_if_exempt_speaker, withdraw_speaker_payment, CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings)
+    CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings)
 from main.schema import *
 from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id, render_email_template
 from main import nicepay
@@ -969,9 +969,12 @@ def get_event_stats(request, event_id: int):
 @ensure_event_staff
 def get_event_attendees(request, event_id: int, all: bool = False):
     event = Event.objects.get(id=event_id)
-    # select_related/prefetch feed AttendeeSchema.resolve_payment_status without
-    # a query per attendee.
-    attendees = event.attendees.select_related('event', 'category').prefetch_related('payments')
+    # prefetch feeds AttendeeSchema.resolve_payment_status without a query per
+    # attendee; handing each one the event we already loaded does the same for
+    # the fee exemption, which is read from that event's speaker list.
+    attendees = list(event.attendees.select_related('category').prefetch_related('payments'))
+    for attendee in attendees:
+        attendee.event = event
 
     # Hide registrations that are not paid for, unless all=True (admin views that
     # need the incomplete ones too). Whether money is owed is per attendee, not
@@ -1245,7 +1248,6 @@ def register_event(request, event_id: int):
         )
 
     event.attendees.add(attendee)
-    settle_if_exempt_speaker(event, attendee)
 
     reply_to = event.main_admin.email if event.main_admin else None
     send_mail.delay(
@@ -1464,8 +1466,6 @@ def add_speaker(request, event_id: int):
         type=data["type"],
         is_payment_exempt=_as_bool(data.get("is_payment_exempt", True)),
     )
-    # They may already have registered and paid nothing yet; settle it now.
-    apply_speaker_exemption(speaker)
     return {"code": "success", "message": "Speaker added."}
 
 @api.post("/event/{event_id}/speaker/{speaker_id}/update", response=MessageSchema)
@@ -1493,8 +1493,6 @@ def update_speaker(request, event_id: int, speaker_id: int):
     if "is_payment_exempt" in data:
         speaker.is_payment_exempt = _as_bool(data["is_payment_exempt"])
     speaker.save()
-    # Covers the email being corrected as well as the tick being changed.
-    apply_speaker_exemption(speaker)
     return {"code": "success", "message": "Speaker updated."}
 
 @api.post("/event/{event_id}/speaker/{speaker_id}/delete", response=MessageSchema)
@@ -1502,10 +1500,6 @@ def update_speaker(request, event_id: int, speaker_id: int):
 def delete_speaker(request, event_id: int, speaker_id: int):
     event = Event.objects.get(id=event_id)
     speaker = event.speakers.get(id=speaker_id)
-    # Take the waiver back before the row goes, or the registration stays
-    # settled at 0 with nothing left to explain it.
-    for attendee in attendees_for_email(event, speaker.email):
-        withdraw_speaker_payment(event, attendee)
     speaker.delete()
     return {"code": "success", "message": "Speaker deleted."}
 

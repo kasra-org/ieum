@@ -2,12 +2,13 @@ from datetime import date
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 
 from main import nicepay
 from main.utils import render_email_template
 from main.models import Abstract, AbstractVote, Attendee, Institution, EmailTemplate, Event, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory
-from main.models import apply_speaker_exemption, settle_speaker_payment
 
 User = get_user_model()
 
@@ -1174,7 +1175,7 @@ class CategorySerializationTests(TestCase):
 
 
 class SpeakerPaymentExemptionTests(TestCase):
-    """A speaker on the list is settled at 0 KRW rather than left owing."""
+    """A speaker on the list owes nothing - without a payment record for it."""
 
     def setUp(self):
         self.user = User.objects.create_user(
@@ -1212,23 +1213,36 @@ class SpeakerPaymentExemptionTests(TestCase):
             data=payload, content_type='application/json',
         )
 
-    def test_adding_a_speaker_settles_an_existing_registration(self):
+    def fresh(self, attendee):
+        """Reload so the event's cached exemption list is rebuilt."""
+        return Attendee.objects.select_related('event').get(id=attendee.id)
+
+    def test_a_listed_speaker_owes_nothing(self):
         attendee = self.make_attendee()
         self.assertEqual(attendee.payment_status, 'pending')
+        self.assertEqual(attendee.registration_fee, 200000)
 
         self.add_speaker()
-        attendee.refresh_from_db()
-        payment = attendee.payments.get()
-        self.assertEqual((payment.amount, payment.status), (0, 'completed'))
-        self.assertEqual(attendee.payment_status, 'paid')
+        attendee = self.fresh(attendee)
+        self.assertTrue(attendee.is_fee_exempt)
+        self.assertEqual(attendee.registration_fee, 0)
+        self.assertEqual(attendee.payment_status, 'free')
+
+    def test_no_payment_record_is_written(self):
+        attendee = self.make_attendee()
+        self.add_speaker()
+        # Nothing was transacted, so there is nothing to receipt and nothing to
+        # show in 결제 관리.
+        self.assertFalse(PaymentHistory.objects.filter(attendee=attendee).exists())
 
     def test_a_speaker_who_is_not_exempt_still_owes(self):
         attendee = self.make_attendee()
         self.add_speaker(is_payment_exempt=False)
+        attendee = self.fresh(attendee)
+        self.assertFalse(attendee.is_fee_exempt)
         self.assertEqual(attendee.payment_status, 'pending')
-        self.assertFalse(attendee.payments.exists())
 
-    def test_registering_after_being_listed_is_settled(self):
+    def test_registering_after_being_listed_is_free(self):
         self.add_speaker()
         response = self.client.post(
             f'/api/event/{self.event.id}/register',
@@ -1238,19 +1252,18 @@ class SpeakerPaymentExemptionTests(TestCase):
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 200)
-        attendee = Attendee.objects.get(event=self.event, user=self.user)
-        self.assertEqual(attendee.payment_status, 'paid')
-        self.assertEqual(attendee.payments.get().amount, 0)
+        attendee = Attendee.objects.select_related('event').get(event=self.event, user=self.user)
+        self.assertEqual(attendee.payment_status, 'free')
 
     def test_matching_is_case_insensitive(self):
         attendee = self.make_attendee()
         self.add_speaker(email='SPK@Example.COM')
-        self.assertEqual(attendee.payment_status, 'paid')
+        self.assertEqual(self.fresh(attendee).payment_status, 'free')
 
-    def test_unticking_the_exemption_takes_the_waiver_back(self):
+    def test_unticking_the_exemption_restores_the_fee(self):
         attendee = self.make_attendee()
         self.add_speaker()
-        self.assertEqual(attendee.payment_status, 'paid')
+        self.assertEqual(self.fresh(attendee).payment_status, 'free')
 
         speaker = self.event.speakers.get()
         self.client.post(
@@ -1259,45 +1272,29 @@ class SpeakerPaymentExemptionTests(TestCase):
                   'is_domestic': True, 'type': 'invited', 'is_payment_exempt': False},
             content_type='application/json',
         )
-        self.assertEqual(attendee.payment_status, 'pending')
-        self.assertFalse(attendee.payments.exists())
+        self.assertEqual(self.fresh(attendee).payment_status, 'pending')
 
-    def test_removing_the_speaker_takes_the_waiver_back(self):
+    def test_removing_the_speaker_restores_the_fee(self):
         attendee = self.make_attendee()
         self.add_speaker()
         speaker = self.event.speakers.get()
         self.client.post(f'/api/event/{self.event.id}/speaker/{speaker.id}/delete',
                          data={}, content_type='application/json')
-        self.assertEqual(attendee.payment_status, 'pending')
+        self.assertEqual(self.fresh(attendee).payment_status, 'pending')
 
-    def test_a_real_payment_is_never_replaced_or_removed(self):
+    def test_someone_who_already_paid_keeps_their_payment(self):
         attendee = self.make_attendee()
         paid = PaymentHistory.objects.create(
             attendee=attendee, event=self.event, amount=200000, status='completed',
             provider='toss',
         )
         self.add_speaker()
-        # No zero-amount record on top, and the real one survives a removal.
+        attendee = self.fresh(attendee)
+        # Free from here on, but the record of what they paid is untouched.
+        self.assertEqual(attendee.payment_status, 'free')
         self.assertEqual([p.id for p in attendee.payments.all()], [paid.id])
-        speaker = self.event.speakers.get()
-        self.client.post(f'/api/event/{self.event.id}/speaker/{speaker.id}/delete',
-                         data={}, content_type='application/json')
-        paid.refresh_from_db()
-        self.assertEqual(attendee.payment_status, 'paid')
 
-    def test_settling_twice_leaves_one_record(self):
-        attendee = self.make_attendee()
-        self.add_speaker()
-        speaker = self.event.speakers.get()
-        self.client.post(
-            f'/api/event/{self.event.id}/speaker/{speaker.id}/update',
-            data={'name': speaker.name, 'email': speaker.email, 'affiliation': 'KAIST',
-                  'is_domestic': True, 'type': 'keynote', 'is_payment_exempt': True},
-            content_type='application/json',
-        )
-        self.assertEqual(attendee.payments.count(), 1)
-
-    def test_a_speaker_at_another_event_is_not_settled(self):
+    def test_a_speaker_at_another_event_is_not_exempt_here(self):
         attendee = self.make_attendee()
         other = Event.objects.create(
             name='Other', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
@@ -1305,8 +1302,23 @@ class SpeakerPaymentExemptionTests(TestCase):
         )
         other.speakers.create(name='Spea Ker', email='spk@example.com',
                               affiliation='PNU', is_domestic=True, type='invited')
-        apply_speaker_exemption(other.speakers.get())
-        self.assertEqual(attendee.payment_status, 'pending')
+        self.assertEqual(self.fresh(attendee).payment_status, 'pending')
+
+    def test_listing_attendees_does_not_query_per_attendee(self):
+        for i in range(5):
+            user = User.objects.create_user(
+                username=f'a{i}@example.com', email=f'a{i}@example.com', password='pw12345!aA')
+            self.event.attendees.add(Attendee.objects.create(
+                user=user, event=self.event, first_name=f'A{i}', last_name='T',
+                nationality=1, institute='PNU', category=self.category))
+        self.add_speaker()
+        # The exemption list is read once from the shared event, not per row.
+        # (The endpoint issues plenty of other queries; only this one matters.)
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(f'/api/event/{self.event.id}/attendees?all=true')
+        self.assertEqual(response.status_code, 200)
+        speaker_queries = [q for q in queries.captured_queries if 'main_speaker' in q['sql']]
+        self.assertEqual(len(speaker_queries), 1, speaker_queries)
 
 
 class ReceiptLookupTests(TestCase):
@@ -1331,8 +1343,11 @@ class ReceiptLookupTests(TestCase):
     def fetch(self, number):
         return self.client.get(f'/api/me/payment/{number}')
 
-    def test_a_waived_payment_reports_zero_so_the_ui_can_disable_printing(self):
-        payment = settle_speaker_payment(self.event, self.attendee)
+    def test_a_zero_amount_payment_reports_zero_so_printing_can_be_disabled(self):
+        payment = PaymentHistory.objects.create(
+            attendee=self.attendee, event=self.event, amount=0, status='completed',
+            toss_order_id='ZERO-1',
+        )
         response = self.fetch(payment.toss_order_id)
         self.assertEqual(response.status_code, 200)
         # Nothing was charged, so ReceiptButtons disables both print actions.

@@ -1096,7 +1096,6 @@
 	"transactions_providerNicePay": "NicePay",
 	"transactions_providerPayPal": "PayPal",
 	"transactions_providerManual": "Manual entry",
-	"transactions_providerWaived": "Waived (speaker)",
 	"transactions_amount": "Amount",
 	"transactions_status": "Status",
 	"transactions_note": "Note",
