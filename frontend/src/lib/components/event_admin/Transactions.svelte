@@ -15,6 +15,9 @@
 
     let { data } = $props();
 
+    // Matches main.models.SPEAKER_PAYMENT_TYPE.
+    const SPEAKER_PAYMENT_TYPE = '연사';
+
     function formatAmount(amount) {
         const formattedAmount = amount.toLocaleString('ko-KR', { maximumFractionDigits: 0 });
         return languageTag() === 'ko' ? `${formattedAmount}원` : `KRW ${formattedAmount}`;
@@ -69,30 +72,45 @@
         }
     }
 
+    // Which gateway took the money comes from `provider`; payment_type only
+    // says how (card, transfer...). Toss and NicePay both record a card payment
+    // as '카드', so reading the type alone labelled every NicePay payment - and
+    // every waived speaker fee - as 토스.
+    function getProviderLabel(payment) {
+        switch (payment.provider) {
+            case 'nicepay': return m.transactions_providerNicePay();
+            case 'paypal':  return m.transactions_providerPayPal();
+            case 'manual':  return m.transactions_providerManual();
+            default:        return m.transactions_providerToss();
+        }
+    }
+
     function getPaymentTypeText(payment) {
-        if (payment.payment_type === '직접입력' && payment.manual_payment_type) {
-            return `직접입력 - ${getManualPaymentTypeText(payment.manual_payment_type)}`;
+        // A waived speaker fee was never charged to anything.
+        if (payment.payment_type === SPEAKER_PAYMENT_TYPE) {
+            return m.transactions_providerWaived();
         }
-        if (payment.payment_type === 'paypal') {
-            return '페이팔';
+        if (payment.provider === 'manual' && payment.manual_payment_type) {
+            return `${m.transactions_providerManual()} - ${getManualPaymentTypeText(payment.manual_payment_type)}`;
         }
-        // Toss payments - prepend "토스 - "
-        if (payment.payment_type) {
-            return `토스 - ${payment.payment_type}`;
+        if (payment.provider === 'paypal') {
+            return m.transactions_providerPayPal();
         }
-        return payment.payment_type;
+        return payment.payment_type
+            ? `${getProviderLabel(payment)} - ${payment.payment_type}`
+            : getProviderLabel(payment);
     }
 
     function getPaymentTypeBadgeColor(payment) {
-        // Check payment source first
-        if (payment.payment_type === '직접입력') {
-            return 'yellow';  // orange
+        if (payment.payment_type === SPEAKER_PAYMENT_TYPE) {
+            return 'purple';
         }
-        if (payment.payment_type === 'paypal') {
-            return 'green';
+        switch (payment.provider) {
+            case 'manual':  return 'yellow';
+            case 'paypal':  return 'green';
+            case 'nicepay': return 'dark';
+            default:        return 'blue';
         }
-        // Toss payments
-        return 'blue';
     }
 
     function getDisplayName(payment) {
@@ -375,9 +393,7 @@
 
         // CSV rows
         const rows = payments.map(payment => {
-            const paymentType = payment.payment_type === '직접입력' && payment.manual_payment_type
-                ? `직접입력 - ${getManualPaymentTypeText(payment.manual_payment_type)}`
-                : payment.payment_type;
+            const paymentType = getPaymentTypeText(payment);
 
             return [
                 payment.number.toString().padStart(6, '0'),

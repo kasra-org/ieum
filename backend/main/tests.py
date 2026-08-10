@@ -1403,6 +1403,18 @@ class NicePayReceiptTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([p['provider'] for p in response.json()], ['nicepay'])
 
+    def test_the_admin_payment_list_reports_the_provider(self):
+        """결제 관리 labels the gateway from this, not from payment_type."""
+        self.make_payment('nicepay', 'MOID-4')
+        self.user.is_staff = True
+        self.user.save()
+        response = self.client.get(f'/api/event/{self.event.id}/payments')
+        self.assertEqual(response.status_code, 200)
+        row = response.json()[0]
+        self.assertEqual(row['provider'], 'nicepay')
+        # Both gateways say '카드', so the type alone cannot name the gateway.
+        self.assertEqual(row['payment_type'], '카드')
+
     @patch('main.apis.requests.get')
     def test_a_nicepay_card_slip_never_asks_toss(self, mock_get):
         """Both providers label a card payment '카드'; only Toss can answer."""

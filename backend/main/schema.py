@@ -605,6 +605,9 @@ class EventPaymentSchema(Schema):
     amount: int
     status: str
     payment_type: str
+    # Which gateway took the money. payment_type alone cannot say: Toss and
+    # NicePay both record a card payment as '카드'.
+    provider: str = "toss"
     manual_payment_type: str = ""  # For 직접입력: card, transfer, cash
     note: str
     attendee_id: Optional[int] = None

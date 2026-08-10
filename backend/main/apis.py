@@ -2619,6 +2619,7 @@ def get_event_payments(request, event_id: int):
             'amount': payment.amount,
             'status': payment.status,
             'payment_type': payment.payment_type,
+            'provider': payment.provider,
             'manual_payment_type': manual_payment_type,
             'note': payment.note,
             'attendee_id': payment.attendee_id,
