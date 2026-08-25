@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db import connection
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 
 from main import nicepay
@@ -1529,3 +1529,58 @@ class DuplicateSpeakerTests(TestCase):
         self.assertEqual(response.status_code, 200)
         speaker.refresh_from_db()
         self.assertEqual(speaker.name, 'Renamed')
+
+
+class CsrfTokenReuseTests(TestCase):
+    """/api/csrftoken must reuse the caller's secret, not mint a new one.
+
+    The frontend layout hands the browser whatever this returns and renders the
+    same value into the page. If a fresh secret came back on every request, the
+    next page load - another tab, a link prefetch - would replace the cookie and
+    invalidate the token already sitting in the page the user is looking at, so
+    their next POST would 403. That is what made social login fail on some
+    machines and not others.
+    """
+
+    @staticmethod
+    def secret_of(token):
+        from django.middleware.csrf import _unmask_cipher_token
+        return _unmask_cipher_token(token) if len(token) == 64 else token
+
+    def fetch(self, client):
+        return client.get('/api/csrftoken').json()['csrftoken']
+
+    def test_the_secret_is_reused_when_the_cookie_is_sent(self):
+        client = Client()
+        first = self.fetch(client)
+        client.cookies['csrftoken'] = first
+        again = self.fetch(client)
+        # Re-masked each call, so the strings differ - the secret must not.
+        self.assertEqual(self.secret_of(first), self.secret_of(again))
+
+    def test_a_token_stays_valid_across_later_loads(self):
+        client = Client()
+        rendered_into_the_page = self.fetch(client)
+        client.cookies['csrftoken'] = rendered_into_the_page
+        for _ in range(3):
+            client.cookies['csrftoken'] = self.fetch(client)
+
+        poster = Client(enforce_csrf_checks=True)
+        poster.cookies['csrftoken'] = client.cookies['csrftoken'].value
+        response = poster.post(
+            '/api/event/1/register',
+            data={}, content_type='application/json',
+            HTTP_X_CSRFTOKEN=rendered_into_the_page,
+        )
+        self.assertNotEqual(response.status_code, 403)
+
+    def test_an_unrelated_secret_is_still_rejected(self):
+        stranger = self.fetch(Client())
+        poster = Client(enforce_csrf_checks=True)
+        poster.cookies['csrftoken'] = self.fetch(Client())
+        response = poster.post(
+            '/api/event/1/register',
+            data={}, content_type='application/json',
+            HTTP_X_CSRFTOKEN=stranger,
+        )
+        self.assertEqual(response.status_code, 403)

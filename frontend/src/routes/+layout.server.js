@@ -18,7 +18,14 @@ const PROFILE_EXEMPT_PATHS = [
 export async function load({ cookies, url }) {
     let rtn = {};
 
-    const response_csrftoken = await get('api/csrftoken');
+    // Forward the cookies: without them Django has no CSRF secret to recognise
+    // and mints a fresh one on every request, which this then writes over the
+    // browser's. Any second request - another tab, a link prefetch, the next
+    // navigation - would therefore invalidate the token already rendered into
+    // the page the user is looking at, and their next POST would 403. Sent the
+    // existing cookie, Django reuses that secret, so every token derived from
+    // it stays valid no matter how many loads happen in between.
+    const response_csrftoken = await get('api/csrftoken', cookies);
     if (!response_csrftoken.ok || response_csrftoken.status !== 200) {
         throw error(500, "Internal Server Error");
     }
