@@ -287,55 +287,47 @@
         md = md.replace(/<code>(.*?)<\/code>/gi, '`$1`');
         md = md.replace(/<pre[^>]*><code[^>]*>(.*?)<\/code><\/pre>/gis, '```\n$1\n```');
 
-        // Convert tables
+        // Convert tables.
+        //
+        // GFM has exactly one table shape: a header row, a separator row, then
+        // the body. A table built without a header row is all <td>, and emitting
+        // its rows without a separator produced something markdown does not
+        // recognise as a table at all - it rendered as the raw pipes, and
+        // reading it back into the editor showed the same wreck. Its first row
+        // becomes the header, since GFM cannot express a table without one.
+        //
+        // colspan has no equivalent either, so a spanning cell is padded out to
+        // the columns it covers; otherwise rows disagree about how many columns
+        // the table has and the cells slide out of line.
         md = md.replace(/<table[^>]*>(.*?)<\/table>/gis, (match, tableContent) => {
-            let rows = [];
-            let headerProcessed = false;
+            const cellText = (cell) => cell
+                .replace(/<t[hd][^>]*>(.*?)<\/t[hd]>/is, '$1')
+                .replace(/<\/(?:p|div)>\s*<(?:p|div)[^>]*>/gi, ' ')  // several blocks in one cell
+                .replace(/<br\s*\/?>/gi, ' ')
+                .replace(/<[^>]+>/g, '')
+                .replace(/\|/g, '\\|')   // an unescaped pipe would start a new column
+                .replace(/\s+/g, ' ')
+                .trim();
 
-            // Process thead
-            const theadMatch = tableContent.match(/<thead[^>]*>(.*?)<\/thead>/is);
-            if (theadMatch) {
-                const headerRow = theadMatch[1].match(/<tr[^>]*>(.*?)<\/tr>/is);
-                if (headerRow) {
-                    const cells = headerRow[1].match(/<th[^>]*>(.*?)<\/th>/gi) || [];
-                    const headerCells = cells.map(cell => {
-                        const content = cell.replace(/<th[^>]*>(.*?)<\/th>/i, '$1').replace(/<[^>]+>/g, '').trim();
-                        return content;
-                    });
-                    if (headerCells.length > 0) {
-                        rows.push('| ' + headerCells.join(' | ') + ' |');
-                        rows.push('| ' + headerCells.map(() => '---').join(' | ') + ' |');
-                        headerProcessed = true;
-                    }
-                }
-            }
+            const rows = (tableContent.match(/<tr[^>]*>(.*?)<\/tr>/gis) || [])
+                .map((tr) => (tr.match(/<t[hd][^>]*>(.*?)<\/t[hd]>/gis) || [])
+                    .flatMap((cell) => {
+                        const span = parseInt((cell.match(/colspan=["']?(\d+)/i) || [])[1] || '1', 10);
+                        return [cellText(cell), ...Array(Math.max(0, span - 1)).fill('')];
+                    }))
+                .filter((cells) => cells.length > 0);
 
-            // Process tbody or direct tr elements
-            const tbodyMatch = tableContent.match(/<tbody[^>]*>(.*?)<\/tbody>/is);
-            const bodyContent = tbodyMatch ? tbodyMatch[1] : tableContent;
-            const trMatches = bodyContent.match(/<tr[^>]*>(.*?)<\/tr>/gis) || [];
+            if (rows.length === 0) return '';
 
-            trMatches.forEach((tr, idx) => {
-                // Check if this row has th (header) or td (data) cells
-                const thCells = tr.match(/<th[^>]*>(.*?)<\/th>/gi);
-                const tdCells = tr.match(/<td[^>]*>(.*?)<\/td>/gi);
+            const width = Math.max(...rows.map((cells) => cells.length));
+            const line = (cells) =>
+                '| ' + [...cells, ...Array(width - cells.length).fill('')].join(' | ') + ' |';
 
-                if (thCells && !headerProcessed) {
-                    const headerCells = thCells.map(cell => {
-                        return cell.replace(/<th[^>]*>(.*?)<\/th>/i, '$1').replace(/<[^>]+>/g, '').trim();
-                    });
-                    rows.push('| ' + headerCells.join(' | ') + ' |');
-                    rows.push('| ' + headerCells.map(() => '---').join(' | ') + ' |');
-                    headerProcessed = true;
-                } else if (tdCells) {
-                    const dataCells = tdCells.map(cell => {
-                        return cell.replace(/<td[^>]*>(.*?)<\/td>/i, '$1').replace(/<[^>]+>/g, '').trim();
-                    });
-                    rows.push('| ' + dataCells.join(' | ') + ' |');
-                }
-            });
-
-            return rows.length > 0 ? '\n' + rows.join('\n') + '\n\n' : '';
+            return '\n\n' + [
+                line(rows[0]),
+                '| ' + Array(width).fill('---').join(' | ') + ' |',
+                ...rows.slice(1).map(line),
+            ].join('\n') + '\n\n';
         });
 
         // Convert paragraphs and line breaks
