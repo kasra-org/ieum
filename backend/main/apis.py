@@ -1328,53 +1328,42 @@ Please review and respond to this request.
 @api.post("/event/{event_id}/abstract", response=MessageSchema)
 def submit_abstract(request, event_id: int):
     event = Event.objects.get(id=event_id)
+
+    def reject(code, message):
+        """Refuse the submission, saying why in the log as well as the response.
+
+        Django logs every 400 as a bare "Bad Request: /api/event/N/abstract",
+        which is the same line for a missing file, a passed deadline and an
+        unpaid registration - so the log alone could not tell them apart.
+        """
+        logger.warning(
+            "Abstract submission refused: code=%s event=%s user=%s",
+            code, event_id, getattr(request.user, 'username', None),
+        )
+        return api.create_response(request, {"code": code, "message": message}, status=400)
+
     if not event.accepts_abstract:
-        return api.create_response(
-            request,
-            {"code": "not_accepted", "message": "This event does not accept abstracts."},
-            status=400,
-        )
+        return reject("not_accepted", "This event does not accept abstracts.")
     if event.abstract_submission_type == 'external':
-        return api.create_response(
-            request,
-            {"code": "external_abstract", "message": "This event uses an external abstract submission system."},
-            status=400,
-        )
+        return reject("external_abstract", "This event uses an external abstract submission system.")
 
     attendee = Attendee.objects.get(user=request.user, event=event)
     if attendee.abstracts.filter(event_id=event_id).exists():
-        return api.create_response(
-            request,
-            {"code": "already_submitted", "message": "You have already submitted an abstract."},
-            status=400,
-        )
+        return reject("already_submitted", "You have already submitted an abstract.")
 
     # An unpaid registration is not final, so it does not carry submission
     # rights - otherwise the deadline could be met, and a slot taken, by someone
     # who never pays. Free tiers are never "outstanding" and so pass straight
     # through.
     if attendee.has_outstanding_payment:
-        return api.create_response(
-            request,
-            {"code": "payment_required",
-             "message": "Please complete your registration payment before submitting an abstract."},
-            status=400,
-        )
+        return reject("payment_required", "Please complete your registration payment before submitting an abstract.")
 
     data = json.loads(request.body)
     if event.abstract_deadline is not None and datetime.now().date() > event.abstract_deadline:
-        return api.create_response(
-            request,
-            {"code": "deadline_passed", "message": "Sorry, abstract submission deadline has passed."},
-            status=400,
-        )
+        return reject("deadline_passed", "Sorry, abstract submission deadline has passed.")
     
     if event.capacity_abstract > 0 and event.capacity_abstract <= event.abstracts.count():
-        return api.create_response(
-            request,
-            {"code": "event_full", "message": "Sorry, abstract submission limit reached."},
-            status=400,
-        )
+        return reject("event_full", "Sorry, abstract submission limit reached.")
 
     # create the abstract with the post json data
     data = json.loads(request.body)
@@ -1384,29 +1373,16 @@ def submit_abstract(request, event_id: int):
     # which sent people looking at their document rather than at the upload.
     raw = data.get("file_content") or ""
     if not isinstance(raw, str) or "," not in raw or raw in ("null", "undefined"):
-        return api.create_response(
-            request,
-            {"code": "no_file", "message": "No abstract file was received. Please attach the file and try again."},
-            status=400,
-        )
+        return reject("no_file", "No abstract file was received. Please attach the file and try again.")
     try:
         file_content = base64.b64decode(raw.split(",", 1)[1])
     except (ValueError, IndexError):
-        return api.create_response(
-            request,
-            {"code": "invalid_file",
-             "message": "The uploaded file did not arrive intact. Please try uploading it again."},
-            status=400,
-        )
+        return reject("invalid_file", "The uploaded file did not arrive intact. Please try uploading it again.")
 
     # Validate file upload for security
     is_valid, error_message = validate_abstract_file(file_name, file_content)
     if not is_valid:
-        return api.create_response(
-            request,
-            {"code": "invalid_file", "message": error_message},
-            status=400,
-        )
+        return reject("invalid_file", error_message)
 
     # Use sanitized filename
     safe_filename = sanitize_filename(file_name)
