@@ -922,6 +922,8 @@
 	"abstractSubmission_submit": "초록 제출",
 	"abstractSubmission_goBack": "뒤로가기",
 	"abstractSubmission_titleRequired": "제목은 필수 항목입니다.",
+	"abstractSubmission_fileRequired": "제출하기 전에 초록 파일을 첨부해 주세요.",
+	"abstractSubmission_fileReadFailed": "파일을 읽지 못했습니다. 다시 선택해 주세요.",
 	"abstractSubmission_invalidFileFormat": "잘못된 파일 형식입니다. DOCX 또는 ODT 파일을 업로드해 주세요.",
 	"abstractSubmission_fileSizeExceeds": "파일 크기가 1 MB 제한을 초과합니다.",
 

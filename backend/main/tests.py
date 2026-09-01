@@ -1584,3 +1584,61 @@ class CsrfTokenReuseTests(TestCase):
             HTTP_X_CSRFTOKEN=stranger,
         )
         self.assertEqual(response.status_code, 403)
+
+
+class AbstractUploadErrorTests(TestCase):
+    """A missing file and a damaged one are different problems."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='up@example.com', email='up@example.com', password='pw12345!aA',
+        )
+        self.event = Event.objects.create(
+            name='Uploads', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, capacity_abstract=10, accepts_abstract=True,
+        )
+        self.event.email_template_abstract_submission = EmailTemplate.objects.create(
+            subject='Submitted', body='Thanks')
+        self.event.save()
+        attendee = Attendee.objects.create(
+            user=self.user, event=self.event, first_name='Up', last_name='Load',
+            nationality=1, institute='PNU',
+        )
+        self.event.attendees.add(attendee)
+        self.client.force_login(self.user)
+
+    @staticmethod
+    def docx_data_url():
+        import base64, io as _io, zipfile
+        buf = _io.BytesIO()
+        with zipfile.ZipFile(buf, 'w') as z:
+            z.writestr('[Content_Types].xml', '<?xml version="1.0"?><Types/>')
+            z.writestr('word/document.xml', '<?xml version="1.0"?><document/>')
+        return 'data:application/octet-stream;base64,' + base64.b64encode(buf.getvalue()).decode()
+
+    def submit(self, file_content, file_name='abstract.docx'):
+        return self.client.post(
+            f'/api/event/{self.event.id}/abstract',
+            data={'title': 'T', 'presentation_type': 'poster',
+                  'file_name': file_name, 'file_content': file_content},
+            content_type='application/json',
+        )
+
+    def test_a_real_docx_is_accepted(self):
+        self.assertEqual(self.submit(self.docx_data_url()).status_code, 200)
+
+    def test_an_uppercase_extension_is_accepted(self):
+        # The client used to refuse these before they ever got here.
+        self.assertEqual(self.submit(self.docx_data_url(), 'ABSTRACT.DOCX').status_code, 200)
+
+    def test_a_missing_file_says_so(self):
+        for empty in ('', 'null', 'undefined'):
+            response = self.submit(empty)
+            self.assertEqual(response.status_code, 400, empty)
+            self.assertEqual(response.json()['code'], 'no_file', empty)
+
+    def test_a_truncated_upload_is_reported_as_such(self):
+        url = self.docx_data_url()
+        response = self.submit(url[:len(url) - 3] + 'A')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'invalid_file')

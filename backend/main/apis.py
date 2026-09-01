@@ -1379,12 +1379,23 @@ def submit_abstract(request, event_id: int):
     # create the abstract with the post json data
     data = json.loads(request.body)
     file_name = data["file_name"]
+
+    # An absent file used to reach the decoder and be reported as bad encoding,
+    # which sent people looking at their document rather than at the upload.
+    raw = data.get("file_content") or ""
+    if not isinstance(raw, str) or "," not in raw or raw in ("null", "undefined"):
+        return api.create_response(
+            request,
+            {"code": "no_file", "message": "No abstract file was received. Please attach the file and try again."},
+            status=400,
+        )
     try:
-        file_content = base64.b64decode(data["file_content"].split(",")[1])
+        file_content = base64.b64decode(raw.split(",", 1)[1])
     except (ValueError, IndexError):
         return api.create_response(
             request,
-            {"code": "invalid_file", "message": "Invalid file content encoding."},
+            {"code": "invalid_file",
+             "message": "The uploaded file did not arrive intact. Please try uploading it again."},
             status=400,
         )
 

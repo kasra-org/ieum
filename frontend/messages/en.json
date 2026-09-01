@@ -922,6 +922,8 @@
 	"abstractSubmission_submit": "Submit Abstract",
 	"abstractSubmission_goBack": "Go Back",
 	"abstractSubmission_titleRequired": "Title is required.",
+	"abstractSubmission_fileRequired": "Please attach your abstract file before submitting.",
+	"abstractSubmission_fileReadFailed": "The file could not be read. Please try selecting it again.",
 	"abstractSubmission_invalidFileFormat": "Invalid file format. Please upload a DOCX or ODT file.",
 	"abstractSubmission_fileSizeExceeds": "File size exceeds the limit of 1 MB.",
 

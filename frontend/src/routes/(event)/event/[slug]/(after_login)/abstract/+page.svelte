@@ -58,6 +58,9 @@
             presentation_type: 'poster',
         },
         onSubmit: async (data) => {
+            if (!abstract_file.file_content) {
+                throw { message: m.abstractSubmission_fileRequired() };
+            }
             const fd = new FormData();
             fd.append('title', data.title);
             fd.append('presentation_type', data.presentation_type);
@@ -92,7 +95,9 @@
     });
 
     const set_file = (file) => {
-        let ext = file.name.split('.').pop();
+        // Case-insensitively, like the server: Word names files .DOCX as often
+        // as .docx, and refusing those here contradicted what it accepts.
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
         if (ext !== 'docx' && ext !== 'odt') {
             error_message = m.abstractSubmission_invalidFileFormat();
             return;
@@ -107,15 +112,19 @@
             error_message = '';
             abstract_file.file_name = file.name;
             abstract_file.file_content = event.target.result;
-            abstract_file = abstract_file;
+        };
+        reader.onerror = () => {
+            unset_file();
+            error_message = m.abstractSubmission_fileReadFailed();
         };
         reader.readAsDataURL(file);
     };
 
     const unset_file = () => {
         abstract_file.file_name = '';
-        abstract_file.file_content = null;
-        abstract_file = abstract_file;
+        // Empty rather than null: this is posted as a form field, and null
+        // arrives at the server as the literal string "null".
+        abstract_file.file_content = '';
     };
 
     const dropHandle = (event) => {
