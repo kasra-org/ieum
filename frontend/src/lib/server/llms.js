@@ -26,11 +26,42 @@ export async function fetchPublicEvents() {
     return events;
 }
 
+/** One event, fetched anonymously so an unpublished one is simply not found. */
+export async function fetchPublicEvent(id) {
+    const response = await get(`api/event/${id}`);
+    return (response.ok && response.status === 200) ? response.data : null;
+}
+
 export async function fetchSiteSettings() {
     const response = await get('api/site-settings');
     return (response.ok && response.status === 200)
         ? response.data
         : { site_name: 'IEUM', site_description: '' };
+}
+
+/**
+ * Make root-relative targets absolute.
+ *
+ * Uploaded images are embedded as /media/editor/images/..., which resolves fine
+ * inside a page but not in a text file fetched on its own: whoever reads it has
+ * no base to resolve against, so the image cannot be downloaded.
+ */
+function absoluteUrls(markdown, origin) {
+    return markdown
+        .replace(/(\]\()(\/[^)\s]*)/g, `$1${origin}$2`)          // [text](/path) and ![alt](/path)
+        .replace(/((?:src|href)=")(\/[^"]*)/gi, `$1${origin}$2`);   // any raw HTML that slipped in
+}
+
+/** Absolute URLs of every image embedded in the description. */
+function imageUrls(markdown, origin) {
+    const urls = [];
+    const pattern = /!\[[^\]]*\]\(([^)\s]+)/g;
+    let match;
+    while ((match = pattern.exec(markdown)) !== null) {
+        const url = match[1];
+        urls.push(url.startsWith('/') ? origin + url : url);
+    }
+    return urls;
 }
 
 function formatDateRange(start, end) {
@@ -60,6 +91,10 @@ function eventSummary(event, origin) {
     const parts = [formatDateRange(event.start_date, event.end_date)];
     if (event.venue) parts.push(event.venue);
     return `- [${event.name}](${origin}/event/${event.id}): ${parts.filter(Boolean).join(', ')}`;
+}
+
+export function renderEvent(event, origin) {
+    return eventSection(event, origin);
 }
 
 function eventSection(event, origin) {
@@ -93,7 +128,12 @@ function eventSection(event, origin) {
     }
 
     if (event.description) {
-        lines.push('', demoteHeadings(event.description.trim()));
+        const images = imageUrls(event.description, origin);
+        if (images.length > 0) {
+            lines.push(`- Images in the description (downloadable):`);
+            for (const url of images) lines.push(`    - ${url}`);
+        }
+        lines.push('', demoteHeadings(absoluteUrls(event.description.trim(), origin)));
     }
     lines.push('');
     return lines.join('\n');

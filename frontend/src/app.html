@@ -22,6 +22,14 @@
 		</script>
 	</head>
 	<body data-sveltekit-preload-data="hover">
+		<noscript>
+			<p>
+				This site builds its pages in the browser, so this document carries no
+				content on its own. For the events as plain text, fetch /llms.txt for the
+				list, or /event/&lt;id&gt;/llms.txt for a single event - dates, venue,
+				registration fees, deadlines, description, and URLs for any images.
+			</p>
+		</noscript>
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>

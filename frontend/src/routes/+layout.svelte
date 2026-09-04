@@ -30,6 +30,12 @@
 	let languageDropdownOpen = $state(false);
 	let isLoading = $state(true);
 
+	// /event/12 and its sub-pages all describe one event; name its text file.
+	const eventTextUrl = $derived.by(() => {
+		const match = $page.url?.pathname?.match(/^\/event\/(\d+)(?:\/|$)/);
+		return match ? `/event/${match[1]}/llms.txt` : '';
+	});
+
 	onMount(() => {
 		// Set up callback to update state when language changes
 		onSetLanguageTag((newTag) => {
@@ -117,6 +123,13 @@
 	<meta property="og:image:width" content="1200" />
 	<meta property="og:image:height" content="630" />
 	<meta property="twitter:image" content="{$page.url.origin}/og-image?url={encodeURIComponent($page.url.href)}" />
+	<!-- Pages build their content in the browser, so a reader that does not run
+	     scripts sees nothing. Point it at the plain-text equivalent - the one for
+	     this event where the path names one. This sits in the layout head
+	     deliberately: the page components below never render server-side. -->
+	{#if eventTextUrl}
+		<link rel="alternate" type="text/plain" href={eventTextUrl} title="Plain-text details for this event" />
+	{/if}
 </svelte:head>
 
 {#if isLoading}
