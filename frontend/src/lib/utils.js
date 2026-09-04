@@ -292,3 +292,22 @@ export function getCategoryLabel(category, lang) {
     const en = category.name ?? category.category_name ?? '';
     return (lang === 'ko' && ko) ? ko : (en || ko);
 }
+
+/**
+ * One cell of a tab-separated export.
+ *
+ * The exports join cells with tabs and rows with CRLF, so a tab or newline
+ * inside a value silently adds a column or a row and everything after it lands
+ * under the wrong heading - which reads as missing data rather than as damage.
+ * Attendees do paste such values: "Yonsei University\tCollege of Medicine" is a
+ * real institute in this database.
+ */
+export function tsvCell(value) {
+    if (value === null || value === undefined) return '';
+    return String(value).replace(/[\t\r\n]+/g, ' ').trim();
+}
+
+/** Rows of cells as a tab-separated document. */
+export function toTsv(rows) {
+    return rows.map((row) => row.map(tsvCell).join('\t')).join('\r\n');
+}

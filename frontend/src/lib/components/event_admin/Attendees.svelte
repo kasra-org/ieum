@@ -9,7 +9,7 @@
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
-    import { getCategoryLabel } from '$lib/utils.js';
+    import { getCategoryLabel, toTsv } from '$lib/utils.js';
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
@@ -146,7 +146,7 @@
             ...row.custom_answers.map(answer => answer ? answer.answer.replace(/^- /, '').replace(/\n- /g, '; ') : "")
         ]);
 
-        const csv = [headers, ...dataRows].map(row => row.join('\t')).join('\r\n');
+        const csv = toTsv([headers, ...dataRows]);
 
         // Convert to UTF-16 LE with BOM for Excel compatibility
         const BOM = '\uFEFF';

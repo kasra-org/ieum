@@ -8,7 +8,7 @@
     import { Award, CircleCheck, Tag, UserMinus, UserPen } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
-    import { getCategoryLabel } from '$lib/utils.js';
+    import { getCategoryLabel, toTsv } from '$lib/utils.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
 
     import OnSiteRegistrationForm from '$lib/components/OnSiteRegistrationForm.svelte';
@@ -39,7 +39,7 @@
     });
 
     const exportAttendeesAsCSV = () => {
-        const csv = [
+        const csv = toTsv([
             [   "ID",
                 "Name",
                 "Email",
@@ -53,7 +53,7 @@
                 row.institute,
                 row.job_title
             ])
-        ].map(row => row.join('\t')).join('\r\n');
+        ]);
 
         // Convert to UTF-16 LE with BOM for Excel compatibility
         const BOM = '\uFEFF';
