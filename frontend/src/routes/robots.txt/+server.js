@@ -15,7 +15,6 @@ export function GET({ url }) {
         '',
         `# Plain-text rendering of the public events, for agents that do not run JavaScript.`,
         `# ${url.origin}/llms.txt`,
-        `# ${url.origin}/llms-full.txt`,
         '',
     ].join('\n');
     return new Response(body, {

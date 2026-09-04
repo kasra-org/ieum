@@ -1,4 +1,5 @@
 import { get } from '$lib/fetch';
+import { renderEvent } from '$lib/server/llms.js';
 import { error, redirect } from '@sveltejs/kit';
 import { isProfileComplete } from '$lib/utils.js';
 
@@ -65,6 +66,31 @@ export async function load({ cookies, url }) {
     }
 
     rtn.csrf_token = response_csrftoken.data.csrftoken;
+
+    // On an event page, load just enough about the event to describe it in the
+    // document itself. Nothing below the root layout renders on the server - it
+    // is all behind the loading gate - so without this a fetcher sees only the
+    // site-wide title and learns nothing about the event it asked for.
+    // Fetched without cookies: an unpublished event is simply not found.
+    const eventPath = url.pathname.match(/^\/event\/(\d+)(?:\/|$)/);
+    if (eventPath) {
+        const response = await get(`api/event/${eventPath[1]}`);
+        if (response.ok && response.status === 200) {
+            const event = response.data;
+            rtn.event_preview = {
+                id: event.id,
+                name: event.name,
+                start_date: event.start_date,
+                end_date: event.end_date,
+                venue: event.venue,
+                registration_deadline: event.registration_deadline,
+            };
+            // The full event as text, embedded in the page below so a single
+            // fetch of this URL is readable without JavaScript and without a
+            // second request.
+            rtn.event_text = renderEvent(event, url.origin);
+        }
+    }
 
     // Load site settings (public endpoint)
     const siteSettingsResponse = await get('api/site-settings');

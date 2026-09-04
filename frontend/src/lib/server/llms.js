@@ -90,7 +90,8 @@ function demoteHeadings(markdown) {
 function eventSummary(event, origin) {
     const parts = [formatDateRange(event.start_date, event.end_date)];
     if (event.venue) parts.push(event.venue);
-    return `- [${event.name}](${origin}/event/${event.id}): ${parts.filter(Boolean).join(', ')}`;
+    // Link to the event's own text file: that is where its full details live.
+    return `- [${event.name}](${origin}/event/${event.id}/llms.txt): ${parts.filter(Boolean).join(', ')}`;
 }
 
 export function renderEvent(event, origin) {
@@ -145,7 +146,8 @@ export function renderIndex(settings, events, origin) {
     if (settings.site_description) lines.push(`> ${settings.site_description}`, '');
     lines.push(
         `This file lists the conferences and events published on this site.`,
-        `For the same list with full descriptions and fees, see ${origin}/llms-full.txt.`,
+        `Each entry links to that event's own text file with its full details -`,
+        `dates, venue, registration fees, deadlines, description and image URLs.`,
         '',
         '## Events',
         '',
@@ -157,13 +159,3 @@ export function renderIndex(settings, events, origin) {
     return lines.join('\n');
 }
 
-/** Everything, so an agent can answer questions from a single fetch. */
-export function renderFull(settings, events, origin) {
-    const lines = [`# ${settings.site_name || 'IEUM'}`, ''];
-    if (settings.site_description) lines.push(`> ${settings.site_description}`, '');
-    lines.push(`Full details of every event published on this site.`, '');
-    lines.push(events.length
-        ? events.map((event) => eventSection(event, origin)).join('\n')
-        : '_No public events at the moment._\n');
-    return lines.join('\n');
-}

@@ -30,6 +30,15 @@
 	let languageDropdownOpen = $state(false);
 	let isLoading = $state(true);
 
+	const siteName = $derived(data.site_settings?.site_name ?? 'IEUM');
+	const eventPreview = $derived(data.event_preview ?? null);
+	const eventDescription = $derived.by(() => {
+		const e = eventPreview;
+		if (!e) return '';
+		const when = [e.start_date, e.end_date].filter(Boolean).join(' ~ ');
+		return [e.name, when, e.venue].filter(Boolean).join(' | ');
+	});
+
 	// /event/12 and its sub-pages all describe one event; name its text file.
 	const eventTextUrl = $derived.by(() => {
 		const match = $page.url?.pathname?.match(/^\/event\/(\d+)(?:\/|$)/);
@@ -105,8 +114,12 @@
 </script>
 
 <svelte:head>
-	<title>{data.site_settings?.site_name ?? 'IEUM'}</title>
-	{#if data.site_settings?.site_description}
+	<title>{eventPreview ? `${eventPreview.name} | ${siteName}` : siteName}</title>
+	{#if eventDescription}
+		<meta name="description" content={eventDescription} />
+		<meta property="og:description" content={eventDescription} />
+		<meta property="twitter:description" content={eventDescription} />
+	{:else if data.site_settings?.site_description}
 		<meta name="description" content={data.site_settings.site_description} />
 		<meta property="og:description" content={data.site_settings.site_description} />
 		<meta property="twitter:description" content={data.site_settings.site_description} />
@@ -115,10 +128,10 @@
 		<meta name="keywords" content={data.site_settings.site_keywords} />
 	{/if}
 	<meta property="og:type" content="website" />
-	<meta property="og:title" content={data.site_settings?.site_name ?? 'IEUM'} />
+	<meta property="og:title" content={eventPreview ? `${eventPreview.name} | ${siteName}` : siteName} />
 	<meta property="og:site_name" content={data.site_settings?.site_name ?? 'IEUM'} />
 	<meta property="twitter:card" content="summary_large_image" />
-	<meta property="twitter:title" content={data.site_settings?.site_name ?? 'IEUM'} />
+	<meta property="twitter:title" content={eventPreview ? `${eventPreview.name} | ${siteName}` : siteName} />
 	<meta property="og:image" content="{$page.url.origin}/og-image?url={encodeURIComponent($page.url.href)}" />
 	<meta property="og:image:width" content="1200" />
 	<meta property="og:image:height" content="630" />
@@ -131,6 +144,10 @@
 		<link rel="alternate" type="text/plain" href={eventTextUrl} title="Plain-text details for this event" />
 	{/if}
 </svelte:head>
+
+{#if data.event_text}
+	<noscript><pre>{data.event_text}</pre></noscript>
+{/if}
 
 {#if isLoading}
 	<div class="fixed inset-0 bg-white flex items-center justify-center z-50">
