@@ -27,12 +27,23 @@
 {#if open}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <!-- The overlay scrolls; the panel is free to be taller than the viewport.
+         It used to carry max-h-full with no overflow of its own, so on a short
+         screen its white background stopped at the viewport while the content
+         carried on past it. Centring directly on the scroll container also cut
+         off the top of a tall panel, which no amount of scrolling could reach -
+         the inner wrapper with min-h-full centres a short panel and simply grows
+         for a tall one. -->
     <div
-        class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-gray-900/50 p-4"
+        class="fixed inset-0 z-50 overflow-y-auto bg-gray-900/50"
         role="dialog" aria-modal="true" tabindex="-1"
         onclick={(e) => { if ((outsideclose || dismissable) && e.target === e.currentTarget) close(); }}
     >
-        <div class="relative max-h-full w-full {SIZES[size] ?? SIZES.md} rounded-lg bg-white shadow {className}" {...rest}>
+        <div
+            class="flex min-h-full items-center justify-center p-4"
+            onclick={(e) => { if ((outsideclose || dismissable) && e.target === e.currentTarget) close(); }}
+        >
+        <div class="relative w-full {SIZES[size] ?? SIZES.md} rounded-lg bg-white shadow {className}" {...rest}>
             {#if title || dismissable}
                 <div class="flex items-center justify-between rounded-t border-b p-4">
                     <h3 class="text-lg font-semibold text-gray-900">{title}</h3>
@@ -50,6 +61,7 @@
             {#if footer}
                 <div class="flex items-center rounded-b border-t p-4">{@render footer()}</div>
             {/if}
+        </div>
         </div>
     </div>
 {/if}
