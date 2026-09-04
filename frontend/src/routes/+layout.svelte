@@ -145,11 +145,16 @@
 	{/if}
 </svelte:head>
 
-{#if data.event_text}
-	<noscript><pre>{data.event_text}</pre></noscript>
-{/if}
-
 {#if isLoading}
+	<!-- The event as text, rendered server-side as a real element - not
+	     <noscript>, which extraction tools strip along with <script>, leaving
+	     them nothing. It sits in normal flow beneath the opaque, full-screen
+	     spinner overlay, so a person never reads it, and the whole block is
+	     removed the moment the app hydrates. A tool that fetches this URL and
+	     keeps body text gets the full event from one request. -->
+	{#if data.event_text}
+		<pre class="whitespace-pre-wrap break-words p-6 text-sm text-gray-700">{data.event_text}</pre>
+	{/if}
 	<div class="fixed inset-0 bg-white flex items-center justify-center z-50">
 		<Spinner size="12" />
 	</div>
