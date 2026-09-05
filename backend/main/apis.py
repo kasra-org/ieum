@@ -1,5 +1,8 @@
 import json
 import base64
+import os
+import tempfile
+from datetime import datetime as _dt
 import uuid
 import requests
 from functools import wraps
@@ -8,7 +11,8 @@ from datetime import datetime, timedelta
 from typing import List
 from django.utils import timezone
 
-from ninja import NinjaAPI
+from ninja import NinjaAPI, File
+from ninja.files import UploadedFile
 from ninja.security import django_auth
 
 from django.middleware.csrf import get_token
@@ -22,6 +26,7 @@ from django.db import IntegrityError
 from django.db.models import Max, Q
 
 from django.conf import settings
+from django.http import FileResponse
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,6 +36,7 @@ from main.models import (ApiKey, User, Event, EmailTemplate, Attendee, Registrat
 from main.schema import *
 from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id, render_email_template
 from main import nicepay
+from main import backup as db_backup
 
 from .tasks import send_mail, send_mail_with_attachment
 
@@ -3726,6 +3732,54 @@ def revoke_api_key(request, key_id: int):
     key.revoked_at = timezone.now() if revoked else None
     key.save(update_fields=["revoked_at"])
     return {"code": "success", "message": "Key revoked." if revoked else "Key re-enabled."}
+
+
+@api.get("/admin/backup")
+@ensure_superuser
+def download_backup(request):
+    """Stream a .tar.gz of the whole database and media (superuser only)."""
+    if not db_backup.is_supported():
+        return api.create_response(
+            request,
+            {"code": "unsupported", "message": "Backups require a PostgreSQL database."},
+            status=400,
+        )
+    try:
+        fd, path = tempfile.mkstemp(suffix=".tar.gz")
+        os.close(fd)
+        db_backup.create_backup(path)
+    except db_backup.BackupError as exc:
+        return api.create_response(
+            request, {"code": "backup_failed", "message": str(exc)}, status=500)
+
+    # Unlink now: the open handle keeps the bytes readable until FileResponse
+    # finishes streaming and closes it, so nothing is left in /tmp afterwards.
+    handle = open(path, "rb")
+    os.unlink(path)
+    filename = f"ieum-backup-{_dt.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
+    return FileResponse(handle, as_attachment=True, filename=filename,
+                        content_type="application/gzip")
+
+
+@api.post("/admin/restore", response=MessageSchema)
+@ensure_superuser
+def restore_backup(request, file: UploadedFile = File(...)):
+    """Replace the whole database and media from an uploaded backup (superuser)."""
+    if not db_backup.is_supported():
+        return api.create_response(
+            request,
+            {"code": "unsupported", "message": "Restore requires a PostgreSQL database."},
+            status=400,
+        )
+    try:
+        db_backup.restore_backup(file)
+    except db_backup.BackupError as exc:
+        return api.create_response(
+            request, {"code": "restore_failed", "message": str(exc)}, status=400)
+    logger.warning("Database restored from an uploaded backup by user=%s",
+                   getattr(request.user, "username", None))
+    return {"code": "success",
+            "message": "Database restored. You may need to sign in again."}
 
 
 @api.post("/admin/apikey/{key_id}/delete", response=MessageSchema)

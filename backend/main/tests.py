@@ -1642,3 +1642,67 @@ class AbstractUploadErrorTests(TestCase):
         response = self.submit(url[:len(url) - 3] + 'A')
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['code'], 'invalid_file')
+
+
+class DatabaseBackupTests(TestCase):
+    """Backup and restore are superuser-only; the archive is a real gzip."""
+
+    def setUp(self):
+        self.superuser = User.objects.create_user(
+            username='root@example.com', email='root@example.com',
+            password='pw12345!aA', is_staff=True, is_superuser=True,
+        )
+        self.staff = User.objects.create_user(
+            username='staff@example.com', email='staff@example.com',
+            password='pw12345!aA', is_staff=True,
+        )
+
+    def test_superuser_downloads_a_gzip_backup(self):
+        self.client.force_login(self.superuser)
+        response = self.client.get('/api/admin/backup')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/gzip')
+        self.assertIn('ieum-backup-', response.get('Content-Disposition', ''))
+        body = b''.join(response.streaming_content)
+        self.assertEqual(body[:2], b'\x1f\x8b')  # gzip magic
+
+    def test_a_backup_contains_the_sql_and_manifest(self):
+        import io as _io, tarfile
+        self.client.force_login(self.superuser)
+        body = b''.join(self.client.get('/api/admin/backup').streaming_content)
+        with tarfile.open(fileobj=_io.BytesIO(body)) as tar:
+            names = tar.getnames()
+        self.assertIn('database.sql', names)
+        self.assertIn('manifest.json', names)
+
+    def test_backup_requires_superuser(self):
+        self.client.force_login(self.staff)
+        self.assertEqual(self.client.get('/api/admin/backup').status_code, 403)
+
+    def test_backup_requires_authentication(self):
+        self.assertEqual(self.client.get('/api/admin/backup').status_code, 401)
+
+    def test_restore_requires_superuser(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            '/api/admin/restore',
+            {'file': SimpleUploadedFile('b.tar.gz', b'x', content_type='application/gzip')})
+        self.assertEqual(response.status_code, 403)
+
+    def test_restore_requires_authentication(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        response = self.client.post(
+            '/api/admin/restore',
+            {'file': SimpleUploadedFile('b.tar.gz', b'x', content_type='application/gzip')})
+        self.assertEqual(response.status_code, 401)
+
+    def test_restore_rejects_a_file_that_is_not_a_backup(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.client.force_login(self.superuser)
+        response = self.client.post(
+            '/api/admin/restore',
+            {'file': SimpleUploadedFile('x.tar.gz', b'not an archive',
+                                        content_type='application/gzip')})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'restore_failed')

@@ -1,7 +1,7 @@
 <script>
     import { Card, Button } from '$lib/components/ui';
     import { Sidebar, SidebarGroup, SidebarItem, SidebarWrapper } from '$lib/components/ui';
-    import { Building2, Calendar, ClipboardList, Clock, CreditCard, FileText, Globe, KeyRound, Settings, Users as UsersIcon } from '@lucide/svelte';
+    import { Building2, Calendar, ClipboardList, Clock, CreditCard, FileText, Globe, KeyRound, DatabaseBackup, Settings, Users as UsersIcon } from '@lucide/svelte';
     import { onMount } from 'svelte';
     import { fly } from 'svelte/transition';
     import * as m from '$lib/paraglide/messages.js';
@@ -16,6 +16,7 @@
     import TermsOfService from '$lib/components/admin/TermsOfService.svelte';
     import SiteSettings from '$lib/components/admin/SiteSettings.svelte';
     import ApiKeys from '$lib/components/admin/ApiKeys.svelte';
+    import Backup from '$lib/components/admin/Backup.svelte';
 
     let { data } = $props();
 
@@ -25,7 +26,7 @@
     // matching entry here silently redirects to #events, which is easy to miss.
     const ADMIN_PAGES = [
         'events', 'users', 'institutions', 'site_settings', 'business_settings',
-        'payment_settings', 'account_settings', 'privacy_policy', 'terms_of_service', 'api_keys'
+        'payment_settings', 'account_settings', 'privacy_policy', 'terms_of_service', 'api_keys', 'backup'
     ];
 
     const setAdminPage = () => {
@@ -36,7 +37,9 @@
         const page = location.hash.slice(1);
         // api_keys is superuser-only; the loader leaves apiKeys null otherwise,
         // so fall back rather than showing an empty panel.
-        const allowed = ADMIN_PAGES.includes(page) && (page !== 'api_keys' || !!data.admin.apiKeys);
+        const superuserOnly = ['api_keys', 'backup'];
+        const allowed = ADMIN_PAGES.includes(page)
+            && (!superuserOnly.includes(page) || !!data.admin.apiKeys);
         if (!allowed) {
             location.hash = '#events';
             return;
@@ -165,6 +168,13 @@
                                 <KeyRound class="w-6 h-6" />
                             {/snippet}
                         </SidebarItem>
+                        {#if data.admin.apiKeys}
+                        <SidebarItem label={m.admin_sidebar_backup()} active={sidebar_selected === 'backup'} href="#backup">
+                            {#snippet icon()}
+                                <DatabaseBackup class="w-6 h-6" />
+                            {/snippet}
+                        </SidebarItem>
+                        {/if}
                         {/if}
                     </SidebarGroup>
                     </div>
@@ -186,6 +196,10 @@
 
             {#if sidebar_selected === 'api_keys' && data.admin.apiKeys}
             <ApiKeys {data} />
+            {/if}
+
+            {#if sidebar_selected === 'backup' && data.admin.apiKeys}
+            <Backup {data} />
             {/if}
 
             {#if sidebar_selected === 'users'}
