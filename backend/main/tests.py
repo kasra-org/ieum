@@ -260,12 +260,16 @@ class NicePayCancelTests(TestCase):
             'ResultCode': '2001', 'ResultMsg': '취소成功', 'TID': 'TID1',
             'MID': TEST_MID, 'CancelAmt': '1004',
         }
-        result = nicepay.cancel(tid='TID1', cancel_amount=1004, reason='관리자 취소')
+        result = nicepay.cancel(
+            tid='TID1', moid='order123', cancel_amount=1004, reason='관리자 취소',
+        )
         self.assertEqual(result['ResultCode'], '2001')
 
         payload = mock_post.call_args[0][1]
         self.assertEqual(payload['PartialCancelCode'], '0')
         self.assertEqual(payload['CancelAmt'], '1004')
+        # The cancel API rejects the request when Moid is absent or empty.
+        self.assertEqual(payload['Moid'], 'order123')
         self.assertEqual(
             payload['SignData'], nicepay.cancel_sign_data('1004', payload['EdiDate'])
         )
@@ -274,8 +278,15 @@ class NicePayCancelTests(TestCase):
     def test_cancel_rejection_raises(self, mock_post):
         mock_post.return_value = {'ResultCode': '4000', 'ResultMsg': '취소 불가'}
         with self.assertRaises(nicepay.NicePayError) as ctx:
-            nicepay.cancel(tid='TID1', cancel_amount=1004)
+            nicepay.cancel(tid='TID1', moid='order123', cancel_amount=1004)
         self.assertEqual(ctx.exception.code, '4000')
+
+    @patch('main.nicepay._post_form')
+    def test_cancel_without_an_order_id_never_reaches_the_api(self, mock_post):
+        with self.assertRaises(nicepay.NicePayError) as ctx:
+            nicepay.cancel(tid='TID1', moid='', cancel_amount=1004)
+        self.assertEqual(ctx.exception.code, 'missing_moid')
+        mock_post.assert_not_called()
 
 
 @nicepay_settings

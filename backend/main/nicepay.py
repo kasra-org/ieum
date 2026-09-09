@@ -401,18 +401,27 @@ def net_cancel(*, net_cancel_url, tid, auth_token, amount, edi_date, sign_data):
         return None
 
 
-def cancel(*, tid, cancel_amount, reason='관리자 취소', partial=False):
+def cancel(*, tid, moid, cancel_amount, reason='관리자 취소', partial=False):
     """Cancel (취소) an approved payment.
 
-    ``partial`` maps to PartialCancelCode: 1 for a partial refund, 0 for a full
-    one. Returns the parsed response; raises NicePayError when rejected.
+    ``moid`` is the order ID the payment was approved under; the cancel API
+    rejects the request without it. ``partial`` maps to PartialCancelCode: 1 for
+    a partial refund, 0 for a full one. Returns the parsed response; raises
+    NicePayError when rejected.
     """
+    if not moid:
+        raise NicePayError(
+            'This payment has no order ID on record, so it cannot be cancelled '
+            'automatically.',
+            code='missing_moid',
+        )
+
     cancel_amt = str(int(cancel_amount))
     edi_date = now_edi_date()
     payload = {
         'TID': tid,
         'MID': settings.NICEPAY_MID,
-        'Moid': '',
+        'Moid': moid,
         'CancelAmt': cancel_amt,
         'CancelMsg': reason or '관리자 취소',
         'PartialCancelCode': '1' if partial else '0',
@@ -421,8 +430,6 @@ def cancel(*, tid, cancel_amount, reason='관리자 취소', partial=False):
         'CharSet': 'utf-8',
         'EdiType': 'JSON',
     }
-    # Moid is optional for cancellation; drop it rather than send an empty value.
-    payload.pop('Moid')
 
     try:
         result = _post_form(settings.NICEPAY_CANCEL_API_URL, payload)

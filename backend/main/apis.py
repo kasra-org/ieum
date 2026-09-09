@@ -2725,6 +2725,7 @@ def cancel_event_payment(request, event_id: int, payment_id: int, data: PaymentC
         try:
             nicepay.cancel(
                 tid=payment.toss_payment_key,
+                moid=payment.toss_order_id,
                 cancel_amount=payment.amount,
                 reason=data.cancel_reason,
             )
