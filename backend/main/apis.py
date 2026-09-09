@@ -2723,12 +2723,20 @@ def cancel_event_payment(request, event_id: int, payment_id: int, data: PaymentC
     # handled previously.
     if payment.provider == 'nicepay' and payment.toss_payment_key:
         try:
-            nicepay.cancel(
+            result = nicepay.cancel(
                 tid=payment.toss_payment_key,
                 moid=payment.toss_order_id,
                 cancel_amount=payment.amount,
                 reason=data.cancel_reason,
             )
+            if nicepay.is_already_cancelled(result):
+                # Cancelled directly in NicePay's web manager. The refund is
+                # already done, so only our record is out of date.
+                logger.warning(
+                    f"NicePay payment {payment.id} was already cancelled at the "
+                    f"gateway (tid={payment.toss_payment_key}); marking the "
+                    f"record cancelled."
+                )
         except nicepay.NicePayError as e:
             return api.create_response(
                 request,

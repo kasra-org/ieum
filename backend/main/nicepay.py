@@ -60,6 +60,13 @@ APPROVAL_SUCCESS_CODES = {
 # ResultCode indicating a successful cancellation.
 CANCEL_SUCCESS_CODE = '2001'
 
+# A payment cancelled elsewhere (NicePay's own web manager, say) comes back as a
+# cancel *failure* mentioning 기취소, e.g.
+# "해당거래 취소실패(기취소성공) : 전화 문의(1661-0808)". The payer already has
+# their money back, so this is a success from our side. The ResultCode for it is
+# not documented, hence the message match.
+ALREADY_CANCELLED_MARKER = '기취소'
+
 # Human readable payment type per PayMethod, matching the Korean labels the
 # rest of the codebase already stores in PaymentHistory.payment_type.
 PAY_METHOD_LABELS = {
@@ -401,13 +408,19 @@ def net_cancel(*, net_cancel_url, tid, auth_token, amount, edi_date, sign_data):
         return None
 
 
+def is_already_cancelled(result):
+    """True when a cancel was rejected because the payment is already cancelled."""
+    return ALREADY_CANCELLED_MARKER in (result.get('ResultMsg') or '')
+
+
 def cancel(*, tid, moid, cancel_amount, reason='관리자 취소', partial=False):
     """Cancel (취소) an approved payment.
 
     ``moid`` is the order ID the payment was approved under; the cancel API
     rejects the request without it. ``partial`` maps to PartialCancelCode: 1 for
     a partial refund, 0 for a full one. Returns the parsed response; raises
-    NicePayError when rejected.
+    NicePayError when rejected. A payment NicePay reports as already cancelled
+    returns normally - see ``is_already_cancelled``.
     """
     if not moid:
         raise NicePayError(
@@ -438,6 +451,13 @@ def cancel(*, tid, moid, cancel_amount, reason='관리자 취소', partial=False
         raise NicePayError('Failed to connect to the payment service.', code='api_error')
 
     if result.get('ResultCode') != CANCEL_SUCCESS_CODE:
+        if is_already_cancelled(result):
+            logger.info(
+                'NicePay reports tid=%s was already cancelled: code=%s msg=%s',
+                tid, result.get('ResultCode'), result.get('ResultMsg'),
+            )
+            return result
+
         logger.error(
             'NicePay cancel rejected: tid=%s code=%s msg=%s',
             tid, result.get('ResultCode'), result.get('ResultMsg'),

@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from unittest.mock import patch
 
@@ -287,6 +288,78 @@ class NicePayCancelTests(TestCase):
             nicepay.cancel(tid='TID1', moid='', cancel_amount=1004)
         self.assertEqual(ctx.exception.code, 'missing_moid')
         mock_post.assert_not_called()
+
+    @patch('main.nicepay._post_form')
+    def test_a_payment_cancelled_elsewhere_is_not_an_error(self, mock_post):
+        # Cancelled in NicePay's web manager: the refund already happened, so
+        # the rejection is a success from our side.
+        mock_post.return_value = {
+            'ResultCode': '2211',
+            'ResultMsg': '해당거래 취소실패(기취소성공) : 전화 문의(1661-0808)',
+        }
+        result = nicepay.cancel(tid='TID1', moid='order123', cancel_amount=1004)
+        self.assertTrue(nicepay.is_already_cancelled(result))
+
+    def test_an_ordinary_rejection_is_not_read_as_already_cancelled(self):
+        self.assertFalse(nicepay.is_already_cancelled({'ResultMsg': '취소 불가'}))
+        self.assertFalse(nicepay.is_already_cancelled({}))
+
+
+@nicepay_settings
+class NicePayAdminCancelTests(TestCase):
+    """The event admin's cancel button, end to end."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Cancellable', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10,
+        )
+        category, = add_categories(self.event, ('Regular', 200000))
+        user = User.objects.create_user(
+            username='payer@example.com', email='payer@example.com', password='pw12345!aA')
+        self.attendee = Attendee.objects.create(
+            user=user, event=self.event, first_name='Pay', last_name='Er',
+            nationality=1, institute='PNU', category=category)
+        self.payment = PaymentHistory.objects.create(
+            attendee=self.attendee, event=self.event, amount=200000, status='completed',
+            provider='nicepay', toss_payment_key='TID1', toss_order_id='MOID-1',
+        )
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.client.force_login(self.admin_user)
+
+    def cancel(self):
+        return self.client.post(
+            f'/api/event/{self.event.id}/payment/{self.payment.id}/cancel',
+            data=json.dumps({'cancel_reason': '관리자 취소'}),
+            content_type='application/json',
+        )
+
+    @patch('main.nicepay._post_form')
+    def test_cancel_sends_the_stored_moid(self, mock_post):
+        mock_post.return_value = {'ResultCode': '2001', 'ResultMsg': '취소성공'}
+        self.assertEqual(self.cancel().status_code, 200)
+        self.assertEqual(mock_post.call_args[0][1]['Moid'], 'MOID-1')
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, 'cancelled')
+
+    @patch('main.nicepay._post_form')
+    def test_a_payment_already_cancelled_at_the_gateway_updates_the_record(self, mock_post):
+        mock_post.return_value = {
+            'ResultCode': '2211',
+            'ResultMsg': '해당거래 취소실패(기취소성공) : 전화 문의(1661-0808)',
+        }
+        self.assertEqual(self.cancel().status_code, 200)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, 'cancelled')
+
+    @patch('main.nicepay._post_form')
+    def test_a_genuine_rejection_leaves_the_record_alone(self, mock_post):
+        mock_post.return_value = {'ResultCode': '4000', 'ResultMsg': '취소 불가'}
+        self.assertEqual(self.cancel().status_code, 400)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, 'completed')
 
 
 @nicepay_settings
