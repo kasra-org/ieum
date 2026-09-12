@@ -202,6 +202,18 @@ export const actions = {
         }
         return;
     },
+    toggle_fee_exemption: async ({ cookies, params, request }) => {
+        let formdata = await request.formData();
+        const response = await post(`api/event/${params.slug}/attendee/${parseInt(formdata.get('id'))}/update`, {
+            fee_waived: formdata.get('fee_waived') === 'true',
+        }, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            error(response.status, response.data);
+        }
+        return;
+    },
     toggle_attended: async ({ cookies, params, request }) => {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/attendee/${parseInt(formdata.get('id'))}/update`, {

@@ -133,6 +133,11 @@ class Attendee(models.Model):
         null=True, blank=True, related_name='attendees',
     )
 
+    # Set by an event admin to excuse this one registration from its category's
+    # fee - the same waiver a speaker gets, granted per registration. Speakers
+    # are exempt through the speaker list instead, so this stays False for them.
+    fee_waived = models.BooleanField(default=False)
+
     class Meta:
         unique_together = [['event', 'attendee_nametag_id']]
 
@@ -155,11 +160,15 @@ class Attendee(models.Model):
 
     @property
     def is_fee_exempt(self):
-        """True when this person is on the event's speaker list, fee waived.
+        """True when this registration is not charged a fee.
 
-        Read from the list rather than stored, so adding or removing a speaker
-        takes effect immediately and leaves no payment record behind.
+        Either an event admin waived it outright, or the person is on the
+        event's speaker list. The speaker half is read from the list rather than
+        stored, so adding or removing a speaker takes effect immediately and
+        leaves no payment record behind.
         """
+        if self.fee_waived:
+            return True
         email = self.email.lower()
         return bool(email) and email in self.event.exempt_speaker_emails
 

@@ -338,6 +338,10 @@ class AttendeeSchema(Schema):
     category_name_ko: str
     registration_fee: int
     payment_status: str
+    # Whether an admin waived this registration's fee, and whether it ends up
+    # free either way - a speaker is exempt without the waiver being set.
+    fee_waived: bool
+    is_fee_exempt: bool
     registered_at: str
     custom_answers: List[AnswerSchema]
 
@@ -352,6 +356,10 @@ class AttendeeSchema(Schema):
     @staticmethod
     def resolve_payment_status(da: Attendee) -> str:
         return da.payment_status
+
+    @staticmethod
+    def resolve_is_fee_exempt(da: Attendee) -> bool:
+        return da.is_fee_exempt
 
     @staticmethod
     def resolve_registered_at(da: Attendee) -> str:

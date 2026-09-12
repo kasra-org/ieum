@@ -1405,6 +1405,93 @@ class SpeakerPaymentExemptionTests(TestCase):
         self.assertEqual(len(speaker_queries), 1, speaker_queries)
 
 
+class AdminFeeWaiverTests(TestCase):
+    """An event admin can excuse one registration from its category's fee."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Waivable', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, published=True,
+        )
+        self.category, = add_categories(self.event, ('Regular', 200000))
+        user = User.objects.create_user(
+            username='owes@example.com', email='owes@example.com', password='pw12345!aA')
+        self.attendee = Attendee.objects.create(
+            user=user, event=self.event, first_name='O', last_name='Wes',
+            nationality=1, institute='PNU', category=self.category)
+        self.event.attendees.add(self.attendee)
+
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.client.force_login(self.admin_user)
+
+    def waive(self, waived):
+        return self.client.post(
+            f'/api/event/{self.event.id}/attendee/{self.attendee.id}/update',
+            data=json.dumps({'fee_waived': waived}),
+            content_type='application/json',
+        )
+
+    def fresh(self):
+        return Attendee.objects.select_related('event').get(id=self.attendee.id)
+
+    def test_waiving_settles_the_registration(self):
+        self.assertEqual(self.attendee.payment_status, 'pending')
+        self.assertEqual(self.waive(True).status_code, 200)
+
+        attendee = self.fresh()
+        self.assertTrue(attendee.is_fee_exempt)
+        self.assertEqual(attendee.registration_fee, 0)
+        self.assertEqual(attendee.payment_status, 'free')
+        self.assertFalse(attendee.has_outstanding_payment)
+
+    def test_no_payment_record_is_written(self):
+        self.waive(True)
+        # Nothing was transacted, so there is nothing to receipt.
+        self.assertFalse(PaymentHistory.objects.filter(attendee=self.attendee).exists())
+
+    def test_the_waiver_can_be_lifted(self):
+        self.waive(True)
+        self.assertEqual(self.waive(False).status_code, 200)
+        attendee = self.fresh()
+        self.assertFalse(attendee.is_fee_exempt)
+        self.assertEqual(attendee.registration_fee, 200000)
+        self.assertEqual(attendee.payment_status, 'pending')
+
+    def test_editing_a_registration_leaves_the_waiver_alone(self):
+        # The edit form posts every other field; it must not silently un-waive.
+        self.waive(True)
+        response = self.client.post(
+            f'/api/event/{self.event.id}/attendee/{self.attendee.id}/update',
+            data=json.dumps({
+                'first_name': 'Oh', 'last_name': 'Wes', 'nationality': 1,
+                'institute': 'PNU', 'job_title': 'Prof',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.fresh().fee_waived)
+
+    def test_a_waived_registration_is_still_listed_for_the_admin(self):
+        # It stays on the unpaid tab so the waiver can be lifted again.
+        self.waive(True)
+        response = self.client.get(f'/api/event/{self.event.id}/attendees')
+        self.assertEqual(response.status_code, 200)
+        row = next(a for a in response.json() if a['id'] == self.attendee.id)
+        self.assertTrue(row['fee_waived'])
+        self.assertTrue(row['is_fee_exempt'])
+        self.assertEqual(row['registration_fee'], 0)
+        self.assertEqual(row['payment_status'], 'free')
+
+    def test_a_stranger_cannot_waive_a_fee(self):
+        outsider = User.objects.create_user(
+            username='nosy@example.com', email='nosy@example.com', password='pw12345!aA')
+        self.client.force_login(outsider)
+        self.assertNotEqual(self.waive(True).status_code, 200)
+        self.assertFalse(self.fresh().fee_waived)
+
+
 class ReceiptLookupTests(TestCase):
     """The receipt link has to resolve for payments with no gateway order id."""
 

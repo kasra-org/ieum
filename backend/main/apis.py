@@ -1070,6 +1070,9 @@ def update_attendee(request, event_id: int, attendee_id: int):
     if "is_attended" in data:
         attendee.is_attended = data.get("is_attended", False)
 
+    if "fee_waived" in data:
+        attendee.fee_waived = bool(data.get("fee_waived", False))
+
     if "first_name" in data or "nationality" in data:
         attendee.first_name = data.get("first_name", "")
         attendee.middle_initial = data.get("middle_initial", "")
