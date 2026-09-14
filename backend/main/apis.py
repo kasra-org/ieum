@@ -1661,6 +1661,9 @@ def send_emails(request, event_id: int):
         render_email_template(subject, {"event": event, "attendee": None})
         render_email_template(body, {"event": event, "attendee": None})
     except TemplateSyntaxError as exc:
+        # The admin sees the reason in the modal; keep a copy here so a report
+        # of "it says 400" can be traced to the exact construct that failed.
+        logger.warning('Manual email for event %s refused, template error: %s', event.id, exc)
         return api.create_response(
             request,
             {"code": "invalid_template", "message": f"The message could not be rendered: {exc}"},

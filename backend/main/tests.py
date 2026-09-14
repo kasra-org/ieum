@@ -2074,6 +2074,23 @@ class ManualEmailTests(TestCase):
         self.assertEqual(sent['nobody@example.com'], 'Hi !')
 
     @patch('main.apis.send_mail')
+    def test_a_variable_the_editor_autolinked_still_renders(self, mock_send):
+        # What the rich editor made of {{ event.name }} - ".name" is a TLD.
+        body = ('Welcome to {{ [event.name](http://event.name) }} at '
+                '{{ [event.venue](https://event.venue/)|upper }}.')
+        response = self.send('ann@example.com', body,
+                             subject='{{ [event.name](http://event.name) }}')
+        self.assertEqual(response.status_code, 200, response.content)
+        call = mock_send.delay.call_args
+        self.assertEqual(call.args[0], 'Songdo Meeting')
+        self.assertEqual(call.args[1], 'Welcome to Songdo Meeting at SONGDO CONVENSIA.')
+
+    def test_a_real_link_next_to_a_variable_is_left_alone(self):
+        body = 'See [{{ event.name }}](https://example.com/{{ event.id }})'
+        out = render_email_template(body, {'event': self.event})
+        self.assertEqual(out, f'See [Songdo Meeting](https://example.com/{self.event.id})')
+
+    @patch('main.apis.send_mail')
     def test_a_broken_template_sends_nothing(self, mock_send):
         response = self.send('ann@example.com', 'Hello {% if attendee %}unclosed')
         self.assertEqual(response.status_code, 400)

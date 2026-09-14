@@ -74,6 +74,13 @@
                 }),
                 Link.configure({
                     openOnClick: false,
+                    // Only link text written as a URL or an address. The default
+                    // also links anything shaped like a bare domain, and email
+                    // bodies carry template variables such as {{ event.name }}
+                    // - ".name" is a real TLD - which it rewrote into
+                    // {{ [event.name](http://event.name) }} and broke the send.
+                    shouldAutoLink: (text) =>
+                        /^(https?:\/\/|www\.|mailto:)/i.test(text) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text),
                     HTMLAttributes: {
                         class: 'text-blue-600 underline hover:text-blue-800',
                     },
@@ -822,7 +829,6 @@
     <div class={activeTab === 'markdown' ? '' : 'hidden'}>
         <Textarea
             {id}
-            {name}
             bind:value={value}
             placeholder={placeholder || m.markdownEditor_placeholder()}
             {rows}

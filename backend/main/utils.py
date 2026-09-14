@@ -656,6 +656,17 @@ def odt_to_html(file_path):
     return ''.join(html_output)
 
 
+# A variable the editor turned into a link: {{ [event.name](http://event.name) }}.
+# Bare-domain autolinking is now off in the editor, but bodies saved before
+# that, or written in another editor, can still carry this shape.
+AUTOLINKED_VARIABLE_RE = re.compile(r'\{\{(\s*)\[([^\]\s]+)\]\([^)]*\)([^}]*)\}\}')
+
+
+def unmangle_autolinked_variables(template_string):
+    """Undo an editor's autolink inside {{ }}, which the template parser cannot read."""
+    return AUTOLINKED_VARIABLE_RE.sub(r'{{\1\2\3}}', template_string or '')
+
+
 def render_email_template(template_string, context_dict):
     """Render an email template as plain text.
 
@@ -665,4 +676,5 @@ def render_email_template(template_string, context_dict):
     """
     from django.template import Context, Template
 
+    template_string = unmangle_autolinked_variables(template_string)
     return Template(template_string).render(Context(context_dict, autoescape=False))

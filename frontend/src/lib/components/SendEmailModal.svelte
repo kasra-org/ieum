@@ -170,7 +170,9 @@
                 message_error = '';
                 successModal = true;
             } else {
-                message_error = m.attendees_sendEmailError();
+                // The API says why (a template that will not render, no valid
+                // recipients); a generic line would hide that.
+                message_error = result.error?.message || m.attendees_sendEmailError();
             }
         };
     };
