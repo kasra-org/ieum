@@ -67,7 +67,7 @@
 
         <div class="mb-6">
             <MarkdownEditor bind:value={body} id="invite_body" name="body" label={m.attendees_message()} rows={10} />
-            <p class="mt-1 text-xs text-gray-500">{m.invite_linkHelp()}</p>
+            <p class="mt-1 text-xs text-gray-500">{m.invite_linkHelp({ link: '{{ invitation_link }}' })}</p>
         </div>
 
         <div class="mb-6">

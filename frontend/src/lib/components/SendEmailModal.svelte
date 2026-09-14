@@ -251,7 +251,7 @@
                 label={m.attendees_message()}
                 rows={10}
             />
-            <p class="mt-1 text-xs text-gray-500">{m.attendees_messageVariablesHelp()}</p>
+            <p class="mt-1 text-xs text-gray-500">{m.attendees_messageVariablesHelp({ variables: '{{ attendee.first_name }}, {{ attendee.name }}, {{ event.name }}, {{ event.venue }}, {{ event.organizers_en }}' })}</p>
         </div>
         <div class="mb-6">
             <EmailAttachments bind:value={attachments} name="attachments" label={m.emailTemplates_attachments()} />

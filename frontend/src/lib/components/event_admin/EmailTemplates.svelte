@@ -111,7 +111,7 @@
     </div>
 
     <Heading tag="h3" class="text-lg font-bold mb-2">{m.emailTemplates_invitation()}</Heading>
-    <p class="font-light mb-6 text-sm text-gray-500">{m.emailTemplates_invitationHelp()}</p>
+    <p class="font-light mb-6 text-sm text-gray-500">{m.emailTemplates_invitationHelp({ link: '{{ invitation_link }}' })}</p>
     <div class="mb-6">
         <Label for="email_template_invitation_subject" class="block mb-2">{m.emailTemplates_subject()}</Label>
         <Input id="email_template_invitation_subject" name="email_template_invitation_subject" value={invitation?.subject ?? ''} />
