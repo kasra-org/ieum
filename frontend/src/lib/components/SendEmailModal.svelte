@@ -249,6 +249,7 @@
                 label={m.attendees_message()}
                 rows={10}
             />
+            <p class="mt-1 text-xs text-gray-500">{m.attendees_messageVariablesHelp()}</p>
         </div>
         <div class="mb-6">
             <EmailAttachments bind:value={attachments} name="attachments" label={m.emailTemplates_attachments()} />

@@ -110,6 +110,9 @@ export const actions = {
             email_template_registration_attachments: parseAttachments(formdata.get('email_template_registration_attachments')),
             email_template_abstract_submission_attachments: parseAttachments(formdata.get('email_template_abstract_submission_attachments')),
             email_template_certificate_attachments: parseAttachments(formdata.get('email_template_certificate_attachments')),
+            email_template_invitation_subject: formdata.get('email_template_invitation_subject'),
+            email_template_invitation_body: formdata.get('email_template_invitation_body'),
+            email_template_invitation_attachments: parseAttachments(formdata.get('email_template_invitation_attachments')),
         }, cookies);
         if (response.ok && response.status === 200) {
             return response.data;
@@ -266,6 +269,23 @@ export const actions = {
     deregister_attendee: async ({ cookies, params, request }) => {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/attendee/${formdata.get('id')}/deregister`, {}, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            error(response.status, response.data);
+        }
+        return;
+    },
+    send_invitations: async ({ cookies, params, request }) => {
+        let formdata = await request.formData();
+        // One address per line, or separated by ; or , - the API validates each.
+        const emails = (formdata.get('emails') || '').split(/[;,\s]+/).map(e => e.trim()).filter(Boolean);
+        const response = await post(`api/event/${params.slug}/invitations`, {
+            emails,
+            subject: formdata.get('subject'),
+            body: formdata.get('body'),
+            fee_waived: formdata.get('fee_waived') === 'true',
+        }, cookies);
         if (response.ok && response.status === 200) {
             return response.data;
         } else {

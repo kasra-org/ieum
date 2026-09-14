@@ -116,7 +116,10 @@
                         'Content-Type': 'application/x-www-form-urlencoded',
                         'Accept': 'application/json',
                     },
-                    body: new URLSearchParams(data),
+                    // `next` rides along so the action can see where the
+                    // person came from - an invitation link registers them
+                    // for its event as part of the signup.
+                    body: new URLSearchParams({ ...data, next: page_data.next || '/' }),
                 }
             );
             if (!response.ok || response.status !== 200) {

@@ -16,10 +16,15 @@
     let registrationBody = $state(data.event.email_template_registration?.body ?? '');
     let abstractBody = $state(data.event.email_template_abstract_submission?.body ?? '');
     let certificateBody = $state(data.event.email_template_certificate?.body ?? '');
+    // Older events have no invitation template on the event; the templates
+    // endpoint creates one on demand, so read it from there.
+    const invitation = data.email_templates?.invitation ?? data.event.email_template_invitation;
+    let invitationBody = $state(invitation?.body ?? '');
 
     let registrationAttachments = $state(data.event.email_template_registration?.attachments ?? []);
     let abstractAttachments = $state(data.event.email_template_abstract_submission?.attachments ?? []);
     let certificateAttachments = $state(data.event.email_template_certificate?.attachments ?? []);
+    let invitationAttachments = $state(invitation?.attachments ?? []);
 
     const afterSubmit = () => {
         return async ({ result, action, update }) => {
@@ -101,6 +106,29 @@
         <EmailAttachments
             bind:value={certificateAttachments}
             name="email_template_certificate_attachments"
+            label={m.emailTemplates_attachments()}
+        />
+    </div>
+
+    <Heading tag="h3" class="text-lg font-bold mb-2">{m.emailTemplates_invitation()}</Heading>
+    <p class="font-light mb-6 text-sm text-gray-500">{m.emailTemplates_invitationHelp()}</p>
+    <div class="mb-6">
+        <Label for="email_template_invitation_subject" class="block mb-2">{m.emailTemplates_subject()}</Label>
+        <Input id="email_template_invitation_subject" name="email_template_invitation_subject" value={invitation?.subject ?? ''} />
+    </div>
+    <div class="mb-6">
+        <MarkdownEditor
+            bind:value={invitationBody}
+            id="email_template_invitation_body"
+            name="email_template_invitation_body"
+            label={m.emailTemplates_body()}
+            rows={10}
+        />
+    </div>
+    <div class="mb-6">
+        <EmailAttachments
+            bind:value={invitationAttachments}
+            name="email_template_invitation_attachments"
             label={m.emailTemplates_attachments()}
         />
     </div>

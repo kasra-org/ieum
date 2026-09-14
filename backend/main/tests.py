@@ -18,7 +18,7 @@ from main import email_body, nicepay
 from main.apis import template_attachment_paths
 from main.tasks import build_email, cleanup_media_files
 from main.utils import render_email_template
-from main.models import Abstract, AbstractVote, Attendee, Institution, EmailAttachment, EmailTemplate, Event, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory
+from main.models import Abstract, AbstractVote, Attendee, Institution, EmailAttachment, EmailTemplate, Event, EventInvitation, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory
 
 User = get_user_model()
 
@@ -1744,6 +1744,349 @@ class EmailUploadRetentionTests(TestCase):
         self.assertTrue(default_storage.exists(image))
         self.assertTrue(default_storage.exists(attached))
         self.assertFalse(default_storage.exists(orphan))
+
+
+class InvitationTests(TestCase):
+    """An admin emails a personal link; opening it registers the recipient."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Invited Symposium', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, published=True,
+            email_template_registration=EmailTemplate.objects.create(
+                subject='Registered for {{ event.name }}', body='Welcome {{ attendee.first_name }}'),
+        )
+        self.category, = add_categories(self.event, ('Regular', 200000))
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.institution = Institution.objects.create(name_en='PNU', name_ko='부산대')
+
+    def invite(self, emails, fee_waived=True, **extra):
+        self.client.force_login(self.admin_user)
+        payload = {
+            'emails': emails,
+            'subject': 'Come to {{ event.name }}',
+            'body': 'Join here: [{{ invitation_link }}]({{ invitation_link }})',
+            'fee_waived': fee_waived,
+        }
+        payload.update(extra)
+        response = self.client.post(
+            f'/api/event/{self.event.id}/invitations',
+            data=json.dumps(payload), content_type='application/json')
+        self.client.logout()
+        return response
+
+    def make_user(self, email='guest@example.com'):
+        return User.objects.create_user(
+            username=email, email=email, password='pw12345!aA',
+            first_name='Gue', last_name='St', nationality=1, job_title='Prof',
+            institute=self.institution,
+        )
+
+    @patch('main.invitations.send_mail')
+    def test_each_address_gets_its_own_link(self, mock_send):
+        response = self.invite(['a@example.com', 'b@example.com'])
+        self.assertEqual(response.status_code, 200)
+
+        rows = {inv.email: inv for inv in EventInvitation.objects.filter(event=self.event)}
+        self.assertEqual(set(rows), {'a@example.com', 'b@example.com'})
+        self.assertNotEqual(rows['a@example.com'].token, rows['b@example.com'].token)
+        self.assertTrue(all(inv.fee_waived for inv in rows.values()))
+
+        # The body was rendered per recipient with that recipient's link.
+        sent = {call.args[2]: call.args[1] for call in mock_send.delay.call_args_list}
+        self.assertIn(f"/invite/{rows['a@example.com'].token}", sent['a@example.com'])
+        self.assertIn(f"/invite/{rows['b@example.com'].token}", sent['b@example.com'])
+        self.assertNotIn(rows['b@example.com'].token, sent['a@example.com'])
+        self.assertEqual(mock_send.delay.call_args.kwargs['rich'], True)
+
+    @patch('main.invitations.send_mail')
+    def test_a_body_without_the_link_is_refused(self, mock_send):
+        response = self.invite(['a@example.com'], body='No link here')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'missing_link')
+        mock_send.delay.assert_not_called()
+
+    @patch('main.invitations.send_mail')
+    def test_bad_and_duplicate_addresses_are_dropped(self, mock_send):
+        response = self.invite(['a@example.com', 'not-an-email', 'A@example.com', ''])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(EventInvitation.objects.filter(event=self.event).count(), 1)
+
+    def test_a_stranger_cannot_send_invitations(self):
+        outsider = User.objects.create_user(
+            username='nosy@example.com', email='nosy@example.com', password='pw12345!aA')
+        self.client.force_login(outsider)
+        response = self.client.post(
+            f'/api/event/{self.event.id}/invitations',
+            data=json.dumps({'emails': ['a@example.com'], 'subject': 's', 'body': '{{ invitation_link }}'}),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 403)
+
+    @patch('main.invitations.send_mail')
+    def test_the_invite_page_can_see_what_is_offered_without_logging_in(self, mock_send):
+        self.invite(['guest@example.com'])
+        token = EventInvitation.objects.get(email='guest@example.com').token
+        response = self.client.get(f'/api/invitation/{token}')
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['email'], 'guest@example.com')
+        self.assertTrue(body['fee_waived'])
+        self.assertFalse(body['is_accepted'])
+        self.assertEqual(body['event_id'], self.event.id)
+        self.assertEqual(body['event_name'], 'Invited Symposium')
+
+    def test_an_unknown_token_is_a_404(self):
+        self.assertEqual(self.client.get('/api/invitation/nope').status_code, 404)
+
+    @patch('main.invitations.send_mail')
+    def test_accepting_registers_from_the_profile_with_the_fee_waived(self, mock_send):
+        self.invite(['guest@example.com'])
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        user = self.make_user()
+        self.client.force_login(user)
+
+        response = self.client.post(f'/api/invitation/{invitation.token}/accept')
+        self.assertEqual(response.status_code, 200)
+
+        attendee = Attendee.objects.select_related('event').get(event=self.event, user=user)
+        self.assertEqual(attendee.first_name, 'Gue')
+        self.assertEqual(attendee.institute, 'PNU')
+        self.assertEqual(attendee.institute_ko, '부산대')
+        self.assertEqual(attendee.category, self.category)
+        self.assertTrue(attendee.fee_waived)
+        self.assertEqual(attendee.payment_status, 'free')
+        # It counts as a registration everywhere the M2M is consulted.
+        self.assertTrue(self.event.attendees.filter(id=attendee.id).exists())
+
+        invitation.refresh_from_db()
+        self.assertTrue(invitation.is_accepted)
+        self.assertEqual(invitation.attendee, attendee)
+
+        # The ordinary registration confirmation went out too.
+        subjects = [call.args[0] for call in mock_send.delay.call_args_list]
+        self.assertIn('Registered for Invited Symposium', subjects)
+
+    @patch('main.invitations.send_mail')
+    def test_without_a_waiver_the_fee_is_still_owed(self, mock_send):
+        self.invite(['guest@example.com'], fee_waived=False)
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        user = self.make_user()
+        self.client.force_login(user)
+        self.client.post(f'/api/invitation/{invitation.token}/accept')
+        attendee = Attendee.objects.select_related('event').get(event=self.event, user=user)
+        self.assertFalse(attendee.fee_waived)
+        self.assertEqual(attendee.payment_status, 'pending')
+
+    @patch('main.invitations.send_mail')
+    def test_someone_else_cannot_spend_the_link(self, mock_send):
+        self.invite(['guest@example.com'])
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        other = self.make_user('other@example.com')
+        self.client.force_login(other)
+
+        response = self.client.post(f'/api/invitation/{invitation.token}/accept')
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()['code'], 'wrong_account')
+        self.assertFalse(Attendee.objects.filter(event=self.event, user=other).exists())
+        invitation.refresh_from_db()
+        self.assertFalse(invitation.is_accepted)
+
+    @patch('main.invitations.send_mail')
+    def test_the_address_match_ignores_case(self, mock_send):
+        self.invite(['Guest@Example.com'])
+        invitation = EventInvitation.objects.get(email='Guest@Example.com')
+        user = self.make_user('guest@example.com')
+        self.client.force_login(user)
+        self.assertEqual(self.client.post(f'/api/invitation/{invitation.token}/accept').status_code, 200)
+
+    @patch('main.invitations.send_mail')
+    def test_opening_the_link_twice_is_harmless(self, mock_send):
+        self.invite(['guest@example.com'])
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        user = self.make_user()
+        self.client.force_login(user)
+        self.client.post(f'/api/invitation/{invitation.token}/accept')
+        self.assertEqual(self.client.post(f'/api/invitation/{invitation.token}/accept').status_code, 200)
+        self.assertEqual(Attendee.objects.filter(event=self.event, user=user).count(), 1)
+
+    @patch('main.invitations.send_mail')
+    def test_an_existing_registration_just_gains_the_waiver(self, mock_send):
+        user = self.make_user()
+        existing = Attendee.objects.create(
+            user=user, event=self.event, first_name='Gue', last_name='St',
+            nationality=1, institute='PNU', category=self.category)
+        self.event.attendees.add(existing)
+        self.assertEqual(existing.payment_status, 'pending')
+
+        self.invite(['guest@example.com'])
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        self.client.force_login(user)
+        self.assertEqual(self.client.post(f'/api/invitation/{invitation.token}/accept').status_code, 200)
+
+        self.assertEqual(Attendee.objects.filter(event=self.event, user=user).count(), 1)
+        existing = Attendee.objects.select_related('event').get(id=existing.id)
+        self.assertTrue(existing.fee_waived)
+        self.assertEqual(existing.payment_status, 'free')
+        # Not a new registration, so no second confirmation email.
+        subjects = [call.args[0] for call in mock_send.delay.call_args_list]
+        self.assertNotIn('Registered for Invited Symposium', subjects)
+
+    @patch('main.invitations.send_mail')
+    def test_a_full_event_refuses_even_an_invited_guest(self, mock_send):
+        self.event.capacity = 1
+        self.event.save()
+        filler = Attendee.objects.create(
+            event=self.event, first_name='Fil', last_name='Ler', nationality=1, institute='PNU')
+        self.event.attendees.add(filler)
+
+        self.invite(['guest@example.com'])
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        self.client.force_login(self.make_user())
+        response = self.client.post(f'/api/invitation/{invitation.token}/accept')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'event_full')
+
+    @patch('main.invitations.send_mail')
+    def test_the_deadline_does_not_apply_to_an_invitation(self, mock_send):
+        # Inviting after the deadline is the admin's override.
+        self.event.registration_deadline = date(2000, 1, 1)
+        self.event.save()
+        self.invite(['guest@example.com'])
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        self.client.force_login(self.make_user())
+        self.assertEqual(self.client.post(f'/api/invitation/{invitation.token}/accept').status_code, 200)
+
+    @patch('main.invitations.send_mail')
+    def test_an_invitation_only_event_needs_no_code_from_an_invitee(self, mock_send):
+        self.event.invitation_code = 'SECRET'
+        self.event.save()
+        self.invite(['guest@example.com'])
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        self.client.force_login(self.make_user())
+        self.assertEqual(self.client.post(f'/api/invitation/{invitation.token}/accept').status_code, 200)
+
+    @patch('main.invitations.send_mail')
+    def test_signing_up_through_the_link_registers_at_the_same_time(self, mock_send):
+        self.invite(['guest@example.com'])
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+
+        response = self.client.post(
+            '/_allauth/browser/v1/auth/signup',
+            data=json.dumps({
+                'email': 'guest@example.com', 'username': 'guest@example.com',
+                'password': 'a-long-passw0rd!!',
+                'first_name': 'Gue', 'last_name': 'St', 'middle_initial': '',
+                'nationality': 1, 'job_title': 'Prof', 'institute': self.institution.id,
+                'department': '', 'disability': '', 'dietary': '',
+                'invitation_token': invitation.token,
+            }),
+            content_type='application/json',
+        )
+        # 401: account created, email verification pending - the normal outcome.
+        self.assertEqual(response.status_code, 401, response.content)
+
+        user = User.objects.get(email='guest@example.com')
+        attendee = Attendee.objects.select_related('event').get(event=self.event, user=user)
+        self.assertEqual(attendee.institute, 'PNU')
+        self.assertTrue(attendee.fee_waived)
+        self.assertEqual(attendee.payment_status, 'free')
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.attendee, attendee)
+
+    @patch('main.invitations.send_mail')
+    def test_signing_up_with_a_different_address_keeps_the_account_but_not_the_seat(self, mock_send):
+        self.invite(['guest@example.com'])
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        response = self.client.post(
+            '/_allauth/browser/v1/auth/signup',
+            data=json.dumps({
+                'email': 'someone@example.com', 'username': 'someone@example.com',
+                'password': 'a-long-passw0rd!!',
+                'first_name': 'Some', 'last_name': 'One', 'middle_initial': '',
+                'nationality': 1, 'job_title': 'Prof', 'institute': self.institution.id,
+                'department': '', 'disability': '', 'dietary': '',
+                'invitation_token': invitation.token,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 401, response.content)
+        self.assertTrue(User.objects.filter(email='someone@example.com').exists())
+        self.assertFalse(Attendee.objects.filter(event=self.event).exists())
+        invitation.refresh_from_db()
+        self.assertFalse(invitation.is_accepted)
+
+    def test_an_older_event_gets_an_invitation_template_on_demand(self):
+        self.assertIsNone(self.event.email_template_invitation)
+        self.client.force_login(self.admin_user)
+        response = self.client.get(f'/api/event/{self.event.id}/email_templates')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('{{ invitation_link }}', response.json()['invitation']['body'])
+        self.event.refresh_from_db()
+        self.assertIsNotNone(self.event.email_template_invitation)
+
+
+class ManualEmailTests(TestCase):
+    """Emails sent by hand from the attendee list render like the automatic ones."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Songdo Meeting', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Songdo Convensia', capacity=10,
+        )
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        for email, first in (('ann@example.com', 'Ann'), ('bob@example.com', 'Bob')):
+            user = User.objects.create_user(username=email, email=email, password='pw12345!aA')
+            attendee = Attendee.objects.create(
+                user=user, event=self.event, first_name=first, last_name='X',
+                nationality=1, institute='PNU')
+            self.event.attendees.add(attendee)
+        self.client.force_login(self.admin_user)
+
+    def send(self, to, body, subject='About {{ event.name }}'):
+        return self.client.post(
+            f'/api/event/{self.event.id}/send_emails',
+            data=json.dumps({'to': to, 'subject': subject, 'body': body}),
+            content_type='application/json')
+
+    @patch('main.apis.send_mail')
+    def test_variables_are_filled_in_per_recipient(self, mock_send):
+        response = self.send(
+            'ann@example.com; bob@example.com',
+            'Dear {{ attendee.first_name }}, see you at {{ event.venue }}.')
+        self.assertEqual(response.status_code, 200)
+
+        sent = {call.args[2]: call.args[:2] for call in mock_send.delay.call_args_list}
+        self.assertEqual(sent['ann@example.com'][1], 'Dear Ann, see you at Songdo Convensia.')
+        self.assertEqual(sent['bob@example.com'][1], 'Dear Bob, see you at Songdo Convensia.')
+        self.assertEqual(sent['ann@example.com'][0], 'About Songdo Meeting')
+
+    @patch('main.apis.send_mail')
+    def test_an_address_without_a_registration_still_gets_the_email(self, mock_send):
+        # Matched case-insensitively; a stranger renders the attendee blank.
+        response = self.send('ANN@example.com; nobody@example.com', 'Hi {{ attendee.first_name }}!')
+        self.assertEqual(response.status_code, 200)
+        sent = {call.args[2]: call.args[1] for call in mock_send.delay.call_args_list}
+        self.assertEqual(sent['ANN@example.com'], 'Hi Ann!')
+        self.assertEqual(sent['nobody@example.com'], 'Hi !')
+
+    @patch('main.apis.send_mail')
+    def test_a_broken_template_sends_nothing(self, mock_send):
+        response = self.send('ann@example.com', 'Hello {% if attendee %}unclosed')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'invalid_template')
+        mock_send.delay.assert_not_called()
+
+    @patch('main.apis.send_mail')
+    def test_markdown_and_media_pass_through_to_the_rich_sender(self, mock_send):
+        body = '**Hotels**: ![map](/media/editor/images/x/map.jpg)'
+        self.send('ann@example.com', body)
+        call = mock_send.delay.call_args
+        self.assertEqual(call.args[1], body)
+        self.assertTrue(call.kwargs['rich'])
 
 
 class ReceiptLookupTests(TestCase):

@@ -256,6 +256,38 @@ class EmailTemplateSchema(Schema):
     body: str
     attachments: List[EmailAttachmentSchema] = []
 
+class InvitationSchema(Schema):
+    """Enough for the invite page to say what is on offer, and to whom."""
+    email: str
+    fee_waived: bool
+    is_accepted: bool
+    event_id: int
+    event_name: str
+    event_start_date: date
+    event_end_date: date
+    event_venue: str
+
+    @staticmethod
+    def resolve_event_id(inv) -> int:
+        return inv.event_id
+
+    @staticmethod
+    def resolve_event_name(inv) -> str:
+        return inv.event.name
+
+    @staticmethod
+    def resolve_event_start_date(inv) -> date:
+        return inv.event.start_date
+
+    @staticmethod
+    def resolve_event_end_date(inv) -> date:
+        return inv.event.end_date
+
+    @staticmethod
+    def resolve_event_venue(inv) -> str:
+        return inv.event.venue
+
+
 class EventAdminSchema(Schema):
     id: int
     name: str
@@ -288,6 +320,7 @@ class EventAdminSchema(Schema):
     email_template_registration: Union[EmailTemplateSchema, None]
     email_template_abstract_submission: Union[EmailTemplateSchema, None]
     email_template_certificate: Union[EmailTemplateSchema, None]
+    email_template_invitation: Union[EmailTemplateSchema, None]
     invitation_code: str
     onsite_code: str
     published: bool

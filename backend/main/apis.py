@@ -31,12 +31,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from main.models import (ApiKey, User, Event, EmailTemplate, EmailAttachment, Attendee, RegistrationCategory,
+from main.models import (ApiKey, User, Event, EmailTemplate, EmailAttachment, EventInvitation, Attendee, RegistrationCategory, attendees_for_email,
     CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings)
 from main.schema import *
 from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id, render_email_template
 from main import nicepay
+from django.template import TemplateSyntaxError
+
 from main import email_body
+from main import invitations
 from main import backup as db_backup
 
 from .tasks import send_mail, send_mail_with_attachment
@@ -575,6 +578,10 @@ def add_event(request):
             "Best regards,\n"
             "{{ event.organizers_en }}"
     )
+    email_template_invitation = EmailTemplate.objects.create(
+        subject=settings.ACCOUNT_EMAIL_SUBJECT_PREFIX+"Invitation to {{ event.name }}",
+        body=default_invitation_body(),
+    )
 
     # Use provided link_info or default to empty (will be set after event creation)
     link_info = data.get("link_info", "").strip()
@@ -608,6 +615,7 @@ def add_event(request):
         email_template_registration=email_template_registration,
         email_template_abstract_submission=email_template_abstract_submission,
         email_template_certificate=email_template_certificate,
+        email_template_invitation=email_template_invitation,
         onsite_code=generate_onsite_code(),
     )
 
@@ -900,6 +908,42 @@ def clean_attachment_paths(raw):
     return paths
 
 
+def default_invitation_body():
+    """Starting text for the invitation email; the admin edits it per event.
+
+    The link is a markdown link rather than a bare URL so it is clickable in
+    the HTML part of the email whatever the recipient's client does with bare
+    URLs. Rendered per recipient, since each gets their own token.
+    """
+    return (
+        "Dear Colleague,\n\n"
+        "You are invited to {{ event.name }}.\n\n"
+        "Event Details:\n"
+        " - Dates: {{ event.start_date|date:'F d, Y' }} - {{ event.end_date|date:'F d, Y' }}\n"
+        " - Venue: {{ event.venue }}\n"
+        " - Official Website: {{ event.link_info }}\n\n"
+        "To accept this invitation, please open the link below. If you do not "
+        "have an account yet, you can create one there and your registration "
+        "for the event will be completed at the same time.\n\n"
+        "[{{ invitation_link }}]({{ invitation_link }})\n\n"
+        "{% if invitation.fee_waived %}The registration fee is waived for you.\n\n{% endif %}"
+        "If you have any questions, please contact us at: " + settings.EMAIL_FROM + "\n\n"
+        "Warm regards,\n"
+        "{{ event.organizers_en }}"
+    )
+
+
+def ensure_invitation_template(event):
+    """Events predating invitations have no template row; make one on demand."""
+    if event.email_template_invitation is None:
+        event.email_template_invitation = EmailTemplate.objects.create(
+            subject=settings.ACCOUNT_EMAIL_SUBJECT_PREFIX + "Invitation to {{ event.name }}",
+            body=default_invitation_body(),
+        )
+        event.save(update_fields=['email_template_invitation'])
+    return event.email_template_invitation
+
+
 def template_attachment_paths(template):
     """The files to attach to every send of this template."""
     if template is None:
@@ -959,6 +1003,14 @@ def update_event_emailtemplates(request, event_id: int):
         event.save()
     sync_template_attachments(
         event.email_template_certificate, data.get("email_template_certificate_attachments"))
+    # Optional in the payload, so a client without the invitation section
+    # cannot blank it out.
+    if "email_template_invitation_subject" in data:
+        invitation = ensure_invitation_template(event)
+        invitation.subject = data["email_template_invitation_subject"]
+        invitation.body = data.get("email_template_invitation_body", "")
+        invitation.save()
+        sync_template_attachments(invitation, data.get("email_template_invitation_attachments"))
     return {"code": "success", "message": "Email templates updated."}
 
 @api.get("/event/{event_id}/registered", response=RegistrationStatusSchema)
@@ -1601,13 +1653,111 @@ def send_emails(request, event_id: int):
     # arrive as /media/ URLs and are validated the same way.
     attachments = clean_attachment_paths(data.get('attachments'))
 
+    # The subject and body are templates, like the automatic emails: rendered
+    # once per recipient with that recipient's registration, so a body can say
+    # "Dear {{ attendee.first_name }}". A broken template fails here, before
+    # anything is queued, rather than in the worker after half have gone out.
+    try:
+        render_email_template(subject, {"event": event, "attendee": None})
+        render_email_template(body, {"event": event, "attendee": None})
+    except TemplateSyntaxError as exc:
+        return api.create_response(
+            request,
+            {"code": "invalid_template", "message": f"The message could not be rendered: {exc}"},
+            status=400,
+        )
+
     reply_to = event.main_admin.email if event.main_admin else None
     for recipient in valid_recipients:
-        send_mail.delay(subject, body, recipient, reply_to=reply_to,
-                        cc=valid_cc if valid_cc else None,
-                        rich=True, attachments=attachments)
+        # An address with no registration (a CC'd colleague, say) still gets the
+        # email; the attendee variables just render empty.
+        matches = attendees_for_email(event, recipient)
+        context = {"event": event, "attendee": matches[0] if matches else None}
+        send_mail.delay(
+            render_email_template(subject, context),
+            render_email_template(body, context),
+            recipient, reply_to=reply_to,
+            cc=valid_cc if valid_cc else None,
+            rich=True, attachments=attachments,
+        )
 
     return {"code": "success", "message": f"Emails sent to {len(valid_recipients)} recipients."}
+
+@api.post("/event/{event_id}/invitations", response=MessageSchema)
+@ensure_event_staff
+def send_invitations(request, event_id: int):
+    """Email a personal registration link to each address.
+
+    The subject and body arrive already edited in the modal; they are still
+    templates, rendered per recipient so each gets their own link.
+    """
+    event = Event.objects.get(id=event_id)
+    data = json.loads(request.body)
+
+    subject = sanitize_email_header(data.get('subject', ''))
+    body = data.get('body', '')
+    if not subject:
+        return api.create_response(
+            request, {"code": "invalid_subject", "message": "Subject is required."}, status=400)
+    if '{{ invitation_link }}' not in body and '{{invitation_link}}' not in body:
+        return api.create_response(
+            request,
+            {"code": "missing_link",
+             "message": "The body must contain {{ invitation_link }}, or nobody can accept."},
+            status=400,
+        )
+
+    emails = []
+    for raw in data.get('emails') or []:
+        email = (raw or '').strip()
+        if validate_email_format(email) and email.lower() not in {e.lower() for e in emails}:
+            emails.append(email)
+    if not emails:
+        return api.create_response(
+            request,
+            {"code": "invalid_recipients", "message": "No valid email addresses provided."},
+            status=400,
+        )
+
+    template = ensure_invitation_template(event)
+    created = invitations.send(
+        event, emails, subject, body,
+        fee_waived=bool(data.get('fee_waived', False)),
+        invited_by=request.user,
+        attachments=template_attachment_paths(template),
+    )
+    return {"code": "success", "message": f"Invitations sent to {len(created)} recipients."}
+
+
+@api.get("/invitation/{token}", response=InvitationSchema, auth=None)
+@rate_limit(max_requests=30, window_seconds=60)
+def get_invitation(request, token: str):
+    """What the invite page shows before the person logs in. Public: the
+    token itself is the secret, and a 404 gives away nothing."""
+    try:
+        invitation = EventInvitation.objects.select_related('event').get(token=token)
+    except EventInvitation.DoesNotExist:
+        return api.create_response(
+            request, {"code": "not_found", "message": "Invitation not found."}, status=404)
+    return invitation
+
+
+@api.post("/invitation/{token}/accept", response=MessageSchema)
+def accept_invitation(request, token: str):
+    """Register the logged-in user through their invitation."""
+    try:
+        invitation = EventInvitation.objects.select_related('event').get(token=token)
+    except EventInvitation.DoesNotExist:
+        return api.create_response(
+            request, {"code": "not_found", "message": "Invitation not found."}, status=404)
+    try:
+        invitations.accept(invitation, request.user)
+    except invitations.InvitationError as exc:
+        return api.create_response(
+            request, {"code": exc.code, "message": exc.message},
+            status=403 if exc.code == 'wrong_account' else 400)
+    return {"code": "success", "message": "Registered."}
+
 
 @api.post("/event/{event_id}/send_certificate", response=MessageSchema)
 @ensure_event_staff
@@ -2328,7 +2478,8 @@ def get_email_templates(request, event_id: int):
     rtn = {
         "registration": event.email_template_registration,
         "abstract": event.email_template_abstract_submission,
-        "certificate": event.email_template_certificate
+        "certificate": event.email_template_certificate,
+        "invitation": ensure_invitation_template(event),
     }
     return rtn
 

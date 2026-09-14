@@ -89,8 +89,26 @@ export const actions = {
     },
     register: async ({ cookies, request }) => {
         let formdata = await request.formData()
+        const next = sanitizeRedirectUrl(formdata.get('next'));
+        formdata.delete('next');
+
+        // Arrived through an invitation link: the signup registers them for
+        // that event as well (main.forms.CustomSignupForm on the backend).
+        const invited = next.match(/^\/invite\/([A-Za-z0-9_-]+)$/);
+        if (invited) {
+            formdata.set('invitation_token', invited[1]);
+        }
+
+        // The verification email's link carries no `next`; remember it here so
+        // that, once verified, they log in and land back where they started.
+        if (next !== '/') {
+            cookies.set('post_verify_next', next, {
+                path: '/', httpOnly: true, sameSite: 'lax', maxAge: 60 * 60 * 24,
+                secure: process.env.NODE_ENV === 'production',
+            });
+        }
+
         const response = await post('_allauth/browser/v1/auth/signup', formdata, cookies);
-        console.log(response.data);
 
         if (!response.ok) {
             if (response.status === 400) {

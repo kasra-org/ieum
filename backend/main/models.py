@@ -321,6 +321,9 @@ class Event(models.Model):
     email_template_registration = models.ForeignKey('EmailTemplate', on_delete=models.SET_NULL, blank=True, null=True, related_name='email_template_registration')
     email_template_abstract_submission = models.ForeignKey('EmailTemplate', on_delete=models.SET_NULL, blank=True, null=True, related_name='email_template_abstract_submission')
     email_template_certificate = models.ForeignKey('EmailTemplate', on_delete=models.SET_NULL, blank=True, null=True, related_name='email_template_certificate')
+    # Sent by an admin to a named address; the body carries a personal link that
+    # registers whoever opens it - see EventInvitation.
+    email_template_invitation = models.ForeignKey('EmailTemplate', on_delete=models.SET_NULL, blank=True, null=True, related_name='email_template_invitation')
     invitation_code = models.CharField(max_length=100, blank=True)  # Empty = public event, non-empty = invitation only
     onsite_code = models.CharField(max_length=6, blank=True)  # Auto-generated code for onsite registration URL
     attendees = models.ManyToManyField('Attendee', related_name='events', blank=True)
@@ -436,6 +439,8 @@ class Event(models.Model):
             self.email_template_abstract_submission.delete()
         if self.email_template_certificate:
             self.email_template_certificate.delete()
+        if self.email_template_invitation:
+            self.email_template_invitation.delete()
         super().delete(*args, **kwargs)
 
 class Organizer(models.Model):
@@ -1212,6 +1217,40 @@ class ApiKey(models.Model):
         self.revoked_at = None
         self.save(update_fields=['prefix', 'key_hash', 'revoked_at'])
         return raw
+
+
+class EventInvitation(models.Model):
+    """A personal registration link an event admin emails to one address.
+
+    Opening the link registers the recipient for the event - creating their
+    account first if they have none - without the registration form, and with
+    the fee waived when the admin said so. The token is the whole credential,
+    so it is bound to the invited address: a forwarded link registers nobody
+    else. See main.invitations for the flow.
+    """
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='invitations')
+    email = models.EmailField()
+    token = models.CharField(max_length=64, unique=True)
+    fee_waived = models.BooleanField(default=False)
+    invited_by = models.ForeignKey(
+        'User', on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_invitations')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Set once the link has done its job. The attendee it produced is kept so
+    # the admin can see who came in through which invitation.
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    attendee = models.ForeignKey(
+        Attendee, on_delete=models.SET_NULL, null=True, blank=True, related_name='invitations')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    @property
+    def is_accepted(self):
+        return self.accepted_at is not None
+
+    def matches(self, email):
+        return bool(email) and email.strip().lower() == self.email.strip().lower()
 
 
 # Speakers are not charged. The exemption is read from the speaker list rather
