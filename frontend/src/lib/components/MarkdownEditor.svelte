@@ -115,6 +115,25 @@
                 attributes: {
                     class: 'prose prose-sm max-w-none focus:outline-none min-h-[200px] p-4',
                 },
+                handlePaste: (view, event) => {
+                    // Plain text pasted into the rich view is inserted verbatim
+                    // by default, so a markdown body copied from an earlier
+                    // email lands as literal brackets, and any URL inside them
+                    // then gets autolinked into [[x](x)](x) nonsense. When the
+                    // clipboard has no HTML and the text reads like markdown,
+                    // render it first.
+                    const clipboard = event.clipboardData;
+                    if (!clipboard || clipboard.getData('text/html') || !DOMPurify) return false;
+                    const text = clipboard.getData('text/plain');
+                    if (!text || !/(!?\[[^\]]*\]\([^)]+\)|^#{1,3} |\*\*[^*]+\*\*|^\s*[-*] )/m.test(text)) return false;
+                    try {
+                        editor.commands.insertContent(DOMPurify.sanitize(marked.parse(text)));
+                        return true;
+                    } catch (e) {
+                        console.error('Error parsing pasted markdown:', e);
+                        return false;
+                    }
+                },
                 handleKeyDown: (view, event) => {
                     if (event.key !== 'Tab') return false;
 
@@ -350,6 +369,12 @@
         md = md.replace(/&lt;/g, '<');
         md = md.replace(/&gt;/g, '>');
         md = md.replace(/&quot;/g, '"');
+
+        // A template variable that was autolinked at some point - by an older
+        // build of this editor, or by whatever the text was pasted from -
+        // comes out as {{ [event.name](http://event.name) }}, which the
+        // server's template parser cannot read. Put it back.
+        md = md.replace(/\{\{(\s*)\[([^\]\s]+)\]\([^)]*\)([^}]*)\}\}/g, '{{$1$2$3}}');
 
         // Clean up extra whitespace
         md = md.replace(/\n{3,}/g, '\n\n');
