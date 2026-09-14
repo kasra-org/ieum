@@ -6,8 +6,12 @@ RUN corepack enable
 
 WORKDIR /app
 
-COPY package.json pnpm-workspace.yaml /app/
-RUN pnpm install
+# The lockfile has to come along: without it pnpm resolves the whole tree afresh
+# on every build, so the image drifts from what was tested locally and a build
+# can break with no change on our side. --frozen-lockfile then fails loudly if
+# package.json and the lockfile ever disagree, rather than quietly re-resolving.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml /app/
+RUN pnpm install --frozen-lockfile
 
 COPY . /app/
 
