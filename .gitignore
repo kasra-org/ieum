@@ -12,10 +12,12 @@ node_modules/
 .env.test.local
 .env.production.local
 
-# SvelteKit lock files
+# Lock files for the package managers this project does not use. pnpm-lock.yaml
+# is committed on purpose: the frontend image installs from it, so ignoring it
+# would leave every build to re-resolve the tree against whatever the registry
+# serves that minute.
 package-lock.json
 yarn.lock
-pnpm-lock.yaml
 
 # SvelteKit output
 public/build/
