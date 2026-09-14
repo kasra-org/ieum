@@ -155,7 +155,12 @@ services:
       - EMAIL_HOST_PASSWORD=${EMAIL_HOST_PASSWORD}
       - EMAIL_PORT=${EMAIL_PORT}
       - EMAIL_PREFIX=${EMAIL_PREFIX}
+    # The worker assembles outgoing email, and a body's inline images and its
+    # attachments are read off the media storage at that moment - without this
+    # mount they silently drop out of every email. The media sweep runs here
+    # too, and sweeps nothing without it.
     volumes:
+      - media_data:/app/media
       - ./backend:/app
     depends_on:
       migrate:
