@@ -38,6 +38,23 @@
         gfm: true
     });
 
+    // A template variable that something autolinked - a mail client
+    // rendering it, an older build of this editor - reads
+    // {{ [event.name](http://event.name) }}. Left alone, marked turns that
+    // into a genuine link and the server's template parser refuses it. Every
+    // markdown that enters or leaves the editor passes through here.
+    function healVariables(md) {
+        return (md || '')
+            .replace(/\{\{(\s*)\[([^\]\s]+)\]\([^)]*\)([^}]*)\}\}/g, '{{$1$2$3}}')
+            // The same old autolinking wrapped a link's own URL text into a
+            // second link: [[https://x](https://x)](https://x). One is enough.
+            .replace(/\[\[([^\]]+)\]\(([^)]+)\)\]\(\2\)/g, '[$1]($2)');
+    }
+
+    function markdownToHtml(md) {
+        return DOMPurify.sanitize(marked.parse(healVariables(md)));
+    }
+
     // Import DOMPurify only on client side
     onMount(async () => {
         const DOMPurifyModule = await import('dompurify');
@@ -53,8 +70,7 @@
         let initialHtml = '';
         if (value && DOMPurify) {
             try {
-                const rawHtml = marked.parse(value);
-                initialHtml = DOMPurify.sanitize(rawHtml);
+                initialHtml = markdownToHtml(value);
             } catch (e) {
                 console.error('Error parsing initial markdown:', e);
             }
@@ -115,6 +131,20 @@
                 attributes: {
                     class: 'prose prose-sm max-w-none focus:outline-none min-h-[200px] p-4',
                 },
+                transformPastedHTML: (html) => {
+                    // Mail clients and browsers link anything shaped like a
+                    // domain when they render, so a body copied out of a
+                    // received email arrives with <a href="http://event.name">
+                    // wrapped around the variable. Unwrap anchors inside {{ }}
+                    // before the editor keeps them as links.
+                    const inVariable = /\{\{([^}]*?)<a\b[^>]*>([\s\S]*?)<\/a>([^}]*?)\}\}/g;
+                    let prev;
+                    do {
+                        prev = html;
+                        html = html.replace(inVariable, '{{$1$2$3}}');
+                    } while (html !== prev);
+                    return html;
+                },
                 handlePaste: (view, event) => {
                     // Plain text pasted into the rich view is inserted verbatim
                     // by default, so a markdown body copied from an earlier
@@ -127,7 +157,7 @@
                     const text = clipboard.getData('text/plain');
                     if (!text || !/(!?\[[^\]]*\]\([^)]+\)|^#{1,3} |\*\*[^*]+\*\*|^\s*[-*] )/m.test(text)) return false;
                     try {
-                        editor.commands.insertContent(DOMPurify.sanitize(marked.parse(text)));
+                        editor.commands.insertContent(markdownToHtml(text));
                         return true;
                     } catch (e) {
                         console.error('Error parsing pasted markdown:', e);
@@ -370,11 +400,7 @@
         md = md.replace(/&gt;/g, '>');
         md = md.replace(/&quot;/g, '"');
 
-        // A template variable that was autolinked at some point - by an older
-        // build of this editor, or by whatever the text was pasted from -
-        // comes out as {{ [event.name](http://event.name) }}, which the
-        // server's template parser cannot read. Put it back.
-        md = md.replace(/\{\{(\s*)\[([^\]\s]+)\]\([^)]*\)([^}]*)\}\}/g, '{{$1$2$3}}');
+        md = healVariables(md);
 
         // Clean up extra whitespace
         md = md.replace(/\n{3,}/g, '\n\n');
@@ -391,9 +417,7 @@
             // Switching to WYSIWYG - convert markdown to HTML
             if (value && DOMPurify) {
                 try {
-                    const rawHtml = marked.parse(value);
-                    const safeHtml = DOMPurify.sanitize(rawHtml);
-                    editor.commands.setContent(safeHtml);
+                    editor.commands.setContent(markdownToHtml(value));
                 } catch (e) {
                     console.error('Error converting markdown to HTML:', e);
                 }
