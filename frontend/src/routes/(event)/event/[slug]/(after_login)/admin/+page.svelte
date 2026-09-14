@@ -231,7 +231,13 @@
                     </div>
                 </div>
             {/if}
-            <div class="p-6 sm:p-8 overflow-auto w-full">
+            <!-- min-w-0 rather than overflow-auto: as a flex item this would
+                 otherwise grow to fit the widest table instead of letting the
+                 table's own overflow-x-auto wrapper scroll it. Any overflow
+                 value here also turns the div into a scroll container, which
+                 pinned the editor toolbar to a box that never scrolls - the
+                 page does - so it never stayed in view. -->
+            <div class="p-6 sm:p-8 min-w-0 w-full">
                 {#if sidebar_selected === 'event_information'}
                 <EventInformation data={data} />
                 {/if}
