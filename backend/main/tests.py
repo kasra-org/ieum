@@ -1,4 +1,8 @@
+import base64
 import json
+import os
+import tempfile
+import uuid
 from datetime import date
 from unittest.mock import patch
 
@@ -7,9 +11,14 @@ from django.db import connection
 from django.test import Client, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 
-from main import nicepay
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+
+from main import email_body, nicepay
+from main.apis import template_attachment_paths
+from main.tasks import build_email, cleanup_media_files
 from main.utils import render_email_template
-from main.models import Abstract, AbstractVote, Attendee, Institution, EmailTemplate, Event, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory
+from main.models import Abstract, AbstractVote, Attendee, Institution, EmailAttachment, EmailTemplate, Event, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory
 
 User = get_user_model()
 
@@ -1490,6 +1499,251 @@ class AdminFeeWaiverTests(TestCase):
         self.client.force_login(outsider)
         self.assertNotEqual(self.waive(True).status_code, 200)
         self.assertFalse(self.fresh().fee_waived)
+
+
+# A 1x1 PNG, small enough to keep inline and real enough to survive the
+# upload validator's magic-byte check.
+PNG_BYTES = base64.b64decode(
+    b'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM'
+    b'IQAAAABJRU5ErkJggg=='
+)
+
+
+def temp_media(cls):
+    """Run a test case against a throwaway MEDIA_ROOT."""
+    return override_settings(MEDIA_ROOT=tempfile.mkdtemp())(cls)
+
+
+@temp_media
+class EmailBodyRenderTests(TestCase):
+    """Markdown in, (html, inline images) out - see main.email_body."""
+
+    def store(self, name, content=PNG_BYTES):
+        return default_storage.save(f'editor/images/{name}', ContentFile(content))
+
+    def test_markdown_becomes_html(self):
+        html, _ = email_body.render('Hello **world**')
+        self.assertIn('<strong>world</strong>', html)
+
+    def test_single_newlines_survive_as_breaks(self):
+        # Bodies written before rich text are plain paragraphs whose newlines
+        # are real line breaks; markdown would otherwise reflow them into one.
+        html, _ = email_body.render('Dear attendee,\nSee you there.')
+        self.assertIn('<br', html)
+
+    def test_a_media_image_is_inlined_by_content_id(self):
+        path = self.store('poster.png')
+        html, images = email_body.render(f'![poster](/media/{path})')
+
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]['content'], PNG_BYTES)
+        self.assertEqual(images[0]['mimetype'], 'image/png')
+        self.assertIn(f"cid:{images[0]['cid']}", html)
+        self.assertNotIn('/media/', html)
+
+    def test_one_image_used_twice_is_attached_once(self):
+        path = self.store('logo.png')
+        body = f'![logo](/media/{path})\n\n![logo again](/media/{path})'
+        html, images = email_body.render(body)
+
+        self.assertEqual(len(images), 1)
+        self.assertEqual(html.count(f"cid:{images[0]['cid']}"), 2)
+
+    def test_an_external_image_is_left_alone(self):
+        html, images = email_body.render('![x](https://example.com/x.png)')
+        self.assertEqual(images, [])
+        self.assertIn('https://example.com/x.png', html)
+
+    def test_a_missing_file_leaves_the_body_sendable(self):
+        # A broken image beats a bounced email.
+        html, images = email_body.render('![gone](/media/editor/images/gone.png)')
+        self.assertEqual(images, [])
+        self.assertIn('/media/editor/images/gone.png', html)
+
+    def test_a_body_cannot_reach_outside_the_media_root(self):
+        self.assertIsNone(email_body.media_path('/media/../../etc/passwd'))
+        self.assertIsNone(email_body.media_path('/media//etc/passwd'))
+        self.assertIsNone(email_body.media_path('https://example.com/x.png'))
+
+    def test_attachments_skip_what_is_gone(self):
+        path = default_storage.save('editor/attachments/programme.pdf', ContentFile(b'%PDF-1.4'))
+        loaded = email_body.load_attachments([path, 'editor/attachments/missing.pdf'])
+        self.assertEqual([f['filename'] for f in loaded], ['programme.pdf'])
+        self.assertEqual(loaded[0]['mimetype'], 'application/pdf')
+
+
+@temp_media
+class EmailAssemblyTests(TestCase):
+    """What build_email actually puts on the wire."""
+
+    def test_a_rich_body_keeps_a_plain_text_alternative(self):
+        email = build_email('Hi', 'Hello **world**', 'to@example.com', rich=True)
+        # The markdown source is the text/plain part: it is written to be read.
+        self.assertEqual(email.body, 'Hello **world**')
+        self.assertEqual(len(email.alternatives), 1)
+        html, mimetype = email.alternatives[0][0], email.alternatives[0][1]
+        self.assertEqual(mimetype, 'text/html')
+        self.assertIn('<strong>world</strong>', html)
+
+    def structure(self, part, depth=0):
+        """The MIME tree as (depth, content type) pairs."""
+        rows = [(depth, part.get_content_type())]
+        if part.is_multipart():
+            for sub in part.get_payload():
+                rows.extend(self.structure(sub, depth + 1))
+        return rows
+
+    def test_an_inlined_image_sits_beside_the_html_that_references_it(self):
+        path = default_storage.save('editor/images/p.png', ContentFile(PNG_BYTES))
+        email = build_email('Hi', f'![p](/media/{path})', 'to@example.com', rich=True)
+
+        self.assertEqual(self.structure(email.message()), [
+            (0, 'multipart/related'),
+            (1, 'multipart/alternative'),
+            (2, 'text/plain'),
+            (2, 'text/html'),
+            (1, 'image/png'),
+        ])
+
+    def test_an_attachment_stays_outside_the_related_part(self):
+        # Buried inside related, some clients never offer it for download.
+        image = default_storage.save('editor/images/q.png', ContentFile(PNG_BYTES))
+        pdf = default_storage.save('editor/attachments/q.pdf', ContentFile(b'%PDF-1.4'))
+        email = build_email('Hi', f'![q](/media/{image})', 'to@example.com',
+                            rich=True, attachments=[pdf])
+
+        self.assertEqual(self.structure(email.message()), [
+            (0, 'multipart/mixed'),
+            (1, 'multipart/related'),
+            (2, 'multipart/alternative'),
+            (3, 'text/plain'),
+            (3, 'text/html'),
+            (2, 'image/png'),
+            (1, 'application/pdf'),
+        ])
+
+    def test_system_mail_stays_plain(self):
+        # Account verification and the like: markdown would mangle the URLs.
+        email = build_email('Verify', 'Go to https://x/y?a=1&b=2', 'to@example.com')
+        self.assertFalse(hasattr(email, 'alternatives') and email.alternatives)
+        self.assertEqual(email.body, 'Go to https://x/y?a=1&b=2')
+
+    def test_attachments_are_attached(self):
+        path = default_storage.save('editor/attachments/map.pdf', ContentFile(b'%PDF-1.4'))
+        email = build_email('Hi', 'See attached', 'to@example.com',
+                            rich=True, attachments=[path])
+        self.assertEqual(
+            [(name, mimetype) for name, _, mimetype in email.attachments],
+            [('map.pdf', 'application/pdf')],
+        )
+
+
+@temp_media
+class EmailTemplateAttachmentTests(TestCase):
+    """The event admin's attachment list, saved against each template."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Mailed', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10,
+            email_template_registration=EmailTemplate.objects.create(subject='S', body='B'),
+            email_template_abstract_submission=EmailTemplate.objects.create(subject='S', body='B'),
+            email_template_certificate=EmailTemplate.objects.create(subject='S', body='B'),
+        )
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.client.force_login(self.admin_user)
+
+        self.path = default_storage.save(
+            'editor/attachments/programme.pdf', ContentFile(b'%PDF-1.4'))
+
+    def save(self, **extra):
+        payload = {
+            'email_template_registration_subject': 'S',
+            'email_template_registration_body': 'B',
+            'email_template_abstract_submission_subject': 'S',
+            'email_template_abstract_submission_body': 'B',
+            'email_template_certificate_subject': 'S',
+            'email_template_certificate_body': 'B',
+        }
+        payload.update(extra)
+        return self.client.post(
+            f'/api/event/{self.event.id}/emailtemplates',
+            data=json.dumps(payload), content_type='application/json')
+
+    def attachments(self):
+        return list(
+            self.event.email_template_registration.attachments.values_list('file_path', flat=True))
+
+    def test_an_attachment_is_stored_against_its_template(self):
+        response = self.save(email_template_registration_attachments=[
+            {'url': f'/media/{self.path}', 'filename': 'programme.pdf'}])
+        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(self.attachments(), [self.path])
+        attachment = self.event.email_template_registration.attachments.get()
+        self.assertEqual(attachment.filename, os.path.basename(self.path))
+        self.assertEqual(attachment.size, len(b'%PDF-1.4'))
+
+    def test_saving_without_the_key_keeps_them(self):
+        # An older client posting only subject and body must not wipe the list.
+        self.save(email_template_registration_attachments=[{'url': f'/media/{self.path}'}])
+        self.assertEqual(self.save().status_code, 200)
+        self.assertEqual(self.attachments(), [self.path])
+
+    def test_an_empty_list_clears_them(self):
+        self.save(email_template_registration_attachments=[{'url': f'/media/{self.path}'}])
+        self.save(email_template_registration_attachments=[])
+        self.assertEqual(self.attachments(), [])
+
+    def test_a_path_outside_the_media_root_is_refused(self):
+        self.save(email_template_registration_attachments=[
+            {'url': '/media/../../etc/passwd'},
+            {'url': '/media/editor/attachments/never-uploaded.pdf'},
+            {'url': 'https://example.com/evil.pdf'},
+        ])
+        self.assertEqual(self.attachments(), [])
+
+    def test_the_admin_page_gets_the_attachment_list_back(self):
+        # The template editor seeds its picker from this payload.
+        self.save(email_template_registration_attachments=[{'url': f'/media/{self.path}'}])
+        response = self.client.get(f'/api/event/{self.event.id}/email_templates')
+        self.assertEqual(response.status_code, 200)
+        attachments = response.json()['registration']['attachments']
+        self.assertEqual([a['url'] for a in attachments], [f'/media/{self.path}'])
+        self.assertEqual(attachments[0]['filename'], os.path.basename(self.path))
+
+    def test_the_sent_email_carries_the_template_attachment(self):
+        self.save(email_template_registration_attachments=[{'url': f'/media/{self.path}'}])
+        paths = template_attachment_paths(self.event.email_template_registration)
+        email = build_email('S', 'B', 'to@example.com', rich=True, attachments=paths)
+        self.assertEqual(
+            [name for name, _, _ in email.attachments], [os.path.basename(self.path)])
+
+
+@temp_media
+class EmailUploadRetentionTests(TestCase):
+    """Files an email body depends on must outlive the orphan sweep."""
+
+    def test_template_images_and_attachments_are_not_swept(self):
+        image = default_storage.save(
+            f'editor/images/{uuid.uuid4()}/keep.png', ContentFile(PNG_BYTES))
+        attached = default_storage.save(
+            f'editor/attachments/{uuid.uuid4()}/keep.pdf', ContentFile(b'%PDF-1.4'))
+        orphan = default_storage.save(
+            f'editor/images/{uuid.uuid4()}/orphan.png', ContentFile(PNG_BYTES))
+
+        template = EmailTemplate.objects.create(subject='S', body=f'![k](/media/{image})')
+        EmailAttachment.objects.create(
+            template=template, file_path=attached, filename='keep.pdf', size=8)
+
+        # min_age_hours=0 so the files just written are old enough to sweep.
+        cleanup_media_files(min_age_hours=0)
+
+        self.assertTrue(default_storage.exists(image))
+        self.assertTrue(default_storage.exists(attached))
+        self.assertFalse(default_storage.exists(orphan))
 
 
 class ReceiptLookupTests(TestCase):

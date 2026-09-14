@@ -1,19 +1,81 @@
 from celery import shared_task
 import base64
 from datetime import timedelta
+from email.mime.image import MIMEImage
 import logging
 
+from main import email_body
+
 from django.core.mail import send_mail as django_send_mail
-from django.core.mail import EmailMessage
+from django.core.mail import EmailMessage, EmailMultiAlternatives
+from django.core.mail.message import SafeMIMEMultipart
 from django.conf import settings
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-@shared_task
-def send_mail(subject, body, to, reply_to=None, cc=None):
-    print(f"Sending email to {to}...")
-    try:
+
+class RichEmail(EmailMultiAlternatives):
+    """An HTML email whose inline images sit where a mail client expects them.
+
+    Django attaches everything at one level, which would put a genuine
+    attachment inside the multipart/related part holding the inline images -
+    some clients then never offer it for download. Nesting it properly gives:
+
+        multipart/mixed
+          multipart/related
+            multipart/alternative (text/plain, text/html)
+            image/*                (inline, referenced by cid)
+          application/*            (the attachments)
+    """
+
+    def __init__(self, *args, inline_images=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.inline_images = list(inline_images)
+
+    def _create_message(self, msg):
+        msg = self._create_alternatives(msg)
+        if self.inline_images:
+            related = SafeMIMEMultipart(_subtype='related', encoding=self.encoding)
+            related.attach(msg)
+            for image in self.inline_images:
+                related.attach(image)
+            msg = related
+        return self._create_attachments(msg)
+
+
+def build_email(subject, body, to, reply_to=None, cc=None, rich=False, attachments=None):
+    """Assemble the message every send in here goes out as.
+
+    ``rich`` says the body was written in the admin's markdown editor, so it
+    gains an HTML alternative with its images inlined. System mail (account
+    verification and the like) is plain text and stays that way: running it
+    through markdown would only mangle the URLs it carries.
+
+    ``attachments`` are media-relative paths of uploaded files to attach.
+    """
+    files = email_body.load_attachments(attachments)
+
+    if rich:
+        html, images = email_body.render(body)
+        inline_images = []
+        for image in images:
+            part = MIMEImage(image['content'], _subtype=image['mimetype'].split('/')[-1])
+            part.add_header('Content-ID', f"<{image['cid']}>")
+            part.add_header('Content-Disposition', 'inline', filename=image['filename'])
+            inline_images.append(part)
+
+        email = RichEmail(
+            subject=subject,
+            body=body,
+            from_email=settings.EMAIL_FROM,
+            to=[to],
+            reply_to=[reply_to] if reply_to else [],
+            cc=cc or [],
+            inline_images=inline_images,
+        )
+        email.attach_alternative(html, 'text/html')
+    else:
         email = EmailMessage(
             subject=subject,
             body=body,
@@ -22,25 +84,34 @@ def send_mail(subject, body, to, reply_to=None, cc=None):
             reply_to=[reply_to] if reply_to else [],
             cc=cc or [],
         )
-        email.send(fail_silently=False)
+
+    for f in files:
+        email.attach(f['filename'], f['content'], f['mimetype'])
+    return email
+
+
+@shared_task
+def send_mail(subject, body, to, reply_to=None, cc=None, rich=False, attachments=None):
+    print(f"Sending email to {to}...")
+    try:
+        build_email(subject, body, to, reply_to=reply_to, cc=cc,
+                    rich=rich, attachments=attachments).send(fail_silently=False)
         print(f"Mail sent to {to}!")
     except Exception as e:
         print(f"Error sending email to {to}: {e}")
 
 @shared_task
-def send_mail_with_attachment(subject, body, to, attachment_name, attachment_base64, attachment_mimetype='application/pdf', reply_to=None):
-    """Send an email with a file attachment."""
+def send_mail_with_attachment(subject, body, to, attachment_name, attachment_base64, attachment_mimetype='application/pdf', reply_to=None, rich=False, attachments=None):
+    """Send an email with a file attachment generated on the fly (a certificate PDF).
+
+    Separate from ``send_mail`` because this one's attachment never touches the
+    media storage - it is built in the browser and posted as base64.
+    """
     print(f"Sending email with attachment to {to}...")
     try:
-        email = EmailMessage(
-            subject=subject,
-            body=body,
-            from_email=settings.EMAIL_FROM,
-            to=[to],
-            reply_to=[reply_to] if reply_to else [],
-        )
-        attachment_data = base64.b64decode(attachment_base64)
-        email.attach(attachment_name, attachment_data, attachment_mimetype)
+        email = build_email(subject, body, to, reply_to=reply_to,
+                            rich=rich, attachments=attachments)
+        email.attach(attachment_name, base64.b64decode(attachment_base64), attachment_mimetype)
         email.send(fail_silently=False)
         print(f"Mail with attachment sent to {to}!")
     except Exception as e:
@@ -177,7 +248,8 @@ def cleanup_media_files(min_age_hours=24):
     import re
     import shutil
     from django.conf import settings
-    from main.models import Event, PrivacyPolicy, TermsOfService, Abstract
+    from main.models import (Event, PrivacyPolicy, TermsOfService, Abstract,
+                             EmailAttachment, EmailTemplate)
 
     min_age = timezone.now() - timedelta(hours=min_age_hours)
     media_root = settings.MEDIA_ROOT
@@ -198,6 +270,15 @@ def cleanup_media_files(min_age_hours=24):
     for event in Event.objects.exclude(description=''):
         matches = file_pattern.findall(event.description)
         referenced_files.update(matches)
+
+    # Email template bodies carry the same uploads - an image inlined in a
+    # confirmation email is only referenced from here, and deleting it would
+    # silently empty out every future send.
+    for body in EmailTemplate.objects.exclude(body='').values_list('body', flat=True):
+        referenced_files.update(file_pattern.findall(body))
+
+    # Template attachments are referenced by path rather than by URL.
+    referenced_files.update(EmailAttachment.objects.values_list('file_path', flat=True))
 
     # Check PrivacyPolicy
     try:

@@ -31,11 +31,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from main.models import (ApiKey, User, Event, EmailTemplate, Attendee, RegistrationCategory,
+from main.models import (ApiKey, User, Event, EmailTemplate, EmailAttachment, Attendee, RegistrationCategory,
     CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings)
 from main.schema import *
 from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id, render_email_template
 from main import nicepay
+from main import email_body
 from main import backup as db_backup
 
 from .tasks import send_mail, send_mail_with_attachment
@@ -883,6 +884,51 @@ def update_nametag_settings(request, event_id: int):
     event.save()
     return {"code": "success", "message": "Nametag settings updated."}
 
+def clean_attachment_paths(raw):
+    """The media-relative paths of an attachment list posted by the admin UI.
+
+    Entries arrive as the /media/ URLs the upload endpoint handed back. Anything
+    that does not resolve to a file inside the media root is dropped rather than
+    trusted - the list is client-supplied, and an attachment is read off disk.
+    """
+    paths = []
+    for entry in raw or []:
+        url = entry.get("url") if isinstance(entry, dict) else entry
+        path = email_body.media_path(url)
+        if path and path not in paths and default_storage.exists(path):
+            paths.append(path)
+    return paths
+
+
+def template_attachment_paths(template):
+    """The files to attach to every send of this template."""
+    if template is None:
+        return []
+    return list(template.attachments.values_list('file_path', flat=True))
+
+
+def sync_template_attachments(template, raw):
+    """Make the template's attachments match the posted list.
+
+    Omitting the key entirely leaves them alone, so a client that knows nothing
+    about attachments cannot wipe them by saving a subject.
+    """
+    if template is None or raw is None:
+        return
+    keep = clean_attachment_paths(raw)
+    template.attachments.exclude(file_path__in=keep).delete()
+    existing = set(template.attachments.values_list('file_path', flat=True))
+    for path in keep:
+        if path in existing:
+            continue
+        EmailAttachment.objects.create(
+            template=template,
+            file_path=path,
+            filename=os.path.basename(path),
+            size=default_storage.size(path),
+        )
+
+
 @api.post("/event/{event_id}/emailtemplates", response=MessageSchema)
 @ensure_event_staff
 def update_event_emailtemplates(request, event_id: int):
@@ -891,9 +937,14 @@ def update_event_emailtemplates(request, event_id: int):
     event.email_template_registration.subject = data["email_template_registration_subject"]
     event.email_template_registration.body = data["email_template_registration_body"]
     event.email_template_registration.save()
+    sync_template_attachments(
+        event.email_template_registration, data.get("email_template_registration_attachments"))
     event.email_template_abstract_submission.subject = data["email_template_abstract_submission_subject"]
     event.email_template_abstract_submission.body = data["email_template_abstract_submission_body"]
     event.email_template_abstract_submission.save()
+    sync_template_attachments(
+        event.email_template_abstract_submission,
+        data.get("email_template_abstract_submission_attachments"))
     # Handle certificate template (may not exist for older events)
     if event.email_template_certificate:
         event.email_template_certificate.subject = data["email_template_certificate_subject"]
@@ -906,6 +957,8 @@ def update_event_emailtemplates(request, event_id: int):
             body=data["email_template_certificate_body"]
         )
         event.save()
+    sync_template_attachments(
+        event.email_template_certificate, data.get("email_template_certificate_attachments"))
     return {"code": "success", "message": "Email templates updated."}
 
 @api.get("/event/{event_id}/registered", response=RegistrationStatusSchema)
@@ -1263,7 +1316,9 @@ def register_event(request, event_id: int):
         render_email_template(event.email_template_registration.subject, {"event": event, "attendee": attendee}),
         render_email_template(event.email_template_registration.body, {"event": event, "attendee": attendee}),
         user.email,
-        reply_to=reply_to
+        reply_to=reply_to,
+        rich=True,
+        attachments=template_attachment_paths(event.email_template_registration),
     )
 
     return {"code": "success", "message": "Successfully registered."}
@@ -1418,7 +1473,9 @@ def submit_abstract(request, event_id: int):
         render_email_template(event.email_template_abstract_submission.subject, {"event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)}),
         render_email_template(event.email_template_abstract_submission.body, {"attendee": attendee, "event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)}),
         attendee.user.email,
-        reply_to=reply_to
+        reply_to=reply_to,
+        rich=True,
+        attachments=template_attachment_paths(event.email_template_abstract_submission),
     )
 
     return {"code": "success", "message": "Successfully submitted!"}
@@ -1540,9 +1597,15 @@ def send_emails(request, event_id: int):
             if validate_email_format(cc):
                 valid_cc.append(cc)
 
+    # Uploaded through the same editor endpoint as the body's images, so they
+    # arrive as /media/ URLs and are validated the same way.
+    attachments = clean_attachment_paths(data.get('attachments'))
+
     reply_to = event.main_admin.email if event.main_admin else None
     for recipient in valid_recipients:
-        send_mail.delay(subject, body, recipient, reply_to=reply_to, cc=valid_cc if valid_cc else None)
+        send_mail.delay(subject, body, recipient, reply_to=reply_to,
+                        cc=valid_cc if valid_cc else None,
+                        rich=True, attachments=attachments)
 
     return {"code": "success", "message": f"Emails sent to {len(valid_recipients)} recipients."}
 
@@ -1597,7 +1660,9 @@ def send_certificate(request, event_id: int):
         email,
         f"Certificate_{attendee.first_name.replace(' ', '_')}.pdf",
         pdf_base64,
-        reply_to=reply_to
+        reply_to=reply_to,
+        rich=True,
+        attachments=template_attachment_paths(event.email_template_certificate),
     )
     return {"code": "success", "message": "Certificate sent."}
 

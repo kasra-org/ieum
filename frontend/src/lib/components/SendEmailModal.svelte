@@ -1,9 +1,11 @@
 <script>
-    import { Modal, Button, Label, Textarea, Alert } from '$lib/components/ui';
+    import { Modal, Button, Label, Alert } from '$lib/components/ui';
     import { CircleX } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { getDisplayName } from '$lib/utils.js';
+    import MarkdownEditor from '$lib/components/MarkdownEditor.svelte';
+    import EmailAttachments from '$lib/components/EmailAttachments.svelte';
 
     let { open = $bindable(false), recipients = '', action = '?/send_emails', eventadmins = [] } = $props();
 
@@ -16,6 +18,8 @@
     let highlightedSuggestion = $state(-1);
     let successModal = $state(false);
     let sentCount = $state(0);
+    let body = $state('');
+    let attachments = $state([]);
 
     let suggestions = $derived(
         ccInput.trim()
@@ -152,6 +156,8 @@
             ccInput = '';
             selectedBadge = -1;
             message_error = '';
+            body = '';
+            attachments = [];
         }
     });
 
@@ -236,8 +242,16 @@
             <input id="subject" name="subject" type="text" class="block w-full border border-gray-300 rounded-lg bg-gray-50 p-2.5 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600" />
         </div>
         <div class="mb-6">
-            <Label for="body" class="block mb-2">{m.attendees_message()}</Label>
-            <Textarea id="body" name="body" rows="10" class="w-full" />
+            <MarkdownEditor
+                bind:value={body}
+                id="body"
+                name="body"
+                label={m.attendees_message()}
+                rows={10}
+            />
+        </div>
+        <div class="mb-6">
+            <EmailAttachments bind:value={attachments} name="attachments" label={m.emailTemplates_attachments()} />
         </div>
         {#if message_error}
             <Alert type="error" color="red" class="mb-6">{message_error}</Alert>

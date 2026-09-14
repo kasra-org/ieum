@@ -243,9 +243,18 @@ class VenueSchema(Schema):
     short_name: str
     long_name: str
 
+class EmailAttachmentSchema(Schema):
+    id: int
+    file_path: str
+    filename: str
+    size: int
+    url: str
+
+
 class EmailTemplateSchema(Schema):
     subject: str
     body: str
+    attachments: List[EmailAttachmentSchema] = []
 
 class EventAdminSchema(Schema):
     id: int

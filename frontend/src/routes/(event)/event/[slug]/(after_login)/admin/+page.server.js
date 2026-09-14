@@ -2,6 +2,19 @@ import { get, post } from '$lib/fetch';
 import { error } from '@sveltejs/kit';
 import { generateOrderId } from '$lib/utils';
 
+// The attachment picker posts its list as one JSON field. A body with no picker
+// on it sends nothing, and the API leaves the stored attachments alone; a
+// malformed one is treated the same rather than wiping them.
+function parseAttachments(raw) {
+    if (raw === null || raw === undefined) return undefined;
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ parent, params, cookies, request }) {
     let rtn = await parent();
@@ -94,6 +107,9 @@ export const actions = {
             email_template_abstract_submission_body: formdata.get('email_template_abstract_submission_body'),
             email_template_certificate_subject: formdata.get('email_template_certificate_subject'),
             email_template_certificate_body: formdata.get('email_template_certificate_body'),
+            email_template_registration_attachments: parseAttachments(formdata.get('email_template_registration_attachments')),
+            email_template_abstract_submission_attachments: parseAttachments(formdata.get('email_template_abstract_submission_attachments')),
+            email_template_certificate_attachments: parseAttachments(formdata.get('email_template_certificate_attachments')),
         }, cookies);
         if (response.ok && response.status === 200) {
             return response.data;
@@ -264,6 +280,7 @@ export const actions = {
             cc: formdata.get('cc') || '',
             subject: formdata.get('subject'),
             body: formdata.get('body'),
+            attachments: parseAttachments(formdata.get('attachments')),
         }, cookies);
         if (response.ok && response.status === 200) {
             return response.data;

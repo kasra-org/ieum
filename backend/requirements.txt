@@ -8,6 +8,7 @@ requests==2.32.3
 django-ratelimit==4.1.0
 celery==5.4.0
 pillow==11.1.0
+markdown==3.10.3
 django-allauth==65.3.1
 PyJWT==2.11.0
 cryptography==46.0.4

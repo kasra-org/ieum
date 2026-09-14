@@ -580,9 +580,35 @@ class CustomAnswer(models.Model):
 class EmailTemplate(models.Model):
     """
     EmailTemplates model
+
+    The body is markdown, authored in the same editor as the event description,
+    and may reference uploaded images by their /media/ URL - see main.email_body
+    for what becomes of them at send time.
     """
     subject = models.CharField(max_length=1000)
     body = models.TextField()
+
+
+class EmailAttachment(models.Model):
+    """A file that rides along with every send of one template.
+
+    Only the storage path is kept: the file itself was uploaded through the
+    editor's upload endpoint and lives under media/editor/attachments.
+    """
+    template = models.ForeignKey(
+        EmailTemplate, on_delete=models.CASCADE, related_name='attachments')
+    # Media-relative, i.e. the /media/ URL with the prefix taken off.
+    file_path = models.CharField(max_length=500)
+    filename = models.CharField(max_length=255)
+    size = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+
+    @property
+    def url(self):
+        return f'/media/{self.file_path}'
 
 class EmailVerificationKey(models.Model):
     """
