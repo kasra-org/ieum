@@ -323,6 +323,7 @@
         md = md.replace(/<em>(.*?)<\/em>/gi, '*$1*');
         md = md.replace(/<i>(.*?)<\/i>/gi, '*$1*');
         md = md.replace(/<u>(.*?)<\/u>/gi, '<u>$1</u>');
+        md = md.replace(/<(?:s|del|strike)>(.*?)<\/(?:s|del|strike)>/gi, '~~$1~~');
 
         // Convert links
         md = md.replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)');
@@ -575,9 +576,9 @@
     <Label for={id} class="block mb-2">{label}{#if required} <span class="text-red-500">*</span>{/if}</Label>
 {/if}
 
-<div class="border border-gray-300 rounded-lg overflow-hidden">
+<div class="border border-gray-300 rounded-lg">
     <!-- Tab Switcher -->
-    <div class="flex border-b border-gray-200 bg-gray-50">
+    <div class="flex border-b border-gray-200 bg-gray-50 rounded-t-lg overflow-hidden">
         <button
             type="button"
             class="px-4 py-2 text-sm font-medium transition-colors {activeTab === 'wysiwyg' ? 'bg-white border-b-2 border-blue-500 text-blue-600' : 'text-gray-600 hover:text-gray-900'}"
@@ -597,7 +598,7 @@
     <!-- WYSIWYG Mode -->
     <div class={activeTab === 'wysiwyg' ? '' : 'hidden'}>
         <!-- WYSIWYG Toolbar -->
-        <div class="flex flex-wrap items-center gap-1 p-2 border-b border-gray-200 bg-gray-50">
+        <div class="sticky top-0 z-10 flex flex-wrap items-center gap-1 p-2 border-b border-gray-200 bg-gray-50">
             <!-- Text Formatting -->
             <button
                 type="button"
@@ -855,7 +856,7 @@
         <!-- Editor Area -->
         <div
             bind:this={editorElement}
-            class="bg-white min-h-[200px]"
+            class="rounded-b-lg bg-white min-h-[200px]"
             style="min-height: {rows * 24}px"
             ondragover={(e) => e.preventDefault()}
             role="textbox"
@@ -881,7 +882,7 @@
             bind:value={value}
             placeholder={placeholder || m.markdownEditor_placeholder()}
             {rows}
-            class="font-mono w-full border-0 rounded-none focus:ring-0"
+            class="font-mono w-full border-0 rounded-none rounded-b-lg focus:ring-0"
         />
         <div class="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-t border-gray-200">
             {m.markdownEditor_supportsMarkdown()}
