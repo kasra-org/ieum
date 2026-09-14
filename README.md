@@ -29,19 +29,29 @@ IEUM is an open-source platform for organizing scientific conferences. It manage
 git clone https://github.com/ieum-org/ieum.git
 cd ieum
 ```
-2. Create a .env file. Define all variables in `compose.yml` or `compose-release.yml`.
+2. Create a .env file. Define all variables in `compose.yml` (production) or
+   `compose-dev.yml` (development).
 3. Run IEUM via Docker Compose
 ```bash
-# Using Docker compose
-docker compose up -d # Debug
-# or
-docker compose -f compose-release.yml up -d # Release
+# Development, on port 9080
+docker compose -f compose-dev.yml up -d
+# or production, on port 9090
+docker compose up -d
 ```
-4. Create superuser.
+   Database migrations are applied automatically: a one-shot `migrate` service
+   runs on every `up`, and everything that touches the database waits for it to
+   finish. Nothing needs to be run by hand.
+
+   After changing code or dependencies, add `--build`. The production images
+   carry the source rather than mounting it, so without a rebuild the containers
+   keep serving the old code:
+```bash
+docker compose up -d --build
+```
+4. The superuser is created from the `DJANGO_SUPERUSER_*` variables in your .env,
+   also by the `migrate` service. To create another one by hand:
 ```bash
 docker compose exec backend python manage.py createsuperuser
-# or
-docker compose -f compose-release.yml exec backend python manage.py createsuperuser
 ```
 5. Login via Django Admin at http://127.0.0.1:9080/[DJANGO_ADMIN_PAGE_NAME]
 6. Access admin page at http://127.0.0.1:9080/[ADMIN_PAGE_NAME]

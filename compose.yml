@@ -7,6 +7,13 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Dependents wait on this rather than on the port being open: postgres
+    # accepts connections briefly during init before it will serve queries.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
     restart: always
 
   caddy:
@@ -22,6 +29,33 @@ services:
       - static_data:/www/static
       - media_data:/www/media
     restart: always
+
+  # Migrations run here rather than in the backend's own entrypoint, so that a
+  # plain `docker compose up -d` applies them even when nothing about the
+  # backend service changed and its container is left running as-is. Everything
+  # that touches the database waits for this to finish successfully, so no
+  # process ever serves or consumes against a schema older than the code.
+  migrate:
+    build: ./backend
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             (python manage.py ensure_superuser || echo 'ensure_superuser failed; continuing.')"
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - DB_HOST=db
+      - DJANGO_SUPERUSER_EMAIL=${DJANGO_SUPERUSER_EMAIL}
+      - DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD}
+      - DJANGO_SUPERUSER_FIRST_NAME=${DJANGO_SUPERUSER_FIRST_NAME}
+      - DJANGO_SUPERUSER_LAST_NAME=${DJANGO_SUPERUSER_LAST_NAME}
+      - DJANGO_SUPERUSER_INSTITUTE=${DJANGO_SUPERUSER_INSTITUTE}
+    depends_on:
+      db:
+        condition: service_healthy
+    # One shot: it exits when the schema is current, and must not be revived.
+    restart: "no"
 
   backend:
     build: ./backend
@@ -63,6 +97,9 @@ services:
     volumes:
       - static_data:/app/static
       - media_data:/app/media
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: always
 
   frontend:
@@ -112,6 +149,9 @@ services:
       - EMAIL_HOST_PASSWORD=${EMAIL_HOST_PASSWORD}
       - EMAIL_PORT=${EMAIL_PORT}
       - EMAIL_PREFIX=${EMAIL_PREFIX}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: always
     logging:
       driver: "json-file"
@@ -136,6 +176,9 @@ services:
       - EMAIL_HOST_PASSWORD=${EMAIL_HOST_PASSWORD}
       - EMAIL_PORT=${EMAIL_PORT}
       - EMAIL_PREFIX=${EMAIL_PREFIX}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: always
     logging:
       driver: "json-file"
