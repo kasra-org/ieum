@@ -2108,6 +2108,27 @@ class InvitationTests(TestCase):
         self.client.post(f'/api/invitation/{invitation.token}/accept')
         self.assertFalse(self.event.speakers.exists())
 
+    def test_the_default_body_states_the_role(self):
+        from main.apis import default_invitation_body
+        from main import invitations
+        body = default_invitation_body()
+
+        def rendered(**flags):
+            invitation = EventInvitation(event=self.event, email='x@example.com', token='t', **flags)
+            return render_email_template(body, invitations.template_context(invitation))
+
+        self.assertIn('as an invited speaker.', rendered(as_speaker=True))
+        self.assertIn('serve as a session chair.', rendered(as_chair=True))
+        self.assertIn('invited speaker and also serve as a session chair', rendered(as_speaker=True, as_chair=True))
+        # A plain participant gets no role sentence, and no gap where one would be.
+        plain = rendered()
+        self.assertNotIn('honoured', plain)
+        self.assertNotIn('participant', plain)
+        self.assertIn('invite you to Invited Symposium.\n\nEvent Details:', plain)
+        self.assertIn('registration fee is waived', rendered(fee_waived=True))
+        self.assertNotIn('registration fee is waived', rendered())
+        self.assertIn('/invite/t', rendered())
+
     def test_an_older_event_gets_an_invitation_template_on_demand(self):
         self.assertIsNone(self.event.email_template_invitation)
         self.client.force_login(self.admin_user)
