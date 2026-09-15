@@ -42,6 +42,12 @@ def interim_body():
 
 
 def forwards(apps, schema_editor):
+    # The default bodies embed EMAIL_FROM. With it unset the old text cannot
+    # be recognised and the new one would carry no contact address, so this
+    # rewrite is skipped rather than either crashing the migration or writing
+    # a broken template. Nothing is lost: the admin can paste the new text in.
+    if not settings.EMAIL_FROM:
+        return
     from main.apis import default_invitation_body
     Event = apps.get_model('main', 'Event')
     EmailTemplate = apps.get_model('main', 'EmailTemplate')

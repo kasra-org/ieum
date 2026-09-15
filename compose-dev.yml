@@ -51,6 +51,9 @@ services:
       - DJANGO_SUPERUSER_FIRST_NAME=${DJANGO_SUPERUSER_FIRST_NAME}
       - DJANGO_SUPERUSER_LAST_NAME=${DJANGO_SUPERUSER_LAST_NAME}
       - DJANGO_SUPERUSER_INSTITUTE=${DJANGO_SUPERUSER_INSTITUTE}
+      # Data migrations that rewrite default email templates put the contact
+      # address into the text; without it they leave the templates alone.
+      - EMAIL_FROM=${EMAIL_FROM}
     volumes:
       - ./backend:/app
     depends_on:
