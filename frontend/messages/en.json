@@ -411,7 +411,6 @@
 	"unpaidAttendees_amountDue": "Amount Due",
 	"unpaidAttendees_feeExempt": "Exempt",
 	"unpaidAttendees_feeExemptHelp": "Waive this registration's fee",
-	"unpaidAttendees_waived": "Waived",
 	"unpaidAttendees_actions": "Actions",
 	"unpaidAttendees_noRecords": "No unpaid registrations.",
 	"unpaidAttendees_count": "{count} unpaid registration(s)",

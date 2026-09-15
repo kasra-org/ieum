@@ -1482,8 +1482,9 @@ class AdminFeeWaiverTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(self.fresh().fee_waived)
 
-    def test_a_waived_registration_is_still_listed_for_the_admin(self):
-        # It stays on the unpaid tab so the waiver can be lifted again.
+    def test_the_admin_list_reports_the_waiver(self):
+        # The roster shows a waived registration as free; the unpaid tab drops
+        # it, and undoing the waiver is done by removing the registration.
         self.waive(True)
         response = self.client.get(f'/api/event/{self.event.id}/attendees')
         self.assertEqual(response.status_code, 200)

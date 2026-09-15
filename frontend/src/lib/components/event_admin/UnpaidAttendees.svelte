@@ -13,13 +13,13 @@
 
     let { data } = $props();
 
-    // Registrations still awaiting payment, plus those an admin has excused from
-    // the fee - a waived registration counts as free, so it would otherwise drop
-    // off this tab the moment it was waived and leave no way to undo. Free
-    // events never produce either, so the tab has nothing to show for them.
+    // Registrations still awaiting payment. Waiving one settles it at 0 KRW, so
+    // it leaves this tab for the roster at once; undoing a waiver is just
+    // removing that registration from there. Free events never produce these,
+    // so the tab has nothing to show for them.
     let unpaid = $derived(
         (data.attendees ?? [])
-            .filter(a => a.payment_status === 'pending' || a.fee_waived)
+            .filter(a => a.payment_status === 'pending')
             .map(a => ({
                 id: a.id,
                 nametag_id: a.attendee_nametag_id,
@@ -47,10 +47,6 @@
             }))
             .sort((x, y) => (x.registered_at || '').localeCompare(y.registered_at || ''))
     );
-
-    // Waived registrations are listed so the waiver can be lifted, but they are
-    // no longer owed anything: they are not chased by email and not counted.
-    let outstanding = $derived(unpaid.filter(a => !a.fee_waived));
 
     let searchTerm = $state('');
     let currentPage = $state(1);
@@ -114,7 +110,7 @@
         send_email_modal = true;
     };
     let emailRecipients = $derived(
-        (send_email_to_all ? outstanding : unpaid.filter(a => activeSelection.includes(a.id)))
+        (send_email_to_all ? unpaid : unpaid.filter(a => activeSelection.includes(a.id)))
             .map(a => a.email).filter(Boolean).join('; ')
     );
 
@@ -194,7 +190,7 @@
     <div class="flex flex-wrap justify-end gap-2 mb-4">
         <Button color="primary" size="sm">{m.unpaidAttendees_emailActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
         <Dropdown class="w-auto list-none p-1">
-            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showEmailModal(true)} disabled={outstanding.length === 0}>
+            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showEmailModal(true)} disabled={unpaid.length === 0}>
                 {m.unpaidAttendees_emailAll()}
             </DropdownItem>
             <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showEmailModal(false)} disabled={activeSelection.length === 0}>
@@ -238,7 +234,7 @@
                     <TableBodyCell>{row.email}</TableBodyCell>
                     <TableBodyCell>{row.institute}</TableBodyCell>
                     <TableBodyCell>{formatDate(row.registered_at)}</TableBodyCell>
-                    <TableBodyCell>{row.fee_waived ? m.unpaidAttendees_waived() : formatFee(row.registration_fee)}</TableBodyCell>
+                    <TableBodyCell>{formatFee(row.registration_fee)}</TableBodyCell>
                     <TableBodyCell>
                         <ActionTooltip text={m.unpaidAttendees_feeExemptHelp()}>
                             <Checkbox checked={row.fee_waived}
@@ -270,7 +266,7 @@
     </TableSearch>
 
     <TablePagination {currentPage} {totalPages} onPageChange={(p) => currentPage = p} />
-    <p class="mt-5 mb-3 text-sm text-right">{m.unpaidAttendees_count({ count: outstanding.length })}</p>
+    <p class="mt-5 mb-3 text-sm text-right">{m.unpaidAttendees_count({ count: unpaid.length })}</p>
 {/if}
 
 <SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
