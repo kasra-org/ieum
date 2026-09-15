@@ -491,6 +491,10 @@ class Speaker(models.Model):
     # Speakers are usually not charged. Ticked, this waives the registration fee
     # for whoever registered under this address - see Attendee.is_fee_exempt.
     is_payment_exempt = models.BooleanField(default=True)
+    # One row covers both roles: a person may give a talk and chair a session.
+    # At least one is set; the API refuses a row with neither.
+    is_speaker = models.BooleanField(default=True)
+    is_chair = models.BooleanField(default=False)
     type = models.CharField(max_length=1000, choices=[
         ('keynote', 'Keynote Talk'),
         ('invited', 'Invited Talk'),
@@ -1232,6 +1236,10 @@ class EventInvitation(models.Model):
     email = models.EmailField()
     token = models.CharField(max_length=64, unique=True)
     fee_waived = models.BooleanField(default=False)
+    # Ticked by the admin: accepting also puts the person on the speaker/chair
+    # list, filled from their profile - see main.invitations.list_as_speaker.
+    as_speaker = models.BooleanField(default=False)
+    as_chair = models.BooleanField(default=False)
     invited_by = models.ForeignKey(
         'User', on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_invitations')
     created_at = models.DateTimeField(auto_now_add=True)

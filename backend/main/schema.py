@@ -426,6 +426,8 @@ class SpeakerSchema(Schema):
     affiliation_ko: str
     is_domestic: bool
     is_payment_exempt: bool
+    is_speaker: bool
+    is_chair: bool
     type: str
     # Whether this speaker has registered yet, so the admin table can say so
     # next to the exemption tick.

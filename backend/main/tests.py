@@ -2051,6 +2051,62 @@ class InvitationTests(TestCase):
         invitation.refresh_from_db()
         self.assertFalse(invitation.is_accepted)
 
+    @patch('main.invitations.send_mail')
+    def test_an_invited_chair_is_listed_on_acceptance(self, mock_send):
+        self.invite(['guest@example.com'], fee_waived=False, as_chair=True)
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        # Nothing on the list yet: there is no profile to fill a row from.
+        self.assertFalse(self.event.speakers.exists())
+
+        self.client.force_login(self.make_user())
+        self.assertEqual(self.client.post(f'/api/invitation/{invitation.token}/accept').status_code, 200)
+
+        listed = self.event.speakers.get()
+        self.assertEqual(listed.email, 'guest@example.com')
+        self.assertEqual(listed.name, 'Gue St')
+        self.assertEqual(listed.affiliation, 'PNU')
+        self.assertEqual(listed.affiliation_ko, '부산대')
+        self.assertTrue(listed.is_domestic)
+        self.assertTrue(listed.is_chair)
+        self.assertFalse(listed.is_speaker)
+        # The fee was not waived on the invitation, so the row does not waive it either.
+        self.assertFalse(listed.is_payment_exempt)
+        attendee = Attendee.objects.select_related('event').get(event=self.event)
+        self.assertEqual(attendee.payment_status, 'pending')
+
+    @patch('main.invitations.send_mail')
+    def test_an_invited_speaker_with_a_waiver_is_exempt_on_the_list_too(self, mock_send):
+        self.invite(['guest@example.com'], fee_waived=True, as_speaker=True, as_chair=True)
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        self.client.force_login(self.make_user())
+        self.client.post(f'/api/invitation/{invitation.token}/accept')
+        listed = self.event.speakers.get()
+        self.assertTrue(listed.is_speaker and listed.is_chair and listed.is_payment_exempt)
+
+    @patch('main.invitations.send_mail')
+    def test_someone_already_listed_just_gains_the_role(self, mock_send):
+        self.event.speakers.create(
+            name='Gue St', email='Guest@Example.com', affiliation='PNU', is_domestic=True,
+            type='keynote', is_speaker=True, is_chair=False, is_payment_exempt=False)
+        self.invite(['guest@example.com'], fee_waived=False, as_chair=True)
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        self.client.force_login(self.make_user())
+        self.client.post(f'/api/invitation/{invitation.token}/accept')
+
+        self.assertEqual(self.event.speakers.count(), 1)
+        listed = self.event.speakers.get()
+        self.assertTrue(listed.is_speaker and listed.is_chair)
+        self.assertEqual(listed.type, 'keynote')
+        self.assertFalse(listed.is_payment_exempt)
+
+    @patch('main.invitations.send_mail')
+    def test_a_plain_invitation_adds_nobody_to_the_list(self, mock_send):
+        self.invite(['guest@example.com'])
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        self.client.force_login(self.make_user())
+        self.client.post(f'/api/invitation/{invitation.token}/accept')
+        self.assertFalse(self.event.speakers.exists())
+
     def test_an_older_event_gets_an_invitation_template_on_demand(self):
         self.assertIsNone(self.event.email_template_invitation)
         self.client.force_login(self.admin_user)
@@ -2298,6 +2354,41 @@ class DuplicateSpeakerTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['code'], 'duplicate_speaker')
         self.assertEqual(self.event.speakers.count(), 1)
+
+    def test_a_row_is_a_speaker_unless_told_otherwise(self):
+        self.add()
+        speaker = self.event.speakers.get()
+        self.assertTrue(speaker.is_speaker)
+        self.assertFalse(speaker.is_chair)
+
+    def test_a_person_can_be_a_chair_or_both(self):
+        response = self.client.post(
+            f'/api/event/{self.event.id}/speaker/add',
+            data={'name': 'Cha Ir', 'email': 'chair@example.com', 'affiliation': 'PNU',
+                  'is_domestic': True, 'type': 'invited', 'is_speaker': False, 'is_chair': True},
+            content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        chair = self.event.speakers.get(email='chair@example.com')
+        self.assertFalse(chair.is_speaker)
+        self.assertTrue(chair.is_chair)
+
+        response = self.client.post(
+            f'/api/event/{self.event.id}/speaker/{chair.id}/update',
+            data={'name': 'Cha Ir', 'email': 'chair@example.com', 'affiliation': 'PNU',
+                  'is_domestic': True, 'type': 'invited', 'is_speaker': True, 'is_chair': True},
+            content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        chair.refresh_from_db()
+        self.assertTrue(chair.is_speaker and chair.is_chair)
+
+    def test_a_row_with_neither_role_is_refused(self):
+        response = self.client.post(
+            f'/api/event/{self.event.id}/speaker/add',
+            data={'name': 'No Body', 'email': 'nobody@example.com', 'affiliation': 'PNU',
+                  'is_domestic': True, 'type': 'invited', 'is_speaker': False, 'is_chair': False},
+            content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'missing_role')
 
     def test_duplicate_detection_ignores_case_and_padding(self):
         self.add()

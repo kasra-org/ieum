@@ -8,12 +8,16 @@
     import * as m from '$lib/paraglide/messages.js';
     import MarkdownEditor from '$lib/components/MarkdownEditor.svelte';
 
-    let { open = $bindable(false), template = null } = $props();
+    // requireRole: on the speakers & chairs tab an invitation must say which
+    // of the two the person is; on the attendees tab it is optional.
+    let { open = $bindable(false), template = null, requireRole = false } = $props();
 
     let emails = $state('');
     let subject = $state('');
     let body = $state('');
     let feeWaived = $state(false);
+    let asSpeaker = $state(false);
+    let asChair = $state(false);
     let error_message = $state('');
     let successModal = $state(false);
     let sentCount = $state(0);
@@ -27,9 +31,13 @@
             subject = template?.subject ?? '';
             body = template?.body ?? '';
             feeWaived = false;
+            asSpeaker = false;
+            asChair = false;
             error_message = '';
         }
     });
+
+    let roleMissing = $derived(requireRole && !asSpeaker && !asChair);
 
     let recipientCount = $derived(
         emails.split(/[;,\s]+/).map(e => e.trim()).filter(e => e.includes('@')).length
@@ -71,6 +79,19 @@
         </div>
 
         <div class="mb-6">
+            <Label class="block mb-2">{m.invite_roles()}{#if requireRole} <span class="text-red-500">*</span>{/if}</Label>
+            <input type="hidden" name="as_speaker" value={asSpeaker ? 'true' : 'false'} />
+            <input type="hidden" name="as_chair" value={asChair ? 'true' : 'false'} />
+            <div class="flex gap-6">
+                <Checkbox bind:checked={asSpeaker}>{m.invite_asSpeaker()}</Checkbox>
+                <Checkbox bind:checked={asChair}>{m.invite_asChair()}</Checkbox>
+            </div>
+            <p class="mt-1 text-xs {roleMissing ? 'text-red-600' : 'text-gray-500'}">
+                {roleMissing ? m.invite_roleRequired() : m.invite_rolesHelp()}
+            </p>
+        </div>
+
+        <div class="mb-6">
             <input type="hidden" name="fee_waived" value={feeWaived ? 'true' : 'false'} />
             <Checkbox bind:checked={feeWaived}>{m.invite_waiveFee()}</Checkbox>
             <p class="mt-1 ms-6 text-xs text-gray-500">{m.invite_waiveFeeHelp()}</p>
@@ -81,7 +102,7 @@
         {/if}
 
         <div class="flex justify-center gap-2">
-            <Button color="primary" type="submit" disabled={recipientCount === 0}>
+            <Button color="primary" type="submit" disabled={recipientCount === 0 || roleMissing}>
                 {m.invite_send({ count: recipientCount })}
             </Button>
             <Button color="light" type="button" onclick={() => open = false}>{m.common_cancel()}</Button>

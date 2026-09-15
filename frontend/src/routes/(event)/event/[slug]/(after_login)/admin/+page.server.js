@@ -158,6 +158,8 @@ export const actions = {
             affiliation_ko: formdata.get('affiliation_ko') || '',
             is_domestic: formdata.get('is_domestic') === 'true',
             is_payment_exempt: formdata.get('is_payment_exempt') === 'true',
+            is_speaker: formdata.has('is_speaker') ? formdata.get('is_speaker') === 'true' : undefined,
+            is_chair: formdata.has('is_chair') ? formdata.get('is_chair') === 'true' : undefined,
             type: formdata.get('type'),
         }, cookies);
         if (response.ok && response.status === 200) {
@@ -177,6 +179,8 @@ export const actions = {
             affiliation_ko: formdata.get('affiliation_ko') || '',
             is_domestic: formdata.get('is_domestic') === 'true',
             is_payment_exempt: formdata.get('is_payment_exempt') === 'true',
+            is_speaker: formdata.has('is_speaker') ? formdata.get('is_speaker') === 'true' : undefined,
+            is_chair: formdata.has('is_chair') ? formdata.get('is_chair') === 'true' : undefined,
             type: formdata.get('type'),
         }, cookies);
         if (response.ok && response.status === 200) {
@@ -228,6 +232,8 @@ export const actions = {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/attendee/${parseInt(formdata.get('id'))}/update`, {
             fee_waived: formdata.get('fee_waived') === 'true',
+            as_speaker: formdata.get('as_speaker') === 'true',
+            as_chair: formdata.get('as_chair') === 'true',
         }, cookies);
         if (response.ok && response.status === 200) {
             return response.data;

@@ -22,7 +22,7 @@ import secrets
 from django.conf import settings
 from django.utils import timezone
 
-from main.models import Attendee, EventInvitation
+from main.models import Attendee, EventInvitation, Speaker
 from main.tasks import send_mail
 from main.utils import render_email_template
 
@@ -55,7 +55,8 @@ def template_context(invitation):
     }
 
 
-def send(event, emails, subject, body, fee_waived, invited_by, attachments=None):
+def send(event, emails, subject, body, fee_waived, invited_by, attachments=None,
+         as_speaker=False, as_chair=False):
     """Create one invitation per address and email it. Returns the rows."""
     reply_to = event.main_admin.email if event.main_admin else None
     created = []
@@ -65,6 +66,8 @@ def send(event, emails, subject, body, fee_waived, invited_by, attachments=None)
             email=email,
             token=new_token(),
             fee_waived=fee_waived,
+            as_speaker=as_speaker,
+            as_chair=as_chair,
             invited_by=invited_by,
         )
         context = template_context(invitation)
@@ -134,6 +137,9 @@ def accept(invitation, user):
         attendee.fee_waived = True
         attendee.save(update_fields=['fee_waived'])
 
+    if invitation.as_speaker or invitation.as_chair:
+        list_as_speaker(invitation, attendee)
+
     if not invitation.is_accepted:
         invitation.accepted_at = timezone.now()
         invitation.attendee = attendee
@@ -143,6 +149,39 @@ def accept(invitation, user):
         send_registration_confirmation(event, attendee, user.email)
 
     return attendee
+
+
+def list_as_speaker(invitation, attendee):
+    """Put the accepted invitee on the speaker/chair list.
+
+    Done at acceptance rather than when the invitation is sent, because only
+    then is there a profile to fill the row from - a list entry with nothing
+    but an email address would be a blank line on the speakers tab. Someone
+    already listed just gains the invited role(s); their exemption follows
+    the invitation only when it waives the fee, never the other way.
+    """
+    event = invitation.event
+    existing = event.speakers.filter(email__iexact=attendee.email).first()
+    if existing:
+        existing.is_speaker = existing.is_speaker or invitation.as_speaker
+        existing.is_chair = existing.is_chair or invitation.as_chair
+        if invitation.fee_waived:
+            existing.is_payment_exempt = True
+        existing.save(update_fields=['is_speaker', 'is_chair', 'is_payment_exempt'])
+        return existing
+    return Speaker.objects.create(
+        event=event,
+        name=attendee.name,
+        korean_name=attendee.korean_name,
+        email=attendee.email,
+        affiliation=attendee.institute,
+        affiliation_ko=attendee.institute_ko,
+        is_domestic=attendee.nationality == 1,
+        is_payment_exempt=invitation.fee_waived,
+        is_speaker=invitation.as_speaker,
+        is_chair=invitation.as_chair,
+        type='invited',
+    )
 
 
 def send_registration_confirmation(event, attendee, to):

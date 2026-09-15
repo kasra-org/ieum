@@ -642,8 +642,8 @@
     <Dropdown class="w-auto list-none p-1">
         <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendEmailToAllModal}>{m.attendees_sendEmailToAll()}</DropdownItem>
         <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendEmailModal} disabled={selectedAttendees.length === 0}>{m.attendees_sendEmailToSelected()}</DropdownItem>
-        <DropdownItem class="text-sm whitespace-nowrap" onclick={() => invite_modal = true}>{m.attendees_inviteByEmail()}</DropdownItem>
     </Dropdown>
+    <Button color="primary" size="sm" onclick={() => invite_modal = true}>{m.attendees_inviteByEmail()}</Button>
 
     <Button color="primary" size="sm" disabled={bulk_cert_sending}>{bulk_cert_sending ? m.attendees_sendingCertificates() : m.attendees_certificateActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
     <Dropdown class="w-auto list-none p-1">

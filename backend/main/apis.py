@@ -1578,6 +1578,15 @@ def add_speaker(request, event_id: int):
             status=400,
         )
 
+    is_speaker = _as_bool(data.get("is_speaker", True))
+    is_chair = _as_bool(data.get("is_chair", False))
+    if not (is_speaker or is_chair):
+        return api.create_response(
+            request,
+            {"code": "missing_role", "message": "Tick speaker, chair, or both."},
+            status=400,
+        )
+
     speaker = event.speakers.create(
         name=data["name"],
         korean_name=data.get("korean_name", ""),
@@ -1587,6 +1596,8 @@ def add_speaker(request, event_id: int):
         is_domestic=data["is_domestic"],
         type=data["type"],
         is_payment_exempt=_as_bool(data.get("is_payment_exempt", True)),
+        is_speaker=is_speaker,
+        is_chair=is_chair,
     )
     return {"code": "success", "message": "Speaker added."}
 
@@ -1614,6 +1625,16 @@ def update_speaker(request, event_id: int, speaker_id: int):
     speaker.type = data["type"]
     if "is_payment_exempt" in data:
         speaker.is_payment_exempt = _as_bool(data["is_payment_exempt"])
+    if "is_speaker" in data or "is_chair" in data:
+        is_speaker = _as_bool(data.get("is_speaker", speaker.is_speaker))
+        is_chair = _as_bool(data.get("is_chair", speaker.is_chair))
+        if not (is_speaker or is_chair):
+            return api.create_response(
+                request,
+                {"code": "missing_role", "message": "Tick speaker, chair, or both."},
+                status=400,
+            )
+        speaker.is_speaker, speaker.is_chair = is_speaker, is_chair
     speaker.save()
     return {"code": "success", "message": "Speaker updated."}
 
@@ -1743,6 +1764,8 @@ def send_invitations(request, event_id: int):
     created = invitations.send(
         event, emails, subject, body,
         fee_waived=bool(data.get('fee_waived', False)),
+        as_speaker=bool(data.get('as_speaker', False)),
+        as_chair=bool(data.get('as_chair', False)),
         invited_by=request.user,
         attachments=template_attachment_paths(template),
     )

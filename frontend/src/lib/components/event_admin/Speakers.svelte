@@ -1,8 +1,8 @@
 <script>
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from '$lib/components/ui';
     import { Button, Modal, Label, Input, Select, Textarea, Alert } from '$lib/components/ui';
-    import { Tabs, TabItem } from '$lib/components/ui';
-    import { Check, UserMinus, UserPen } from '@lucide/svelte';
+    import { Tabs, TabItem, Dropdown, DropdownItem } from '$lib/components/ui';
+    import { Check, ChevronDown, UserMinus, UserPen } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import * as m from '$lib/paraglide/messages.js';
@@ -12,6 +12,7 @@
     import SearchableUserList from '$lib/components/SearchableUserList.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
+    import InviteModal from '$lib/components/InviteModal.svelte';
 
     let { data } = $props();
 
@@ -56,7 +57,13 @@
     let speakerAffiliationKo = $state('');
     let speakerIsDomestic = $state(false);
     let speakerIsPaymentExempt = $state(true);
+    let speakerIsSpeaker = $state(true);
+    let speakerIsChair = $state(false);
     let speakerType = $state('invited'); // Default to 'invited' speaker type
+
+    const roleLabel = (row) =>
+        [row.is_speaker && m.speakers_roleSpeaker(), row.is_chair && m.speakers_roleChair()]
+            .filter(Boolean).join(' · ');
 
     // Toggling the tick in the table posts the speaker unchanged except for the
     // exemption, so the row is the control rather than a trip through the modal.
@@ -111,6 +118,8 @@
         speakerAffiliationKo = '';
         speakerIsDomestic = false;
         speakerIsPaymentExempt = true;
+        speakerIsSpeaker = true;
+        speakerIsChair = false;
         speakerType = 'invited';
         speaker_modal = true;
     };
@@ -123,6 +132,8 @@
         speakerAffiliationKo = selected_speaker.affiliation_ko || '';
         speakerIsDomestic = selected_speaker.is_domestic || false;
         speakerIsPaymentExempt = selected_speaker.is_payment_exempt ?? true;
+        speakerIsSpeaker = selected_speaker.is_speaker ?? true;
+        speakerIsChair = selected_speaker.is_chair ?? false;
         speakerType = selected_speaker.type;
         speaker_modal = true;
     };
@@ -176,18 +187,33 @@
 
 
     let send_email_modal = $state(false);
-    const showSendEmailModal = () => {
+    let invite_modal = $state(false);
+    // Who the email goes to: the ticked rows, or everyone in one role.
+    let email_audience = $state('selected');
+    const showSendEmailModal = (audience = 'selected') => {
+        email_audience = audience;
         send_email_modal = true;
     };
-    let emailRecipients = $derived(
-        selectedSpeakers.map(id => data.speakers.find(a => a.id === id)?.email).filter(Boolean).join("; ")
-    );
+    let emailRecipients = $derived.by(() => {
+        const rows = email_audience === 'speakers' ? data.speakers.filter(s => s.is_speaker)
+            : email_audience === 'chairs' ? data.speakers.filter(s => s.is_chair)
+            : selectedSpeakers.map(id => data.speakers.find(a => a.id === id));
+        return rows.map(r => r?.email).filter(Boolean).join("; ");
+    });
+    let speakerCount = $derived(data.speakers.filter(s => s.is_speaker).length);
+    let chairCount = $derived(data.speakers.filter(s => s.is_chair).length);
 </script>
 
 <Heading tag="h2" class="text-xl font-bold mb-3">{m.speakers_title()}</Heading>
 <p class="font-light mb-6">{m.speakers_description()}</p>
-<div class="flex justify-end gap-2">
-    <Button color="primary" size="sm" disabled={selectedSpeakers.length === 0} onclick={showSendEmailModal}>{m.speakers_sendEmailToSelected()}</Button>
+<div class="flex justify-end gap-2 flex-wrap">
+    <Button color="primary" size="sm">{m.speakers_emailActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
+    <Dropdown class="w-auto list-none p-1">
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showSendEmailModal('speakers')} disabled={speakerCount === 0}>{m.speakers_emailSpeakers()}</DropdownItem>
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showSendEmailModal('chairs')} disabled={chairCount === 0}>{m.speakers_emailChairs()}</DropdownItem>
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showSendEmailModal('selected')} disabled={selectedSpeakers.length === 0}>{m.speakers_sendEmailToSelected()}</DropdownItem>
+    </Dropdown>
+    <Button color="primary" size="sm" onclick={() => invite_modal = true}>{m.speakers_inviteByEmail()}</Button>
     <Button color="primary" size="sm" onclick={addSpeakerModal}>{m.speakers_addSpeaker()}</Button>
 </div>
 <TableSearch placeholder={m.speakers_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermSpeaker}>
@@ -206,6 +232,7 @@
             }}
         /></TableHeadCell>
         <TableHeadCell>{m.speakers_name()}</TableHeadCell>
+        <TableHeadCell>{m.speakers_role()}</TableHeadCell>
         <TableHeadCell>{m.speakers_email()}</TableHeadCell>
         <TableHeadCell>{m.speakers_affiliation()}</TableHeadCell>
         <TableHeadCell>{m.speakers_domestic()}</TableHeadCell>
@@ -227,6 +254,7 @@
                     <div>{row.name}</div>
                     {#if row.korean_name}<div class="text-sm text-gray-500">{row.korean_name}</div>{/if}
                 </TableBodyCell>
+                <TableBodyCell class="whitespace-nowrap">{roleLabel(row)}</TableBodyCell>
                 <TableBodyCell>{row.email}</TableBodyCell>
                 <TableBodyCell>
                     <div>{row.affiliation}</div>
@@ -307,6 +335,18 @@
             </div>
         </div>
         <div class="mb-6">
+            <Label class="block mb-2">{m.speakers_role()} <span class="text-red-500">*</span></Label>
+            <div class="flex gap-6">
+                <Checkbox bind:checked={speakerIsSpeaker}>{m.speakers_roleSpeaker()}</Checkbox>
+                <Checkbox bind:checked={speakerIsChair}>{m.speakers_roleChair()}</Checkbox>
+            </div>
+            {#if !speakerIsSpeaker && !speakerIsChair}
+                <p class="mt-1 text-sm text-red-600">{m.speakers_roleRequired()}</p>
+            {/if}
+            <input type="hidden" name="is_speaker" value={speakerIsSpeaker ? 'true' : 'false'} />
+            <input type="hidden" name="is_chair" value={speakerIsChair ? 'true' : 'false'} />
+        </div>
+        <div class="mb-6">
             <Checkbox bind:checked={speakerIsDomestic}>
                 {m.speakers_isDomestic()}
             </Checkbox>
@@ -333,7 +373,7 @@
             <Alert color="red" class="mb-6">{update_speaker_error}</Alert>
         {/if}
         <div class="flex justify-center">
-            <Button color="primary" type="submit">{selected_speaker ? m.speakers_update() : m.speakers_add()}</Button>
+            <Button color="primary" type="submit" disabled={!speakerIsSpeaker && !speakerIsChair}>{selected_speaker ? m.speakers_update() : m.speakers_add()}</Button>
         </div>
     </form>
 </Modal>
@@ -353,6 +393,7 @@
 </Modal>
 
 <SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
+<InviteModal bind:open={invite_modal} template={data.email_templates?.invitation} requireRole={true} />
 
 <!-- Row controls post through these rather than opening the edit modal. The
      update action needs the whole speaker, so every field rides along and only
@@ -370,5 +411,7 @@
     <input type="hidden" name="affiliation_ko" value={toggling_speaker?.affiliation_ko ?? ''} />
     <input type="hidden" name="is_domestic" value={toggling_speaker?.is_domestic ? 'true' : 'false'} />
     <input type="hidden" name="is_payment_exempt" value={toggling_speaker?.is_payment_exempt ? 'true' : 'false'} />
+    <input type="hidden" name="is_speaker" value={toggling_speaker?.is_speaker ? 'true' : 'false'} />
+    <input type="hidden" name="is_chair" value={toggling_speaker?.is_chair ? 'true' : 'false'} />
     <input type="hidden" name="type" value={toggling_speaker?.type ?? ''} />
 </form>
