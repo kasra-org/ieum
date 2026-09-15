@@ -2128,6 +2128,9 @@ class InvitationTests(TestCase):
         self.assertIn('registration fee is waived', rendered(fee_waived=True))
         self.assertNotIn('registration fee is waived', rendered())
         self.assertIn('/invite/t', rendered())
+        # Sent in the committee's name, not signed by the main admin.
+        self.assertTrue(plain.rstrip().endswith('The Organising Committee\nInvited Symposium'))
+        self.assertNotIn('On behalf of', plain)
 
     def test_an_older_event_gets_an_invitation_template_on_demand(self):
         self.assertIsNone(self.event.email_template_invitation)

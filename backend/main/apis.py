@@ -917,8 +917,7 @@ def default_invitation_body():
     """
     return (
         "Dear Colleague,\n\n"
-        "On behalf of the organising committee, it is our great pleasure to "
-        "invite you to {{ event.name }}.\n\n"
+        "It is our great pleasure to invite you to {{ event.name }}.\n\n"
         # The role sentence appears only for a speaker or chair; a plain
         # participant invitation goes straight to the details.
         "{% if invitation.as_speaker and invitation.as_chair %}"
@@ -943,8 +942,10 @@ def default_invitation_body():
         + settings.EMAIL_FROM + ".\n\n"
         "We sincerely hope you will be able to join us and look forward to "
         "welcoming you.\n\n"
+        # Sent in the committee's name, not the main admin's.
         "Yours sincerely,\n"
-        "{{ event.organizers_en }}"
+        "The Organising Committee\n"
+        "{{ event.name }}"
     )
 
 
