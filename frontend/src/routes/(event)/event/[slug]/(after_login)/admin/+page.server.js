@@ -212,6 +212,9 @@ export const actions = {
             job_title: formdata.get('job_title'),
             disability: formdata.get('disability'),
             dietary: formdata.get('dietary'),
+            // Only the admin modals carry this; leaving it out keeps the
+            // category as it is.
+            category: formdata.has('category') ? formdata.get('category') : undefined,
         }, cookies);
 
         if (response.ok && response.status === 200) {

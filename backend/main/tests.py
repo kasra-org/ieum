@@ -1493,6 +1493,40 @@ class AdminFeeWaiverTests(TestCase):
         self.assertEqual(row['registration_fee'], 0)
         self.assertEqual(row['payment_status'], 'free')
 
+    def update(self, **fields):
+        return self.client.post(
+            f'/api/event/{self.event.id}/attendee/{self.attendee.id}/update',
+            data=json.dumps(fields), content_type='application/json')
+
+    def test_an_admin_can_move_a_registration_to_another_category(self):
+        student, = add_categories(self.event, ('Student', 50000))
+        self.assertEqual(self.update(category=student.id).status_code, 200)
+        attendee = self.fresh()
+        self.assertEqual(attendee.category, student)
+        self.assertEqual(attendee.registration_fee, 50000)
+
+    def test_a_retired_category_is_still_assignable_by_an_admin(self):
+        # Registrants only see what is on offer; an admin may keep someone on
+        # a tier that has since been withdrawn.
+        old, = add_categories(self.event, ('Early bird', 100000))
+        self.event.registration_categories.filter(id=old.id).update(is_active=False)
+        self.assertEqual(self.update(category=old.id).status_code, 200)
+        self.assertEqual(self.fresh().category_id, old.id)
+
+    def test_another_events_category_is_refused(self):
+        other = Event.objects.create(
+            name='Other', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10)
+        theirs, = add_categories(other, ('Theirs', 1))
+        response = self.update(category=theirs.id)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'invalid_category')
+        self.assertEqual(self.fresh().category, self.category)
+
+    def test_leaving_the_category_out_keeps_it(self):
+        self.assertEqual(self.update(is_attended=True).status_code, 200)
+        self.assertEqual(self.fresh().category, self.category)
+
     def test_a_stranger_cannot_waive_a_fee(self):
         outsider = User.objects.create_user(
             username='nosy@example.com', email='nosy@example.com', password='pw12345!aA')

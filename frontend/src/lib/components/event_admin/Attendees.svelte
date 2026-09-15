@@ -198,6 +198,19 @@
     let attendee_modal = $state(false);
     let remove_attendee_modal = $state(false);
 
+    // What the category select offers: everything on offer, plus the row's
+    // own category when it has since been retired, so the select can show
+    // it rather than silently switching the person to something else.
+    function categoryOptions(row) {
+        const lang = languageTag();
+        const items = (data.event.registration_categories ?? []).map(c => ({ value: c.id, name: getCategoryLabel(c, lang) }));
+        if (row?.category && !items.some(i => i.value === row.category)) {
+            items.unshift({ value: row.category, name: getCategoryLabel(row, lang) });
+        }
+        if (!row?.category) items.unshift({ value: '', name: '—' });
+        return items;
+    }
+
     let selected_idx = $state(null);
     const showAttenteeModal = (id) => {
         selected_idx = table_data_attendees.findIndex(item => item.id === id);
@@ -759,6 +772,10 @@
     <form method="post" action="?/update_attendee" use:enhance={afterSuccessfulSubmitDefaultAnswerChanges}>
         <input type="hidden" name="id" value={table_data_attendees[selected_idx].id} />
         <Heading tag="h2" class="text-lg font-bold pt-3 mb-6">{m.attendees_basicInformation()}</Heading>
+        <div class="mb-6">
+            <Label for="attendee_category" class="block mb-2">{m.attendees_tier()}</Label>
+            <Select id="attendee_category" name="category" value={table_data_attendees[selected_idx].category ?? ''} items={categoryOptions(table_data_attendees[selected_idx])} />
+        </div>
         <RegistrationForm data={table_data_attendees[selected_idx]} config={form_config} institution_resolved={edit_institution_resolved} />
         {#if message_default_answer_changes.type === 'success'}
             <Alert type="success" color="green">{message_default_answer_changes.message}</Alert>

@@ -1,6 +1,6 @@
 <script>
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
-    import { Button, Modal, Alert, Checkbox, Dropdown, DropdownItem } from '$lib/components/ui';
+    import { Button, Modal, Alert, Checkbox, Dropdown, DropdownItem, Label, Select } from '$lib/components/ui';
     import { ChevronDown, UserMinus, UserPen } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
@@ -139,6 +139,17 @@
         edit_message = { type: '', message: '' };
         edit_modal = true;
     };
+    // Everything on offer, plus the row's own category if it has since been
+    // retired, so the select does not silently move the person elsewhere.
+    let edit_category_options = $derived.by(() => {
+        const lang = languageTag();
+        const items = (data.event.registration_categories ?? []).map(c => ({ value: c.id, name: getCategoryLabel(c, lang) }));
+        if (edit_target?.category && !items.some(i => i.value === edit_target.category)) {
+            items.unshift({ value: edit_target.category, name: getCategoryLabel(edit_target, lang) });
+        }
+        if (!edit_target?.category) items.unshift({ value: '', name: '—' });
+        return items;
+    });
     let edit_institution_resolved = $derived(edit_target
         ? { name_en: edit_target.institute_en, name_ko: edit_target.institute_ko }
         : null);
@@ -278,6 +289,10 @@
     {#if edit_target}
         <form method="post" action="?/update_attendee" use:enhance={afterEdit}>
             <input type="hidden" name="id" value={edit_target.id} />
+            <div class="mb-6">
+                <Label for="unpaid_category" class="block mb-2">{m.attendees_tier()}</Label>
+                <Select id="unpaid_category" name="category" value={edit_target.category ?? ''} items={edit_category_options} />
+            </div>
             <RegistrationForm data={edit_target} config={form_config} institution_resolved={edit_institution_resolved} />
             {#if edit_message.type === 'error'}
                 <Alert color="red" class="mt-4">{edit_message.message}</Alert>

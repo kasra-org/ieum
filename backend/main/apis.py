@@ -1178,6 +1178,23 @@ def update_attendee(request, event_id: int, attendee_id: int):
     if "fee_waived" in data:
         attendee.fee_waived = bool(data.get("fee_waived", False))
 
+    # Any of this event's categories, retired ones included: an admin moving
+    # someone is not a registrant picking from what is on offer. A category
+    # from another event is still refused, since it would price this one.
+    if "category" in data:
+        raw = data.get("category")
+        if raw in (None, ""):
+            attendee.category = None
+        else:
+            try:
+                attendee.category = event.registration_categories.get(id=int(raw))
+            except (ValueError, TypeError, RegistrationCategory.DoesNotExist):
+                return api.create_response(
+                    request,
+                    {"code": "invalid_category", "message": "Invalid registration category"},
+                    status=400,
+                )
+
     if "first_name" in data or "nationality" in data:
         attendee.first_name = data.get("first_name", "")
         attendee.middle_initial = data.get("middle_initial", "")
