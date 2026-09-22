@@ -109,6 +109,8 @@
 			[m.footer_businessRegistrationNumber(), b.business_registration_number],
 			[m.footer_businessAddress(), localized(b.address, b.address_en)],
 			[m.footer_businessPhone(), b.phone],
+			// Third element: an href, so the email is a link rather than text.
+			[m.footer_businessEmail(), b.email, b.email ? `mailto:${b.email}` : ''],
 		].filter(([, value]) => value);
 	});
 </script>
@@ -278,9 +280,11 @@
 					</h2>
 					<address class="mt-3 not-italic">
 						<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
-							{#each businessInfo as [label, value]}
+							{#each businessInfo as [label, value, href]}
 								<dt class="text-gray-400">{label}</dt>
-								<dd class="text-gray-700">{value}</dd>
+								<dd class="text-gray-700">
+									{#if href}<a href={href} class="hover:underline">{value}</a>{:else}{value}{/if}
+								</dd>
 							{/each}
 						</dl>
 					</address>

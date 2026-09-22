@@ -50,6 +50,7 @@
 	"footer_businessRegistrationNumber": "사업자등록번호",
 	"footer_businessAddress": "사업장주소",
 	"footer_businessPhone": "전화번호",
+	"footer_businessEmail": "이메일",
 
 	"cookieConsent_description": "이 사이트는 더 나은 서비스를 제공하기 위해 쿠키를 사용합니다. 사이트를 계속 사용하시면 쿠키 사용에 동의하시는 것으로 간주됩니다.",
 	"cookieConsent_learnMore": "자세히 보기",
