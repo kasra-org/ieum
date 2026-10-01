@@ -3,6 +3,7 @@ import { redirect } from '@sveltejs/kit';
 import { error } from '@sveltejs/kit';
 import { post } from '$lib/fetch';
 import { sanitizeRedirectUrl } from '$lib/utils.js';
+import { invitationForNext } from '$lib/server/invitation.js';
 
 function clean_orcid_cookies(cookies) {
     try {
@@ -42,6 +43,7 @@ export async function load({ parent, cookies, request }) {
         clean_orcid_cookies(cookies);
     }
     data.next = next;
+    data.invitation = await invitationForNext(next);
 
     // Load privacy policy and terms of service
     const privacyPolicyResponse = await get('api/privacy-policy', cookies);

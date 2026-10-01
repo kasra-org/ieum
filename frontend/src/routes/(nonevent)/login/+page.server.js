@@ -2,6 +2,7 @@ import { post } from '$lib/fetch';
 import { fail, redirect } from '@sveltejs/kit';
 import { sanitizeRedirectUrl } from '$lib/utils.js';
 import { TURNSTILE_FIELD, turnstileSiteKey, verifyTurnstile } from '$lib/server/turnstile.js';
+import { invitationForNext } from '$lib/server/invitation.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ parent, request }) {
@@ -16,6 +17,7 @@ export async function load({ parent, request }) {
     rtn.sociallogin_error = url.searchParams.get('error_process') || '';
     rtn.next = next;
     rtn.turnstile_site_key = turnstileSiteKey();
+    rtn.invitation = await invitationForNext(next);
 
     return rtn;
 }

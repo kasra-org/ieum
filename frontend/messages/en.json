@@ -191,6 +191,7 @@
 	"form_venueLongitude": "Longitude",
 	"form_coordinates": "Coordinates",
 
+	"registration_invitationNotice": "The invitation to {event} was sent to {email}. Sign up with that address and you will be registered for the event automatically.",
 	"registration_title": "Registration",
 	"registration_description": "Become a member for easy event registration and email notifications.",
 	"registration_submit": "Register",
@@ -232,6 +233,7 @@
 	"completeProfile_infoMessage": "We need a few more details to complete your account setup. Please fill in the required fields below.",
 	"completeProfile_submit": "Complete Profile",
 
+	"login_invitationNotice": "The invitation to {event} was sent to {email}. Please sign in with that address, or sign up with it if you don't have an account. The invitation does not apply to an account under a different email.",
 	"login_title": "Sign in to your account",
 	"login_description": "Please log in to access your account.",
 	"login_submit": "Login",

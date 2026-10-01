@@ -91,11 +91,14 @@
         <div class="border-l border-b border-gray-300 p-8">
             <h3 class="text-xl font-medium text-gray-900 dark:text-white">{m.login_title()}</h3>
             <p class="text-sm !mt-2">{m.login_description()}</p>
+            {#if data.invitation}
+                <Alert color="blue" class="mt-4">{m.login_invitationNotice({ event: data.invitation.event_name, email: data.invitation.email })}</Alert>
+            {/if}
             <form method="POST" action="?/login" class="space-y-4 mt-6">
                 <input type="hidden" name="next" value={data.next || '/'} />
                 <div>
                     <label for="email" class="block text-sm font-medium text-gray-700">{m.form_email()}*</label>
-                    <Input id="email" name="email" type="email" required class="mt-1" />
+                    <Input id="email" name="email" type="email" required class="mt-1" value={form?.email ?? data.invitation?.email ?? ''} />
                 </div>
                 <div>
                     <label for="password" class="block text-sm font-medium text-gray-700">{m.form_password()}*</label>

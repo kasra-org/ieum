@@ -92,7 +92,7 @@
 
     const { form: felteForm, data, errors, isSubmitting } = createForm({
         initialValues: {
-            email: '',
+            email: page_data.invitation?.email ?? '',
             password: '',
             confirm_password: '',
             first_name: '',
@@ -166,6 +166,10 @@
         </div>
     </div>
 </div>
+
+{#if page_data.invitation}
+    <Alert color="blue" class="mb-6">{m.registration_invitationNotice({ event: page_data.invitation.event_name, email: page_data.invitation.email })}</Alert>
+{/if}
 
 {#if currentStep === 1}
     <!-- Step 1: Terms Agreement -->
