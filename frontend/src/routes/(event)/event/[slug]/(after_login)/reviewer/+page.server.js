@@ -18,7 +18,7 @@ export async function load({ parent, params, cookies }) {
     if (rtn.is_reviewer) {
         rtn.vote = await get_data_or_500('reviewer/vote');
         if (rtn.vote.voted_abstracts.length === 0) {
-            let abstracts = await get_data_or_500('abstracts');
+            let abstracts = await get_data_or_500('review/abstracts');
             rtn.abstracts = [];
             for (let abstract of abstracts) {
                 rtn.abstracts.push( await get_data_or_500(`abstract/${abstract.id}`) );

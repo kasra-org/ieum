@@ -170,6 +170,16 @@ class PublicUserSchema(Schema):
         return name
 
 
+class PublicOrganizerSchema(Schema):
+    """An organizer on the public event page: no contact address."""
+    id: int
+    organizer_type: str
+    name: str
+    korean_name: str
+    affiliation: str
+    affiliation_ko: str
+    order: int
+
 class OrganizerSchema(Schema):
     id: int
     organizer_type: str
@@ -205,7 +215,7 @@ class EventSchema(Schema):
     venue_address_ko: str
     venue_latitude: Union[float, None]
     venue_longitude: Union[float, None]
-    organizers: List[OrganizerSchema]
+    organizers: List[PublicOrganizerSchema]
     organizers_en: str
     organizers_ko: str
     main_languages: List[str]
@@ -326,6 +336,7 @@ class EventAdminSchema(Schema):
     published: bool
     is_archived: bool
     main_admin_id: Union[int, None]
+    created_by_id: Union[int, None]
     nametag_paper_width: float
     nametag_paper_height: float
     nametag_orientation: str
@@ -416,6 +427,18 @@ class AttendeeSchema(Schema):
             name += " " + da.middle_initial
         name += " " + da.last_name
         return name
+
+class PublicSpeakerSchema(Schema):
+    """What anyone may see of a speaker: no address, nothing about payment."""
+    id: int
+    name: str
+    korean_name: str
+    affiliation: str
+    affiliation_ko: str
+    is_domestic: bool
+    is_speaker: bool
+    is_chair: bool
+    type: str
 
 class SpeakerSchema(Schema):
     id: int
@@ -529,6 +552,38 @@ class AbstractUserSchema(Schema):
         import os
         full_path = os.path.join(settings.HEADLESS_URL_ROOT, settings.MEDIA_URL, abstract.file_path)
         return full_path
+
+class ReviewAuthorSchema(Schema):
+    """An abstract's author as a reviewer sees them: who, and from where.
+
+    Reviewers are ordinary attendees, so nothing else of the registration -
+    contact details, dietary or disability notes, payment - reaches them.
+    """
+    name: str
+    first_name: str
+    middle_initial: str
+    last_name: str
+    korean_name: str
+    institute: str
+    institute_ko: str
+    department: str
+
+class ReviewAbstractShortSchema(Schema):
+    id: int
+    attendee: Optional[ReviewAuthorSchema] = None
+    title: str
+    presentation_type: str
+    is_reviewable: bool
+    # No file link: reviewers read the converted body, and the file itself is
+    # served only to its author and the event's admins.
+
+class ReviewAbstractSchema(ReviewAbstractShortSchema):
+    body: str
+    resolve_body = staticmethod(AbstractSchema.resolve_body)
+
+class ReviewerVoteSchema(Schema):
+    id: int
+    voted_abstracts: List[ReviewAbstractShortSchema]
 
 class AbstractVoteSchema(Schema):
     id: int
@@ -743,7 +798,7 @@ class PayPalCaptureOrderSchema(Schema):
 class NicePayPrepareSchema(Schema):
     """Schema for preparing a NicePay authenticated payment"""
     eventId: int
-    payMethod: str = "CARD"  # CARD / BANK / VBANK / CELLPHONE
+    payMethod: str = "CARD"  # CARD / BANK / CELLPHONE
 
 
 class NicePayPrepareResponseSchema(Schema):

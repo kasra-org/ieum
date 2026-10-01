@@ -41,7 +41,7 @@ export async function load({ parent, params, cookies, request }) {
 
     rtn.attendees = await get_data_or_404_event('attendees?all=true');
     rtn.questions = await get_data_or_404_event('questions');
-    rtn.speakers = await get_data_or_404_event('speakers');
+    rtn.speakers = await get_data_or_404_event('admin/speakers');
     rtn.reviewers = await get_data_or_404_event('reviewers');
     rtn.abstracts = await get_data_or_404_event('abstracts');
     rtn.organizers = await get_data_or_404_event('organizers');

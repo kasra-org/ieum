@@ -1,12 +1,13 @@
 import { get, post } from '$lib/fetch';
 import { error } from '@sveltejs/kit';
+import { sanitizeRedirectUrl } from '$lib/utils.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ parent, request, cookies }) {
     const data = await parent();
 
     const url = new URL(request.url);
-    const next = url.searchParams.get('next') || '/';
+    const next = sanitizeRedirectUrl(url.searchParams.get('next'));
     data.next = next;
 
     // Pass social account linking error from allauth redirect

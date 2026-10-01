@@ -975,7 +975,7 @@ class InvitedTalkReviewExemptionTests(TestCase):
 
     def test_reviewer_does_not_see_invited_talks(self):
         self.client.force_login(self.reviewer_user)
-        response = self.client.get(f'/api/event/{self.event.id}/abstracts')
+        response = self.client.get(f'/api/event/{self.event.id}/review/abstracts')
         self.assertEqual(response.status_code, 200)
         titles = [a['title'] for a in response.json()]
         self.assertIn('Competing', titles)
@@ -2271,7 +2271,7 @@ class PaidSpeakerExemptionTests(TestCase):
     def test_the_list_says_who_has_paid(self):
         self.pay()
         self.add_speaker()
-        response = self.client.get(f'/api/event/{self.event.id}/speakers')
+        response = self.client.get(f'/api/event/{self.event.id}/admin/speakers')
         row = response.json()[0]
         self.assertTrue(row['has_paid'])
         self.assertFalse(row['is_payment_exempt'])
@@ -2780,3 +2780,316 @@ class DatabaseBackupTests(TestCase):
                                         content_type='application/gzip')})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['code'], 'restore_failed')
+
+
+class EmailTemplateSandboxTests(TestCase):
+    """Event admins write the templates, so a template sees plain fields only."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Sandboxed', start_date=date(2026, 3, 4), end_date=date(2026, 3, 5),
+            venue='Busan', capacity=10, published=True,
+        )
+        self.superuser = User.objects.create_superuser(
+            username='root@example.com', email='root@example.com', password='pw12345!aA')
+        self.event.admins.add(self.superuser)
+        self.attendee = Attendee.objects.create(
+            user=self.superuser, event=self.event, first_name='Root', last_name='User',
+            nationality=1, institute='PNU')
+
+    def render(self, template, **context):
+        return render_email_template(template, {'event': self.event, 'attendee': self.attendee, **context})
+
+    def test_a_template_cannot_reach_other_users(self):
+        rendered = self.render(
+            '[{% for u in event.admins.all %}{{ u.password }}{% endfor %}]'
+            '[{{ attendee.user.password }}][{{ attendee.user }}][{{ event.main_admin }}]')
+        self.assertEqual(rendered, '[][][][]')
+
+    def test_a_template_cannot_rotate_an_api_key(self):
+        from main.models import ApiKey
+        key, _ = ApiKey.generate('mcp', self.superuser)
+        rendered = self.render(
+            '{% for k in attendee.user.api_keys.all %}{{ k.rotate }}{% endfor %}'
+            '{% for a in event.admins.all %}{% for k in a.api_keys.all %}{{ k.rotate }}{% endfor %}{% endfor %}')
+        self.assertEqual(rendered, '')
+        key_hash = key.key_hash
+        key.refresh_from_db()
+        self.assertEqual(key.key_hash, key_hash)
+
+    def test_whitelisted_fields_still_render(self):
+        abstract = Abstract.objects.create(
+            attendee=self.attendee, event=self.event, title='On Folding',
+            presentation_type='short_talk', file_path='abstracts/x/a.docx')
+        rendered = self.render(
+            "{{ attendee.first_name }}|{{ attendee.email }}|{{ event.name }}|"
+            "{{ event.start_date|date:'F d, Y' }}|{{ abstract.title }}|"
+            "{{ abstract.get_presentation_type_display }}|{{ event }}",
+            abstract=abstract)
+        self.assertEqual(
+            rendered,
+            'Root|root@example.com|Sandboxed|March 04, 2026|On Folding|Short talk only|Sandboxed')
+
+    def test_includes_and_tag_libraries_are_unavailable(self):
+        from django.template import TemplateSyntaxError
+        from django.template.exceptions import TemplateDoesNotExist
+        with self.assertRaises(TemplateSyntaxError):
+            self.render('{% load static %}')
+        with self.assertRaises(TemplateDoesNotExist):
+            self.render("{% include 'account/email/base_message.txt' %}")
+
+    def test_a_model_outside_the_whitelist_is_refused(self):
+        with self.assertRaises(TypeError):
+            render_email_template('{{ u }}', {'u': self.superuser})
+
+
+class PublicSpeakerListTests(TestCase):
+    """The public speaker list hides addresses, payment state and draft events."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Talks', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, published=True,
+        )
+        self.event.speakers.create(name='Speaker One', email='one@example.com', type='invited')
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.outsider = User.objects.create_user(
+            username='out@example.com', email='out@example.com', password='pw12345!aA')
+
+    def test_public_list_leaves_out_email_and_payment(self):
+        response = self.client.get(f'/api/event/{self.event.id}/speakers')
+        self.assertEqual(response.status_code, 200)
+        row = response.json()[0]
+        self.assertEqual(row['name'], 'Speaker One')
+        for field in ('email', 'is_payment_exempt', 'is_registered', 'has_paid'):
+            self.assertNotIn(field, row)
+
+    def test_draft_and_archived_events_are_hidden(self):
+        self.event.published = False
+        self.event.save()
+        self.assertEqual(self.client.get(f'/api/event/{self.event.id}/speakers').status_code, 404)
+        self.client.force_login(self.outsider)
+        self.assertEqual(self.client.get(f'/api/event/{self.event.id}/speakers').status_code, 404)
+        self.event.published, self.event.is_archived = True, True
+        self.event.save()
+        self.assertEqual(self.client.get(f'/api/event/{self.event.id}/speakers').status_code, 404)
+
+    def test_unknown_event_is_not_found(self):
+        self.assertEqual(self.client.get('/api/event/999999/speakers').status_code, 404)
+
+    def test_admin_list_keeps_email_for_event_admins_only(self):
+        url = f'/api/event/{self.event.id}/admin/speakers'
+        self.client.force_login(self.outsider)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.client.force_login(self.admin_user)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]['email'], 'one@example.com')
+
+
+class EventCreatorAdminTests(TestCase):
+    """Whoever creates an event is on its admin list for good."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username='staff@example.com', email='staff@example.com', password='pw12345!aA', is_staff=True)
+        self.client.force_login(self.staff)
+
+    def create_event(self):
+        response = self.client.post('/api/admin/event/add', data=json.dumps({
+            'name': 'Made Here', 'venue': 'Seoul', 'start_date': '2026-05-01',
+            'end_date': '2026-05-02', 'capacity': 10,
+        }), content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        return Event.objects.get(name='Made Here')
+
+    def test_creator_is_recorded_and_made_admin(self):
+        event = self.create_event()
+        self.assertEqual(event.created_by, self.staff)
+        self.assertIn(self.staff, event.admins.all())
+
+    def test_creator_cannot_be_removed(self):
+        event = self.create_event()
+        other = User.objects.create_user(
+            username='co@example.com', email='co@example.com', password='pw12345!aA')
+        event.admins.add(other)
+        self.client.force_login(other)
+        response = self.client.post(f'/api/event/{event.id}/eventadmin/{self.staff.id}/delete')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'creator_admin')
+        self.assertIn(self.staff, event.admins.all())
+        # Other admins can still be removed.
+        self.client.force_login(self.staff)
+        response = self.client.post(f'/api/event/{event.id}/eventadmin/{other.id}/delete')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(other, event.admins.all())
+
+
+@nicepay_settings
+class NicePayVirtualAccountTests(TestCase):
+    """가상계좌 is not offered, and one slipped in through the window is undone."""
+
+    setUp = NicePayCallbackTests.setUp
+    callback_params = NicePayCallbackTests.callback_params
+    approval_response = NicePayCallbackTests.approval_response
+
+    def test_prepare_refuses_vbank(self):
+        self.client.force_login(self.user)
+        s = PaymentSettings.get_instance()
+        s.domestic_provider = 'nicepay'
+        s.save()
+        response = self.client.post(
+            '/api/payment/nicepay/prepare',
+            data={'eventId': self.event.id, 'payMethod': 'VBANK'},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'invalid_pay_method')
+
+    @patch('main.nicepay.net_cancel')
+    @patch('main.nicepay._post_form')
+    def test_vbank_approval_is_net_cancelled_and_not_recorded(self, mock_post, mock_net_cancel):
+        result = self.approval_response()
+        result.update({'PayMethod': 'VBANK', 'ResultCode': '4100', 'ResultMsg': '가상계좌 발급 성공'})
+        mock_post.return_value = result
+
+        response = self.client.post('/nicepay/callback', self.callback_params(PayMethod='VBANK'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn('payment/success', response['Location'])
+        self.assertTrue(mock_net_cancel.called)
+        self.assertFalse(PaymentHistory.objects.filter(attendee=self.attendee).exists())
+
+
+class ReviewerPrivacyTests(TestCase):
+    """Reviewers see who wrote an abstract and its text, nothing more."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Private Review', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, accepts_abstract=True, published=True,
+            abstract_deadline=date(2020, 1, 1),
+        )
+        self.reviewer_user = User.objects.create_user(
+            username='rev@example.com', email='rev@example.com', password='pw12345!aA')
+        self.reviewer = Attendee.objects.create(
+            user=self.reviewer_user, event=self.event, first_name='Rev', last_name='Iewer',
+            nationality=1, institute='PNU')
+        self.event.reviewers.add(self.reviewer)
+        AbstractVote.objects.create(reviewer=self.reviewer)
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.author_user = User.objects.create_user(
+            username='au@example.com', email='au@example.com', password='pw12345!aA')
+        author = Attendee.objects.create(
+            user=self.author_user, event=self.event, first_name='Au', last_name='Thor',
+            nationality=1, institute='KAIST', disability='wheelchair', dietary='vegan')
+        self.abstract = Abstract.objects.create(
+            event=self.event, attendee=author, title='Secret Result',
+            file_path=f'abstracts/{uuid.uuid4()}/a.docx', presentation_type='short_talk_poster')
+
+    def assert_author_is_minimal(self, row):
+        self.assertEqual(row['attendee']['name'], 'Au Thor')
+        self.assertEqual(row['attendee']['institute'], 'KAIST')
+        for field in ('disability', 'dietary', 'user', 'user_email', 'payment_status', 'custom_answers'):
+            self.assertNotIn(field, row['attendee'])
+        self.assertNotIn('link', row)
+        self.assertNotIn('votes', row)
+
+    def test_review_list_and_detail_hide_the_registration(self):
+        self.client.force_login(self.reviewer_user)
+        rows = self.client.get(f'/api/event/{self.event.id}/review/abstracts').json()
+        self.assert_author_is_minimal(rows[0])
+        response = self.client.get(f'/api/event/{self.event.id}/abstract/{self.abstract.id}')
+        self.assertEqual(response.status_code, 200)
+        self.assert_author_is_minimal(response.json())
+        self.assertIn('body', response.json())
+
+    def test_reviewer_votes_round_trip(self):
+        self.client.force_login(self.reviewer_user)
+        response = self.client.post(
+            f'/api/event/{self.event.id}/reviewer/vote',
+            data=json.dumps({'voted_abstracts': [self.abstract.id]}), content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        response = self.client.get(f'/api/event/{self.event.id}/reviewer/vote')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('reviewer', response.json())
+        self.assert_author_is_minimal(response.json()['voted_abstracts'][0])
+
+    def test_reviewers_cannot_use_the_admin_list(self):
+        self.client.force_login(self.reviewer_user)
+        self.assertEqual(self.client.get(f'/api/event/{self.event.id}/abstracts').status_code, 403)
+
+    def test_others_are_refused(self):
+        self.client.force_login(self.author_user)
+        self.assertEqual(self.client.get(f'/api/event/{self.event.id}/review/abstracts').status_code, 403)
+        self.assertEqual(
+            self.client.get(f'/api/event/{self.event.id}/abstract/{self.abstract.id}').status_code, 403)
+        self.assertEqual(self.client.get(f'/api/event/{self.event.id}/reviewer/vote').status_code, 403)
+        response = self.client.post(
+            f'/api/event/{self.event.id}/reviewer/vote',
+            data=json.dumps({'voted_abstracts': [self.abstract.id]}), content_type='application/json')
+        self.assertEqual(response.status_code, 403)
+
+    def test_abstract_file_goes_to_author_and_admins_only(self):
+        url = '/api/media-auth/abstract'
+        uri = '/' + self.abstract.file_path
+
+        def status(user):
+            self.client.logout()
+            if user:
+                self.client.force_login(user)
+            return self.client.get(url, HTTP_X_FORWARDED_URI=uri).status_code
+
+        staff = User.objects.create_user(
+            username='st@example.com', email='st@example.com', password='pw12345!aA', is_staff=True)
+        self.assertEqual(status(None), 401)
+        self.assertEqual(status(self.author_user), 200)
+        self.assertEqual(status(self.admin_user), 200)
+        self.assertEqual(status(staff), 200)
+        self.assertEqual(status(self.reviewer_user), 403)
+        self.client.force_login(self.author_user)
+        self.assertEqual(
+            self.client.get(url, HTTP_X_FORWARDED_URI=f'/abstracts/{uuid.uuid4()}/x.docx').status_code, 404)
+
+
+class PublicEventPrivacyTests(TestCase):
+    """Public event data carries no addresses, and drafts stay hidden."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Open Day', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, published=True,
+        )
+        self.event.organizer_set.create(name='Org Anizer', email='org@example.com', affiliation='PNU')
+        self.event.custom_questions.create(question={'type': 'text', 'question': 'Q?'})
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.outsider = User.objects.create_user(
+            username='out@example.com', email='out@example.com', password='pw12345!aA')
+
+    def test_organizer_email_is_not_public(self):
+        for url in (f'/api/event/{self.event.id}', '/api/events'):
+            body = self.client.get(url).content.decode()
+            self.assertIn('Org Anizer', body)
+            self.assertNotIn('org@example.com', body)
+
+    def test_draft_questions_are_hidden_from_outsiders(self):
+        url = f'/api/event/{self.event.id}/questions'
+        self.client.force_login(self.outsider)
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.event.published = False
+        self.event.save()
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.client.force_login(self.admin_user)
+        self.assertEqual(self.client.get(url).status_code, 200)
+        # An archived event's own admin still manages its questions.
+        self.event.published, self.event.is_archived = True, True
+        self.event.save()
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.client.force_login(self.outsider)
+        self.assertEqual(self.client.get(url).status_code, 404)

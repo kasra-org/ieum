@@ -19,7 +19,7 @@ import { error, redirect } from '@sveltejs/kit';
 export async function load({ parent, params, cookies, url }) {
     const data = await parent();
 
-    const info = await get(`api/invitation/${params.token}`, cookies);
+    const info = await get(`api/invitation/${encodeURIComponent(params.token)}`, cookies);
     if (!info.ok || info.status !== 200) {
         throw error(404, 'This invitation link is not valid.');
     }
@@ -29,7 +29,7 @@ export async function load({ parent, params, cookies, url }) {
         throw redirect(303, `/login?next=${encodeURIComponent(url.pathname)}`);
     }
 
-    const accepted = await post(`api/invitation/${params.token}/accept`, {}, cookies);
+    const accepted = await post(`api/invitation/${encodeURIComponent(params.token)}/accept`, {}, cookies);
     if (accepted.ok && accepted.status === 200) {
         data.outcome = { ok: true };
     } else {

@@ -2,7 +2,7 @@
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from '$lib/components/ui';
     import { Button, Modal, Label, Input, Select, Textarea, Alert } from '$lib/components/ui';
     import { Tabs, TabItem } from '$lib/components/ui';
-    import { Star, UserMinus } from '@lucide/svelte';
+    import { Lock, Star, UserMinus } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import * as m from '$lib/paraglide/messages.js';
@@ -124,11 +124,17 @@
                                 </Button>
                             </form>
                         </ActionTooltip>
-                        <ActionTooltip text={m.eventAdmins_deleteAdmin()}>
-                            <Button color="none" size="none" onclick={() => deleteEventAdminModal(row.id)}>
-                                <UserMinus class="w-5 h-5" />
-                            </Button>
-                        </ActionTooltip>
+                        {#if data.event.created_by_id === row.id}
+                            <ActionTooltip text={m.eventAdmins_creatorLocked()}>
+                                <Lock class="w-5 h-5 text-gray-400" />
+                            </ActionTooltip>
+                        {:else}
+                            <ActionTooltip text={m.eventAdmins_deleteAdmin()}>
+                                <Button color="none" size="none" onclick={() => deleteEventAdminModal(row.id)}>
+                                    <UserMinus class="w-5 h-5" />
+                                </Button>
+                            </ActionTooltip>
+                        {/if}
                     </div>
                 </TableBodyCell>
             </TableBodyRow>

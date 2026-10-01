@@ -4,6 +4,7 @@ import os
 import tempfile
 from datetime import datetime as _dt
 import uuid
+import re
 import requests
 from functools import wraps
 
@@ -617,7 +618,10 @@ def add_event(request):
         email_template_certificate=email_template_certificate,
         email_template_invitation=email_template_invitation,
         onsite_code=generate_onsite_code(),
+        created_by=request.user,
     )
+    # The creator manages the event from the start, and stays on its admin list.
+    event.admins.add(request.user)
 
     # Every event starts from the standard three categories; the form may send
     # its own set, which replaces them.
@@ -727,35 +731,31 @@ def get_event(request, event_id: int):
             status=404,
         )
 
-    # Archived events are not accessible (except to global admins)
-    if event.is_archived:
-        user = request.user
-        if not user.is_authenticated or not (user.is_superuser or user.is_staff):
-            return api.create_response(
-                request,
-                {"code": "not_found", "message": "Event not found."},
-                status=404,
-            )
-
-    # Draft events are only accessible to event admins
-    if not event.published:
-        user = request.user
-        if not user.is_authenticated:
-            return api.create_response(
-                request,
-                {"code": "not_found", "message": "Event not found."},
-                status=404,
-            )
-        # Check if user is superuser, staff, or event admin
-        is_admin = user.is_superuser or user.is_staff or event.admins.filter(id=user.id).exists()
-        if not is_admin:
-            return api.create_response(
-                request,
-                {"code": "not_found", "message": "Event not found."},
-                status=404,
-            )
+    if event_hidden_from(request.user, event):
+        return api.create_response(
+            request,
+            {"code": "not_found", "message": "Event not found."},
+            status=404,
+        )
 
     return event
+
+
+def event_hidden_from(user, event):
+    """True when this user may not see the event's public pages.
+
+    Archived events are shown to global admins only, and drafts to event admins.
+    """
+    if event.is_archived:
+        if not user.is_authenticated or not (user.is_superuser or user.is_staff):
+            return True
+    if not event.published:
+        if not user.is_authenticated:
+            return True
+        is_admin = user.is_superuser or user.is_staff or event.admins.filter(id=user.id).exists()
+        if not is_admin:
+            return True
+    return False
 
 @api.get("/admin/event/{event_id}", response=EventAdminSchema)
 @ensure_event_staff
@@ -1053,7 +1053,17 @@ def check_registration_status(request, event_id: int):
 
 @api.get("/event/{event_id}/questions", response=List[QuestionSchema])
 def get_event_questions(request, event_id: int):
-    event = Event.objects.get(id=event_id)
+    event = Event.objects.filter(id=event_id).first()
+    user = request.user
+    # The registration form reads these, so they follow the event page's
+    # visibility; the event's own admins see them whatever its state.
+    is_admin = event is not None and (user.is_staff or event.admins.filter(id=user.id).exists())
+    if event is None or (not is_admin and event_hidden_from(user, event)):
+        return api.create_response(
+            request,
+            {"code": "not_found", "message": "Event not found."},
+            status=404,
+        )
     questions = event.custom_questions.all()
     return questions
 
@@ -1565,8 +1575,22 @@ def submit_abstract(request, event_id: int):
 
     return {"code": "success", "message": "Successfully submitted!"}
 
-@api.get("/event/{event_id}/speakers", response=List[SpeakerSchema], auth=None)
+@api.get("/event/{event_id}/speakers", response=List[PublicSpeakerSchema], auth=None)
 def get_speakers(request, event_id: int):
+    # Public, so it follows the event page's visibility and leaves out each
+    # speaker's address and payment state. The admin table uses the route below.
+    event = Event.objects.filter(id=event_id).first()
+    if event is None or event_hidden_from(request.user, event):
+        return api.create_response(
+            request,
+            {"code": "not_found", "message": "Event not found."},
+            status=404,
+        )
+    return event.speakers.all()
+
+@api.get("/event/{event_id}/admin/speakers", response=List[SpeakerSchema])
+@ensure_event_staff
+def get_speakers_for_admin(request, event_id: int):
     event = Event.objects.get(id=event_id)
     return event.speakers.all()
 
@@ -1914,26 +1938,63 @@ def delete_reviewer(request, event_id: int, reviewer_id: int):
     return {"code": "success", "message": "Reviewer deleted."}
 
 @api.get("/event/{event_id}/abstracts", response=List[AbstractShortSchema])
+@ensure_event_staff
 def get_abstracts(request, event_id: int):
-    user = request.user
+    # The admin table: every submission with its author's full registration.
+    # Reviewers use /review/abstracts, which shows them far less.
     event = Event.objects.get(id=event_id)
-    # event.reviewers is a M2M to Attendee, so a User is never "in" it; the old
-    # `user in event.reviewers.all()` was always False and reviewers got a 403.
-    is_admin = user.is_staff or user in event.admins.all()
-    is_reviewer = event.reviewers.filter(user=user).exists()
-    if not (is_admin or is_reviewer):
+    return event.abstracts.all()
+
+def reviewer_attendee(user, event):
+    """This user's registration on `event` if they review for it, else None.
+
+    event.reviewers is a M2M to Attendee, so a User is never "in" it - the
+    test has to go through the registration.
+    """
+    if not user.is_authenticated:
+        return None
+    return event.reviewers.filter(user=user).first()
+
+@api.get("/event/{event_id}/review/abstracts", response=List[ReviewAbstractShortSchema])
+def get_abstracts_for_review(request, event_id: int):
+    event = Event.objects.get(id=event_id)
+    if reviewer_attendee(request.user, event) is None:
         return api.create_response(
             request,
             {"code": "permission_denied", "message": "Permission denied"},
             status=403,
         )
-    abstracts = event.abstracts.all()
-    # Admins manage every submission; reviewers only score the ones in
-    # competition, so invited and plenary talks are not shown to them at all.
-    if not is_admin:
-        abstracts = abstracts.exclude(
-            presentation_type__in=Abstract.NON_REVIEWABLE_PRESENTATION_TYPES)
-    return abstracts
+    # Reviewers only score the abstracts in competition, so invited and
+    # plenary talks are not shown to them at all.
+    return event.abstracts.exclude(
+        presentation_type__in=Abstract.NON_REVIEWABLE_PRESENTATION_TYPES)
+
+ABSTRACT_MEDIA_RE = re.compile(r'abstracts/([0-9a-fA-F-]{36})/')
+
+@api.get("/media-auth/abstract", auth=None)
+def authorize_abstract_file(request):
+    """Caddy's forward_auth check before it serves anything under /media/abstracts/.
+
+    An abstract file is unpublished work, so only its author and the event's
+    admins may download it. Reviewers read the converted body in the page
+    instead. Caddy sends the requested path in X-Forwarded-Uri; only the
+    status code of this response matters.
+    """
+    from django.http import HttpResponse
+
+    user = request.user
+    if not user.is_authenticated:
+        return HttpResponse(status=401)
+    match = ABSTRACT_MEDIA_RE.search(request.headers.get('X-Forwarded-Uri', ''))
+    abstract = None
+    if match:
+        abstract = (Abstract.objects.select_related('attendee', 'event')
+                    .filter(file_path__startswith=f"abstracts/{match.group(1)}/").first())
+    if abstract is None:
+        return HttpResponse(status=404)
+    is_author = abstract.attendee is not None and abstract.attendee.user_id == user.id
+    is_admin = user.is_staff or abstract.event.admins.filter(id=user.id).exists()
+    return HttpResponse(status=200 if (is_author or is_admin) else 403)
 
 @api.get("/event/{event_id}/abstract", response=AbstractUserSchema)
 def get_user_abstract(request, event_id: int):
@@ -1957,19 +2018,26 @@ def get_user_abstract(request, event_id: int):
         )
     return abstract
 
-@api.get("/event/{event_id}/abstract/{abstract_id}", response=AbstractSchema)
+@api.get("/event/{event_id}/abstract/{abstract_id}", response=ReviewAbstractSchema)
 def get_abstract(request, event_id: int, abstract_id: int):
+    """One abstract for scoring: its text, title and who wrote it."""
     user = request.user
-    if not (user.is_staff or
-            user in Event.objects.get(id=event_id).admins.all() or
-            user in Event.objects.get(id=event_id).reviewers.all()):
+    event = Event.objects.get(id=event_id)
+    is_admin = user.is_staff or event.admins.filter(id=user.id).exists()
+    if not (is_admin or reviewer_attendee(user, event) is not None):
         return api.create_response(
             request,
             {"code": "permission_denied", "message": "Permission denied"},
             status=403,
         )
-    event = Event.objects.get(id=event_id)
-    abstract = event.abstracts.get(id=abstract_id)
+    abstracts = event.abstracts.all()
+    if not is_admin:
+        abstracts = abstracts.exclude(
+            presentation_type__in=Abstract.NON_REVIEWABLE_PRESENTATION_TYPES)
+    abstract = abstracts.filter(id=abstract_id).first()
+    if abstract is None:
+        return api.create_response(
+            request, {"code": "not_found", "message": "Abstract not found."}, status=404)
     return abstract
 
 @api.post("/event/{event_id}/abstract/{abstract_id}/update", response=MessageSchema)
@@ -2005,7 +2073,7 @@ def is_reviewer(request, event_id: int):
         return False # User is not registered to the event
     return attendee in Event.objects.get(id=event_id).reviewers.all()
 
-@api.get("/event/{event_id}/reviewer/vote", response=AbstractVoteSchema)
+@api.get("/event/{event_id}/reviewer/vote", response=ReviewerVoteSchema)
 def get_reviewer_votes(request, event_id: int):
     event = Event.objects.get(id=event_id)
     if not event.accepts_abstract:
@@ -2020,18 +2088,14 @@ def get_reviewer_votes(request, event_id: int):
             {"code": "deadline_not_passed", "message": "Abstract submission deadline has not passed."},
             status=400,
         )
-    user = request.user
-    if not (user.is_staff or
-            user in Event.objects.get(id=event_id).admins.all() or
-            user in Event.objects.get(id=event_id).reviewers.all()):
+    reviewer = reviewer_attendee(request.user, event)
+    if reviewer is None:
         return api.create_response(
             request,
             {"code": "permission_denied", "message": "Permission denied"},
             status=403,
         )
-    event = Event.objects.get(id=event_id)
-    reviewer = Attendee.objects.get(user=user, event=event)
-    votes = AbstractVote.objects.get(reviewer=reviewer)
+    votes, _ = AbstractVote.objects.get_or_create(reviewer=reviewer)
     return votes
 
 @api.post("/event/{event_id}/reviewer/vote", response=MessageSchema)
@@ -2049,11 +2113,15 @@ def vote_abstract(request, event_id: int):
             {"code": "deadline_not_passed", "message": "Abstract submission deadline has not passed."},
             status=400,
         )
-    user = request.user
-    event = Event.objects.get(id=event_id)
-    reviewer = Attendee.objects.get(user=user, event=event)
+    reviewer = reviewer_attendee(request.user, event)
+    if reviewer is None:
+        return api.create_response(
+            request,
+            {"code": "permission_denied", "message": "Permission denied"},
+            status=403,
+        )
     data = json.loads(request.body)
-    vote = AbstractVote.objects.get(reviewer=reviewer)
+    vote, _ = AbstractVote.objects.get_or_create(reviewer=reviewer)
     for abstract_id in data["voted_abstracts"]:
         # Validate abstract belongs to this event to prevent cross-event voting
         abstract = Abstract.objects.get(id=abstract_id, event=event)
@@ -2428,6 +2496,12 @@ def add_event_admin(request, event_id: int):
 @ensure_event_staff
 def delete_event_admin(request, event_id: int, admin_id: int):
     event = Event.objects.get(id=event_id)
+    if event.created_by_id == admin_id:
+        return api.create_response(
+            request,
+            {"code": "creator_admin", "message": "The admin who created the event cannot be removed."},
+            status=400,
+        )
     user = User.objects.get(id=admin_id)
     event.admins.remove(user)
     # If the deleted admin was the main admin, reassign to next available or clear

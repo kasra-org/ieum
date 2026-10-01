@@ -1,6 +1,7 @@
 <script>
     import { A, Card, Button, Heading, Indicator, Label, Input, Checkbox, Select, Alert, Modal } from '$lib/components/ui';
     import { onMount } from 'svelte';
+    import Turnstile from '$lib/components/Turnstile.svelte';
     import * as m from '$lib/paraglide/messages.js';
 
     import 'academicons';
@@ -112,6 +113,9 @@
                 {/if}
                 {#if data.sociallogin_error}
                 <Alert color="red" class="mb-4" dismissable>{m.login_socialNotLinked()}</Alert>
+                {/if}
+                {#if data.turnstile_site_key}
+                    <Turnstile sitekey={data.turnstile_site_key} />
                 {/if}
                 <Button type="submit" color="primary" class="w-full">{m.login_submit()}</Button>
 

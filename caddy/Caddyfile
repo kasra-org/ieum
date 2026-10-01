@@ -25,6 +25,14 @@
         file_server
     }
     handle_path /media/* {
+        # Abstract files go only to their author and the event's admins; the
+        # backend decides from the session cookie (authorize_abstract_file).
+        forward_auth /abstracts/* backend:8080 {
+            uri /api/media-auth/abstract
+            # The same Host the frontend's API calls use, so ALLOWED_HOSTS
+            # does not depend on which name the visitor came in by.
+            header_up Host {upstream_hostport}
+        }
         root * /www/media
         file_server
     }

@@ -12,7 +12,7 @@ import time
 import json
 import random
 import string
-from datetime import datetime
+from datetime import date, datetime
 from functools import wraps
 
 from django.core.cache import cache
@@ -667,14 +667,111 @@ def unmangle_autolinked_variables(template_string):
     return AUTOLINKED_VARIABLE_RE.sub(r'{{\1\2\3}}', template_string or '')
 
 
+# Email templates are written by event admins, who are not staff. A Django
+# template follows any attribute and calls any method that takes no arguments,
+# so a model instance in the context lets a template walk from the event to
+# every admin's password hash, or call ApiKey.rotate() and print the new key.
+# Templates therefore get plain copies of these fields only - what the event
+# admin page already shows the person writing the template.
+EVENT_TEMPLATE_FIELDS = (
+    'id', 'name', 'description', 'category', 'start_date', 'end_date',
+    'venue', 'venue_ko', 'venue_address', 'venue_address_ko', 'link_info',
+    'organizers_en', 'organizers_ko', 'registration_deadline', 'capacity',
+    'accepts_abstract', 'abstract_submission_type', 'external_abstract_url',
+    'abstract_deadline', 'has_tiered_fees', 'has_onsite_fee',
+)
+ATTENDEE_TEMPLATE_FIELDS = (
+    'id', 'attendee_nametag_id', 'first_name', 'middle_initial', 'last_name',
+    'korean_name', 'name', 'email', 'nationality', 'institute', 'institute_ko',
+    'department', 'job_title', 'disability', 'dietary', 'is_attended',
+    'category_name', 'category_name_ko', 'registration_fee', 'payment_status',
+    'fee_waived', 'is_fee_exempt',
+)
+ONSITE_ATTENDEE_TEMPLATE_FIELDS = (
+    'id', 'onsiteattendee_nametag_id', 'name', 'first_name', 'last_name',
+    'korean_name', 'email', 'institute', 'job_title', 'is_confirmed',
+    'category_name', 'category_name_ko', 'registration_fee',
+)
+ABSTRACT_TEMPLATE_FIELDS = (
+    'id', 'title', 'presentation_type', 'get_presentation_type_display',
+    'is_reviewable',
+)
+INVITATION_TEMPLATE_FIELDS = (
+    'email', 'fee_waived', 'as_speaker', 'as_chair', 'is_accepted',
+)
+
+
+class TemplateValues:
+    """The whitelisted fields of one model instance, read when a template asks.
+
+    Templates look variables up by subscript first, so `attendee.first_name`
+    lands in __getitem__; anything off the list is a KeyError and renders empty.
+    The template language refuses names starting with `_`, so the wrapped
+    instance itself cannot be reached. Fields are read lazily because a body
+    usually names only a few of them, and some cost a query.
+    """
+
+    def __init__(self, instance, fields):
+        self._instance = instance
+        self._fields = fields
+        self._cache = {}
+
+    def __getitem__(self, key):
+        if key not in self._fields:
+            raise KeyError(key)
+        if key not in self._cache:
+            value = getattr(self._instance, key, '')
+            self._cache[key] = value() if callable(value) else value
+        return self._cache[key]
+
+    def __str__(self):
+        return str(self._instance)
+
+
+def template_values(value):
+    """A model instance as the plain values an email template may see.
+
+    Anything else that is not a plain value is refused rather than passed
+    through, so a new call site cannot hand a template a live object by mistake.
+    """
+    from django.db import models as db_models
+    from main.models import Event, Attendee, OnSiteAttendee, Abstract, EventInvitation
+
+    fields = {
+        Event: EVENT_TEMPLATE_FIELDS,
+        Attendee: ATTENDEE_TEMPLATE_FIELDS,
+        OnSiteAttendee: ONSITE_ATTENDEE_TEMPLATE_FIELDS,
+        Abstract: ABSTRACT_TEMPLATE_FIELDS,
+        EventInvitation: INVITATION_TEMPLATE_FIELDS,
+    }.get(type(value))
+    if fields is not None:
+        return TemplateValues(value, fields)
+    if value is None or isinstance(value, (str, int, float, bool, date)):
+        return value
+    if isinstance(value, db_models.Model):
+        raise TypeError(f'{type(value).__name__} cannot be passed to an email template')
+    raise TypeError(f'{type(value).__name__} is not a plain template value')
+
+
+_email_engine = None
+
+
 def render_email_template(template_string, context_dict):
     """Render an email template as plain text.
 
     Emails are sent as text/plain, so Django's HTML autoescaping must be off:
     with it on, an event named "SCSOK & KSBMB" reaches the recipient as
     "SCSOK &amp; KSBMB", and any quote or angle bracket is mangled the same way.
-    """
-    from django.template import Context, Template
 
+    The context is reduced to plain values first (see template_values), and the
+    template runs on a bare engine: no template directories to {% include %}
+    from and no app tag libraries to {% load %}.
+    """
+    global _email_engine
+    from django.template import Context, Engine
+
+    if _email_engine is None:
+        _email_engine = Engine()
     template_string = unmangle_autolinked_variables(template_string)
-    return Template(template_string).render(Context(context_dict, autoescape=False))
+    context = {key: template_values(value) for key, value in context_dict.items()}
+    return _email_engine.from_string(template_string).render(Context(context, autoescape=False))

@@ -330,6 +330,10 @@ class Event(models.Model):
     reviewers = models.ManyToManyField('Attendee', related_name='reviewed_events', blank=True)
     admins = models.ManyToManyField('User', related_name='admins', blank=True)
     main_admin = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='main_admin_events')
+    # Whoever created the event. They are put on the admin list at creation and
+    # cannot be taken off it - see delete_event_admin. Null for events created
+    # before this was recorded.
+    created_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='created_events')
     published = models.BooleanField(default=False)
     is_archived = models.BooleanField(default=False)
 

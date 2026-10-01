@@ -2,7 +2,23 @@ import { env } from '$env/dynamic/private';
 
 const BASE_URL = env.API_BASE_URL || 'http://backend:8080/';
 
+// Route params arrive decoded, so a link carrying `..%2F` hands a caller like
+// `api/invitation/${params.token}/accept` a real `../`, and new URL() resolves
+// it: the request - with the visitor's cookies and CSRF token - lands on
+// whatever backend path the link chose. No caller builds a dot segment or a
+// fragment on purpose, so a path holding one is refused outright. The URL
+// parser drops tabs and newlines and reads `\` as `/`, so those count too.
+function isPlainPath(path) {
+    if (path.includes('#')) return false;
+    const pathname = path.split('?')[0].replace(/[\t\n\r]/g, '');
+    return !pathname.split(/[\\/]/).some(segment => /^(\.|%2e){1,2}$/i.test(segment));
+}
+
 async function send({ method, path, data, cookies, extraHeaders }) {
+    if (!isPlainPath(path)) {
+        console.warn('Refused backend path with dot segments:', path);
+        return { ok: false, status: 404, data: { code: 'not_found', message: 'Not Found' } };
+    }
     const url = new URL(path, BASE_URL);
 
     let headers = {

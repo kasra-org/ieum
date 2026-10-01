@@ -93,7 +93,7 @@ function buildForm(params, action) {
  *
  * @param {Object} options
  * @param {number} options.eventId - Event being paid for
- * @param {string} [options.payMethod] - CARD | BANK | VBANK | CELLPHONE
+ * @param {string} [options.payMethod] - CARD | BANK | CELLPHONE
  * @param {Function} [options.onClose] - Called if the payer closes the window
  * @returns {Promise<void>}
  */

@@ -42,9 +42,10 @@ JS_SDK_URL = 'https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js'
 # Payment methods accepted by the payment window (PayMethod).
 PAY_METHOD_CARD = 'CARD'
 PAY_METHOD_BANK = 'BANK'
-PAY_METHOD_VBANK = 'VBANK'
 PAY_METHOD_CELLPHONE = 'CELLPHONE'
-PAY_METHODS = (PAY_METHOD_CARD, PAY_METHOD_BANK, PAY_METHOD_VBANK, PAY_METHOD_CELLPHONE)
+# 가상계좌 (VBANK) is deliberately absent: it is approved when the account is
+# issued, before anything is deposited, and we take no deposit notification.
+PAY_METHODS = (PAY_METHOD_CARD, PAY_METHOD_BANK, PAY_METHOD_CELLPHONE)
 
 # AuthResultCode indicating a successful authentication.
 AUTH_SUCCESS_CODE = '0000'
@@ -53,7 +54,6 @@ AUTH_SUCCESS_CODE = '0000'
 APPROVAL_SUCCESS_CODES = {
     PAY_METHOD_CARD: '3001',       # 신용카드
     PAY_METHOD_BANK: '4000',       # 계좌이체
-    PAY_METHOD_VBANK: '4100',      # 가상계좌 발급
     PAY_METHOD_CELLPHONE: 'A000',  # 휴대폰 소액결제
 }
 
@@ -72,7 +72,6 @@ ALREADY_CANCELLED_MARKER = '기취소'
 PAY_METHOD_LABELS = {
     PAY_METHOD_CARD: '카드',
     PAY_METHOD_BANK: '계좌이체',
-    PAY_METHOD_VBANK: '가상계좌',
     PAY_METHOD_CELLPHONE: '휴대폰',
 }
 
@@ -357,6 +356,25 @@ def approve(*, next_app_url, net_cancel_url, tid, auth_token, amount):
     pay_method = result.get('PayMethod', PAY_METHOD_CARD)
     expected_code = APPROVAL_SUCCESS_CODES.get(pay_method)
     result_code = result.get('ResultCode', '')
+
+    # PayMethod is not covered by SignData, so the payer can switch it in the
+    # payment window - to 가상계좌, say, which "succeeds" with no money moved.
+    # Whatever NicePay did under a method we do not take is undone.
+    if expected_code is None:
+        logger.error('NicePay approval with unsupported PayMethod=%s for tid=%s', pay_method, tid)
+        net_cancel(
+            net_cancel_url=net_cancel_url,
+            tid=tid,
+            auth_token=auth_token,
+            amount=amt,
+            edi_date=edi_date,
+            sign_data=payload['SignData'],
+        )
+        raise NicePayError(
+            'This payment method is not supported. The payment was cancelled.',
+            code='unsupported_pay_method',
+            response=result,
+        )
 
     if result_code != expected_code:
         logger.error(

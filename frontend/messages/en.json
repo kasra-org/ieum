@@ -799,6 +799,7 @@
 	"eventAdmins_deleteConfirm": "Are you sure you want to delete the admin?",
 	"eventAdmins_delete": "Delete",
 	"eventAdmins_cancel": "Cancel",
+	"eventAdmins_creatorLocked": "Created this event; cannot be removed",
 	"eventAdmins_toggleMainAdmin": "Toggle main admin",
 
 	"organizers_title": "Organizers",

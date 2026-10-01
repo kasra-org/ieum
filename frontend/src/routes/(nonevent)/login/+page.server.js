@@ -1,6 +1,7 @@
 import { post } from '$lib/fetch';
 import { fail, redirect } from '@sveltejs/kit';
 import { sanitizeRedirectUrl } from '$lib/utils.js';
+import { TURNSTILE_FIELD, turnstileSiteKey, verifyTurnstile } from '$lib/server/turnstile.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ parent, request }) {
@@ -14,6 +15,7 @@ export async function load({ parent, request }) {
 
     rtn.sociallogin_error = url.searchParams.get('error_process') || '';
     rtn.next = next;
+    rtn.turnstile_site_key = turnstileSiteKey();
 
     return rtn;
 }
@@ -24,6 +26,14 @@ export const actions = {
         let formdata = await request.formData()
         const next = sanitizeRedirectUrl(formdata.get('next'));
         const email = formdata.get('email');
+
+        // Email/password login only; social login goes to the provider and
+        // never reaches this action.
+        const turnstileToken = formdata.get(TURNSTILE_FIELD);
+        formdata.delete(TURNSTILE_FIELD);
+        if (!(await verifyTurnstile(turnstileToken))) {
+            return fail(400, { error: true, message: 'Please complete the verification and try again.' });
+        }
 
         const response = await post('_allauth/browser/v1/auth/login', formdata, cookies);
 

@@ -799,6 +799,7 @@
 	"eventAdmins_deleteConfirm": "정말로 이 관리자를 삭제하시겠습니까?",
 	"eventAdmins_delete": "삭제",
 	"eventAdmins_cancel": "취소",
+	"eventAdmins_creatorLocked": "행사 생성자는 삭제할 수 없습니다",
 	"eventAdmins_toggleMainAdmin": "대표 관리자 전환",
 
 	"organizers_title": "주최자",

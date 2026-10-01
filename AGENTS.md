@@ -286,9 +286,11 @@ All endpoints use base URL `/api/` with CSRF protection enabled.
 
 ### Abstract Management
 - `POST /api/event/{event_id}/abstract` - Submit abstract
-- `GET /api/event/{event_id}/abstracts` - List abstracts (admin/reviewer)
+- `GET /api/event/{event_id}/abstracts` - List abstracts with full author registration (event admin)
+- `GET /api/event/{event_id}/review/abstracts` - List reviewable abstracts, author name/affiliation only (reviewer)
 - `GET /api/event/{event_id}/abstract` - Get user's abstract
-- `GET /api/event/{event_id}/abstract/{abstract_id}` - Get abstract details
+- `GET /api/event/{event_id}/abstract/{abstract_id}` - Get abstract body for review (reviewer/event admin; no file link)
+- `GET /api/media-auth/abstract` - Caddy forward_auth check for `/media/abstracts/*` (author or event admin only)
 - `POST /api/event/{event_id}/abstract/{abstract_id}/update` - Update abstract
 - `POST /api/event/{event_id}/abstract/{abstract_id}/delete` - Delete abstract
 
@@ -301,7 +303,8 @@ All endpoints use base URL `/api/` with CSRF protection enabled.
 - `POST /api/event/{event_id}/reviewer/vote` - Submit votes
 
 ### Speaker Management
-- `GET /api/event/{event_id}/speakers` - List speakers
+- `GET /api/event/{event_id}/speakers` - List speakers (public: no email/payment fields, hidden for draft/archived events)
+- `GET /api/event/{event_id}/admin/speakers` - List speakers with email and payment state (event admin)
 - `POST /api/event/{event_id}/speaker/add` - Add speaker
 - `POST /api/event/{event_id}/speaker/{speaker_id}/update` - Update speaker
 - `POST /api/event/{event_id}/speaker/{speaker_id}/delete` - Delete speaker
