@@ -433,10 +433,19 @@ class SpeakerSchema(Schema):
     # next to the exemption tick.
     is_registered: bool = False
 
+    # Whether they have already paid: the exemption tick is then locked off,
+    # since waiving a settled fee would report the registration as free.
+    has_paid: bool = False
+
     @staticmethod
     def resolve_is_registered(speaker) -> bool:
         from main.models import attendees_for_email
         return bool(attendees_for_email(speaker.event, speaker.email))
+
+    @staticmethod
+    def resolve_has_paid(speaker) -> bool:
+        from main.models import has_paid_for
+        return has_paid_for(speaker.event, speaker.email)
 
 class AbstractShortSchema(Schema):
     id: int

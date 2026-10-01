@@ -61,6 +61,17 @@
     let speakerIsChair = $state(false);
     let speakerType = $state('invited'); // Default to 'invited' speaker type
 
+    // Someone who has paid cannot be exempted. Known from the row when
+    // editing; when adding, looked up in the attendee list by the typed address.
+    let modalPersonPaid = $derived.by(() => {
+        if (selected_speaker?.has_paid) return true;
+        const email = (speakerEmail || '').trim().toLowerCase();
+        if (!email) return false;
+        return data.attendees.some(a =>
+            (a.user?.email || a.user_email || '').trim().toLowerCase() === email
+            && a.payment_status === 'paid');
+    });
+
     const roleLabel = (row) =>
         [row.is_speaker && m.speakers_roleSpeaker(), row.is_chair && m.speakers_roleChair()]
             .filter(Boolean).join(' · ');
@@ -70,6 +81,8 @@
     let exemption_form = $state(null);
     let toggling_speaker = $state(null);
     const toggleExemption = (row) => {
+        // Already paid: nothing to waive, and the server would refuse anyway.
+        if (row.has_paid) return;
         toggling_speaker = { ...row, is_payment_exempt: !row.is_payment_exempt };
         // Wait for the hidden inputs to take the new values before submitting.
         queueMicrotask(() => exemption_form?.requestSubmit());
@@ -263,7 +276,8 @@
                 <TableBodyCell>{#if row.is_domestic}<Check class="w-4 h-4 text-green-500 inline mr-2" />{/if}</TableBodyCell>
                 <TableBodyCell>{format_type(row.type)}</TableBodyCell>
                 <TableBodyCell>
-                    <Checkbox checked={row.is_payment_exempt}
+                    <Checkbox checked={row.is_payment_exempt && !row.has_paid} disabled={row.has_paid}
+                        title={row.has_paid ? m.speakers_alreadyPaid() : undefined}
                         onclick={(e) => { e.preventDefault(); toggleExemption(row); }} />
                 </TableBodyCell>
                 <TableBodyCell>
@@ -353,11 +367,18 @@
             <input type="hidden" name="is_domestic" value={speakerIsDomestic ? 'true' : 'false'} />
         </div>
         <div class="mb-4">
-            <Checkbox bind:checked={speakerIsPaymentExempt}>
-                {m.speakers_paymentExempt()}
-            </Checkbox>
-            <p class="mt-1 text-sm text-gray-500">{m.speakers_paymentExemptHelp()}</p>
-            <input type="hidden" name="is_payment_exempt" value={speakerIsPaymentExempt ? 'true' : 'false'} />
+            {#if modalPersonPaid}
+                <Checkbox checked={false} disabled>
+                    {m.speakers_paymentExempt()}
+                </Checkbox>
+                <p class="mt-1 text-sm text-gray-500">{m.speakers_alreadyPaidHelp()}</p>
+            {:else}
+                <Checkbox bind:checked={speakerIsPaymentExempt}>
+                    {m.speakers_paymentExempt()}
+                </Checkbox>
+                <p class="mt-1 text-sm text-gray-500">{m.speakers_paymentExemptHelp()}</p>
+            {/if}
+            <input type="hidden" name="is_payment_exempt" value={speakerIsPaymentExempt && !modalPersonPaid ? 'true' : 'false'} />
         </div>
         <div class="mb-6">
             <Label for="type" class="block mb-2">{m.speakers_type()}</Label>

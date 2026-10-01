@@ -1383,8 +1383,10 @@ class SpeakerPaymentExemptionTests(TestCase):
         )
         self.add_speaker()
         attendee = self.fresh(attendee)
-        # Free from here on, but the record of what they paid is untouched.
-        self.assertEqual(attendee.payment_status, 'free')
+        # Paid before being listed: the listing does not exempt them, so the
+        # registration keeps reading as paid and the payment is untouched.
+        self.assertFalse(self.event.speakers.get().is_payment_exempt)
+        self.assertEqual(attendee.payment_status, 'paid')
         self.assertEqual([p.id for p in attendee.payments.all()], [paid.id])
 
     def test_a_speaker_at_another_event_is_not_exempt_here(self):
@@ -2221,6 +2223,135 @@ class ManualEmailTests(TestCase):
         self.assertTrue(call.kwargs['rich'])
 
 
+class PaidSpeakerExemptionTests(TestCase):
+    """Someone who paid and then became a speaker or chair is not exempted."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Paid First', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, published=True,
+        )
+        self.category, = add_categories(self.event, ('Regular', 200000))
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.payer = User.objects.create_user(
+            username='payer@example.com', email='payer@example.com', password='pw12345!aA',
+            first_name='Pay', last_name='Er')
+        self.attendee = Attendee.objects.create(
+            user=self.payer, event=self.event, first_name='Pay', last_name='Er',
+            nationality=1, institute='PNU', category=self.category)
+        self.event.attendees.add(self.attendee)
+        self.client.force_login(self.admin_user)
+
+    def pay(self):
+        PaymentHistory.objects.create(
+            attendee=self.attendee, event=self.event, amount=200000, status='completed')
+
+    def add_speaker(self, **extra):
+        payload = {'name': 'Pay Er', 'email': 'Payer@Example.com', 'affiliation': 'PNU',
+                   'is_domestic': True, 'type': 'invited'}
+        payload.update(extra)
+        return self.client.post(
+            f'/api/event/{self.event.id}/speaker/add',
+            data=json.dumps(payload), content_type='application/json')
+
+    def fresh_attendee(self):
+        return Attendee.objects.select_related('event').get(id=self.attendee.id)
+
+    def test_listing_a_paid_person_does_not_exempt_them(self):
+        self.pay()
+        # The form's default is exempt; the server overrides it for a payer.
+        self.assertEqual(self.add_speaker(is_payment_exempt=True).status_code, 200)
+        speaker = self.event.speakers.get()
+        self.assertFalse(speaker.is_payment_exempt)
+        # So the registration still reads as paid, not as free.
+        self.assertEqual(self.fresh_attendee().payment_status, 'paid')
+
+    def test_the_list_says_who_has_paid(self):
+        self.pay()
+        self.add_speaker()
+        response = self.client.get(f'/api/event/{self.event.id}/speakers')
+        row = response.json()[0]
+        self.assertTrue(row['has_paid'])
+        self.assertFalse(row['is_payment_exempt'])
+
+    def test_an_update_cannot_exempt_a_paid_person_either(self):
+        self.pay()
+        self.add_speaker()
+        speaker = self.event.speakers.get()
+        response = self.client.post(
+            f'/api/event/{self.event.id}/speaker/{speaker.id}/update',
+            data=json.dumps({'name': 'Pay Er', 'email': 'payer@example.com', 'affiliation': 'PNU',
+                             'is_domestic': True, 'type': 'invited', 'is_payment_exempt': True}),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        speaker.refresh_from_db()
+        self.assertFalse(speaker.is_payment_exempt)
+
+    def test_someone_who_has_not_paid_is_exempted_as_before(self):
+        self.add_speaker()
+        self.assertTrue(self.event.speakers.get().is_payment_exempt)
+        self.assertEqual(self.fresh_attendee().payment_status, 'free')
+
+    def test_a_cancelled_payment_does_not_count_as_paid(self):
+        PaymentHistory.objects.create(
+            attendee=self.attendee, event=self.event, amount=200000, status='cancelled')
+        self.add_speaker()
+        self.assertTrue(self.event.speakers.get().is_payment_exempt)
+
+    @patch('main.invitations.send_mail')
+    def test_an_invitation_does_not_waive_a_fee_already_paid(self, mock_send):
+        self.pay()
+        response = self.client.post(
+            f'/api/event/{self.event.id}/invitations',
+            data=json.dumps({'emails': ['payer@example.com'], 'subject': 's',
+                             'body': '{{ invitation_link }}', 'fee_waived': True, 'as_chair': True}),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        invitation = EventInvitation.objects.get(email='payer@example.com')
+        self.client.force_login(self.payer)
+        self.assertEqual(self.client.post(f'/api/invitation/{invitation.token}/accept').status_code, 200)
+
+        attendee = self.fresh_attendee()
+        self.assertFalse(attendee.fee_waived)
+        self.assertEqual(attendee.payment_status, 'paid')
+        listed = self.event.speakers.get()
+        self.assertTrue(listed.is_chair)
+        self.assertFalse(listed.is_payment_exempt)
+
+    def test_the_migration_clears_exemptions_on_paid_registrations(self):
+        import importlib
+        from django.apps import apps as django_apps
+        migration = importlib.import_module('main.migrations.0085_no_exemption_for_paid')
+
+        # State as it could exist before this rule: paid, yet exempt both ways.
+        self.pay()
+        Attendee.objects.filter(id=self.attendee.id).update(fee_waived=True)
+        paid_row = self.event.speakers.create(
+            name='Pay Er', email='PAYER@example.com', affiliation='PNU',
+            is_domestic=True, type='invited', is_payment_exempt=True)
+        # Someone else, unpaid: must be left exactly as they are.
+        other = User.objects.create_user(
+            username='free@example.com', email='free@example.com', password='pw12345!aA')
+        other_attendee = Attendee.objects.create(
+            user=other, event=self.event, first_name='Fr', last_name='Ee',
+            nationality=1, institute='PNU', category=self.category, fee_waived=True)
+        self.event.attendees.add(other_attendee)
+        unpaid_row = self.event.speakers.create(
+            name='Fr Ee', email='free@example.com', affiliation='PNU',
+            is_domestic=True, type='invited', is_payment_exempt=True)
+
+        migration.forwards(django_apps, None)
+
+        paid_row.refresh_from_db(); unpaid_row.refresh_from_db(); other_attendee.refresh_from_db()
+        self.assertFalse(paid_row.is_payment_exempt)
+        self.assertFalse(self.fresh_attendee().fee_waived)
+        self.assertEqual(self.fresh_attendee().payment_status, 'paid')
+        self.assertTrue(unpaid_row.is_payment_exempt)
+        self.assertTrue(other_attendee.fee_waived)
+
+
 class ReceiptLookupTests(TestCase):
     """The receipt link has to resolve for payments with no gateway order id."""
 
@@ -2304,6 +2435,14 @@ class NicePayReceiptTests(TestCase):
         payment.save()
         return payment
 
+    def test_a_nicepay_card_slip_points_at_nicepay_by_tid(self):
+        payment = self.make_payment('nicepay', 'MOID-SLIP')
+        response = self.client.get(f'/api/payment/{payment.toss_order_id}/card-receipt')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()['receipt_url'],
+            'https://npg.nicepay.co.kr/issue/IssueLoader.do?TID=TID123&type=0')
+
     def test_a_nicepay_receipt_is_readable_by_its_moid(self):
         payment = self.make_payment('nicepay', 'MOID-1')
         response = self.client.get(f'/api/me/payment/{payment.toss_order_id}')
@@ -2332,11 +2471,11 @@ class NicePayReceiptTests(TestCase):
 
     @patch('main.apis.requests.get')
     def test_a_nicepay_card_slip_never_asks_toss(self, mock_get):
-        """Both providers label a card payment '카드'; only Toss can answer."""
+        """Both providers label a card payment '카드'; NicePay's slip is its own URL."""
         payment = self.make_payment('nicepay', 'MOID-3')
         response = self.client.get(f'/api/payment/{payment.toss_order_id}/card-receipt')
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()['code'], 'not_supported')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('npg.nicepay.co.kr', response.json()['receipt_url'])
         mock_get.assert_not_called()
 
     @override_settings(TOSS_SECRET_KEY='sk_test', TOSS_API_URL='https://api.tosspayments.com/v1')

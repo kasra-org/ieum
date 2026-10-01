@@ -495,6 +495,8 @@
 	"invite_asChair": "좌장",
 	"invite_rolesHelp": "체크하면 초대 수락 시 프로필 정보로 연자/좌장 목록에도 자동 등록됩니다.",
 	"invite_roleRequired": "연자, 좌장 중 하나 이상 선택하세요.",
+	"speakers_alreadyPaid": "결제 완료",
+	"speakers_alreadyPaidHelp": "이미 등록비를 결제한 분이라 면제할 수 없습니다.",
 	"speakers_actions": "관리",
 	"speakers_noRecords": "기록 없음",
 	"speakers_updateSpeaker": "수정",

@@ -22,7 +22,7 @@ import secrets
 from django.conf import settings
 from django.utils import timezone
 
-from main.models import Attendee, EventInvitation, Speaker
+from main.models import Attendee, EventInvitation, Speaker, has_paid_for
 from main.tasks import send_mail
 from main.utils import render_email_template
 
@@ -133,7 +133,10 @@ def accept(invitation, user):
         attendee = attendee_from_profile(event, user, category)
         event.attendees.add(attendee)
 
-    if invitation.fee_waived and not attendee.fee_waived:
+    # A waiver is for a fee still owed. Someone who registered and paid before
+    # being invited keeps their paid registration as it is.
+    already_paid = (not newly_registered) and has_paid_for(event, user.email)
+    if invitation.fee_waived and not attendee.fee_waived and not already_paid:
         attendee.fee_waived = True
         attendee.save(update_fields=['fee_waived'])
 
@@ -161,11 +164,13 @@ def list_as_speaker(invitation, attendee):
     the invitation only when it waives the fee, never the other way.
     """
     event = invitation.event
+    # Paid already: listed, but not exempted - see has_paid_for.
+    exempt = invitation.fee_waived and not has_paid_for(event, attendee.email)
     existing = event.speakers.filter(email__iexact=attendee.email).first()
     if existing:
         existing.is_speaker = existing.is_speaker or invitation.as_speaker
         existing.is_chair = existing.is_chair or invitation.as_chair
-        if invitation.fee_waived:
+        if exempt:
             existing.is_payment_exempt = True
         existing.save(update_fields=['is_speaker', 'is_chair', 'is_payment_exempt'])
         return existing
@@ -177,7 +182,7 @@ def list_as_speaker(invitation, attendee):
         affiliation=attendee.institute,
         affiliation_ko=attendee.institute_ko,
         is_domestic=attendee.nationality == 1,
-        is_payment_exempt=invitation.fee_waived,
+        is_payment_exempt=exempt,
         is_speaker=invitation.as_speaker,
         is_chair=invitation.as_chair,
         type='invited',

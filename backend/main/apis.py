@@ -31,7 +31,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from main.models import (ApiKey, User, Event, EmailTemplate, EmailAttachment, EventInvitation, Attendee, RegistrationCategory, attendees_for_email,
+from main.models import (ApiKey, User, Event, EmailTemplate, EmailAttachment, EventInvitation, Attendee, RegistrationCategory, attendees_for_email, has_paid_for,
     CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings)
 from main.schema import *
 from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id, render_email_template
@@ -1611,7 +1611,9 @@ def add_speaker(request, event_id: int):
         affiliation_ko=data.get("affiliation_ko", ""),
         is_domestic=data["is_domestic"],
         type=data["type"],
-        is_payment_exempt=_as_bool(data.get("is_payment_exempt", True)),
+        # Never for someone who has already paid - whatever the form says.
+        is_payment_exempt=(_as_bool(data.get("is_payment_exempt", True))
+                           and not has_paid_for(event, data["email"])),
         is_speaker=is_speaker,
         is_chair=is_chair,
     )
@@ -1651,6 +1653,10 @@ def update_speaker(request, event_id: int, speaker_id: int):
                 status=400,
             )
         speaker.is_speaker, speaker.is_chair = is_speaker, is_chair
+    # Checked last, against the address as it now stands: a paid registration
+    # is never exempted, whatever the form sent.
+    if speaker.is_payment_exempt and has_paid_for(event, speaker.email):
+        speaker.is_payment_exempt = False
     speaker.save()
     return {"code": "success", "message": "Speaker updated."}
 
@@ -3255,11 +3261,18 @@ def get_card_receipt(request, order_id: str):
 
     # The columns are named after Toss but hold NicePay's Moid/TID too, so the
     # provider - not the field names - decides whose API can answer for it.
+    if payment.provider == 'nicepay' and payment.toss_payment_key:
+        # NicePay serves the slip itself, keyed by TID; no API call needed.
+        # The public lookup form (cs/transInfo/cardList.do) cannot be
+        # prefilled - it takes no parameters and asks for a captcha.
+        return {"code": "success",
+                "receipt_url": nicepay.card_receipt_url(payment.toss_payment_key)}
+
     if payment.provider != 'toss':
         return api.create_response(
             request,
             {"code": "not_supported",
-             "message": "A card slip is only available for card payments made through Toss."},
+             "message": "A card slip is not available for this payment."},
             status=400,
         )
 

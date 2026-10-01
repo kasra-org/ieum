@@ -408,6 +408,16 @@ def net_cancel(*, net_cancel_url, tid, auth_token, amount, edi_date, sign_data):
         return None
 
 
+# 매출전표: the slip for an approved card payment, by TID. type=0 is a card
+# slip (1 would be a cash receipt).
+CARD_RECEIPT_URL = 'https://npg.nicepay.co.kr/issue/IssueLoader.do'
+
+
+def card_receipt_url(tid):
+    from urllib.parse import urlencode
+    return f'{CARD_RECEIPT_URL}?{urlencode({"TID": tid, "type": "0"})}'
+
+
 def is_already_cancelled(result):
     """True when a cancel was rejected because the payment is already cancelled."""
     return ALREADY_CANCELLED_MARKER in (result.get('ResultMsg') or '')

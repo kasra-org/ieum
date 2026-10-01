@@ -1264,6 +1264,11 @@ class EventInvitation(models.Model):
 # Speakers are not charged. The exemption is read from the speaker list rather
 # than recorded as a payment: nothing was transacted, so there is nothing to
 # receipt and nothing to show in 결제 관리.
+#
+# Someone who has already paid is the exception: they sometimes become a
+# speaker or chair afterwards, and exempting them then would report a paid
+# registration as free. So a paid registration is never exempted - not from the
+# speaker list, not by a waiver - see has_paid_for.
 
 
 def attendees_for_email(event, email):
@@ -1281,3 +1286,12 @@ def attendees_for_email(event, email):
         .filter(models.Q(user__email__iexact=email) | models.Q(user_email__iexact=email))
         .select_related('event')
     )
+
+
+
+def has_paid_for(event, email):
+    """True when a registration on `event` under this address has been paid."""
+    attendees = attendees_for_email(event, email)
+    if not attendees:
+        return False
+    return PaymentHistory.objects.filter(attendee__in=attendees, status='completed').exists()
