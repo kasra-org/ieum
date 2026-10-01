@@ -301,7 +301,7 @@
                 </TableBodyCell>
             </TableBodyRow>
         {/each}
-        {#if data.abstracts.length === 0}
+        {#if filteredAbstracts.length === 0}
             <TableBodyRow>
                 <TableBodyCell colspan="5" class="text-center">{m.abstracts_noRecords()}</TableBodyCell>
             </TableBodyRow>
