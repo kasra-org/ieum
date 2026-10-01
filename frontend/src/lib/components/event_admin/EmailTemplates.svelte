@@ -2,6 +2,7 @@
     import { Heading, Label, Input, Button, Alert } from '$lib/components/ui';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import MarkdownEditor from '$lib/components/MarkdownEditor.svelte';
     import EmailAttachments from '$lib/components/EmailAttachments.svelte';
 
@@ -30,10 +31,10 @@
         return async ({ result, action, update }) => {
             if (result.type === "success") {
                 await update({reset: false});
-                success = result.data.message;
+                success = m.common_saved();
                 failure = "";
             } else {
-                failure = result.error.message;
+                failure = apiMessage(result.error);
                 success = "";
             }
         }

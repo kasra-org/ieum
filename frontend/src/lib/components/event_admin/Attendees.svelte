@@ -7,6 +7,7 @@
     import { invalidateAll } from '$app/navigation';
     import { Award, CircleCheck, Tag, UserMinus, UserPen } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
     import { getCategoryLabel, toTsv } from '$lib/utils.js';
@@ -282,7 +283,7 @@
                 await update({ reset: false });
                 message_custom_answer_changes = { type: 'success', message: m.attendees_successCustomAnswers() };
             } else {
-                message_custom_answer_changes = { type: 'error', message: result.error.message };
+                message_custom_answer_changes = { type: 'error', message: apiMessage(result.error) };
             }
             // scroll attendee_modal to bottom
             const modalContent = document.querySelector('#attendee_modal [role="document"]');

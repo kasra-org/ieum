@@ -6,6 +6,7 @@
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
@@ -163,7 +164,7 @@
                 speaker_modal = false;
                 update_speaker_error = '';
             } else {
-                update_speaker_error = result.error.message;
+                update_speaker_error = apiMessage(result.error);
             }
         }
     };
@@ -176,7 +177,7 @@
                 remove_speaker_modal = false;
                 remove_speaker_error = '';
             } else {
-                remove_speaker_error = result.error.message;
+                remove_speaker_error = apiMessage(result.error);
             }
         }
     };

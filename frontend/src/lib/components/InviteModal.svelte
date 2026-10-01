@@ -6,6 +6,7 @@
     import { Modal, Button, Label, Input, Textarea, Checkbox, Alert } from '$lib/components/ui';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import MarkdownEditor from '$lib/components/MarkdownEditor.svelte';
 
     // requireRole: on the speakers & chairs tab an invitation must say which
@@ -51,7 +52,7 @@
                 open = false;
                 successModal = true;
             } else {
-                error_message = result.error?.message || m.invite_sendError();
+                error_message = apiMessage(result.error, m.invite_sendError);
             }
         };
     };

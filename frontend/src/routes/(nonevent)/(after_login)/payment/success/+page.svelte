@@ -4,6 +4,7 @@
     import { Card, Button, Alert, Spinner } from '$lib/components/ui';
     import { CircleAlert, CircleCheck } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     let { data, form } = $props();
 
@@ -27,7 +28,7 @@
                 status = 'success';
             } else if (form.error) {
                 status = 'error';
-                errorMessage = form.error;
+                errorMessage = apiMessage(form, m.eventRegister_paymentError);
             }
         }
     });
@@ -42,7 +43,7 @@
                 status = 'success';
             } else {
                 status = 'error';
-                errorMessage = data.nicepayError || 'Payment not found';
+                errorMessage = apiMessage(data.nicepayError, m.api_payment_not_found);
             }
             return;
         }
@@ -64,7 +65,7 @@
         // Toss Payments flow: Validate required parameters
         if (!data.paymentKey || !data.orderId || !data.amount) {
             status = 'error';
-            errorMessage = 'Missing payment confirmation parameters';
+            errorMessage = m.payment_missingParams();
             return;
         }
 
@@ -72,7 +73,7 @@
         const storedData = sessionStorage.getItem('pendingPayment');
         if (!storedData) {
             status = 'error';
-            errorMessage = 'Payment data not found. Please try again.';
+            errorMessage = m.payment_dataNotFound();
             return;
         }
 
@@ -81,7 +82,7 @@
             paymentData = JSON.parse(storedData);
         } catch (e) {
             status = 'error';
-            errorMessage = 'Invalid payment data';
+            errorMessage = m.payment_invalidData();
             return;
         }
 
@@ -106,7 +107,7 @@
             <div class="text-center py-8">
                 <Spinner size="12" class="mx-auto mb-4" />
                 <h1 class="text-xl font-semibold text-gray-900 mb-2">{m.common_loading()}</h1>
-                <p class="text-gray-600">{m.payment_confirmingPayment?.() || 'Confirming your payment...'}</p>
+                <p class="text-gray-600">{m.payment_confirmingPayment()}</p>
             </div>
 
             <!-- Hidden form for server-side confirmation -->

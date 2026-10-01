@@ -2,6 +2,7 @@
     import { A, Card, Button, Heading, Indicator, Label, Input, Checkbox, Select, Alert, Modal } from '$lib/components/ui';
     import { onMount } from 'svelte';
     import Turnstile from '$lib/components/Turnstile.svelte';
+    import { apiMessage } from '$lib/apiMessages.js';
     import * as m from '$lib/paraglide/messages.js';
 
     import 'academicons';
@@ -106,7 +107,7 @@
                 </div>
                 {#if form?.error}
                 <Alert color="red" class="mb-4" dismissable>
-                    <p>{form.message}</p>
+                    <p>{apiMessage(form)}</p>
                     {#if form?.needsVerification}
                         <p class="text-sm mt-2">
                             {m.login_emailNotDelivered()} <button type="button" class="underline" onclick={() => resendVerification(form.email, form.verificationKey)}>{m.login_resendVerificationLink()}</button>
@@ -161,7 +162,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
         </svg>
         <h3 class="mb-5 text-lg font-normal text-gray-500">
-            {form?.message || m.login_verificationEmailSent()}
+            {m.login_verificationEmailSent()}
         </h3>
         <Button color="green" onclick={() => successModal = false}>{m.common_ok()}</Button>
     </div>

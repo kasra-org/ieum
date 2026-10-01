@@ -5,6 +5,7 @@
     import { enhance } from '$app/forms';
     import { invalidateAll } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     let { data } = $props();
 
@@ -42,7 +43,7 @@
                 new_user_id = null;
                 await invalidateAll();
             } else if (result.type === 'success') {
-                error = result.data?.error || 'Request failed';
+                error = apiMessage(result.data);
             }
         };
     };
@@ -152,5 +153,5 @@
     <Alert color="yellow">{m.admin_apiKeys_secretWarn()}</Alert>
     <code class="mt-3 block break-all rounded bg-gray-100 p-3 text-sm">{revealed_secret}</code>
     <Button class="mt-3" color="alternative"
-            onclick={() => navigator.clipboard?.writeText(revealed_secret)}>Copy</Button>
+            onclick={() => navigator.clipboard?.writeText(revealed_secret)}>{m.common_copy()}</Button>
 </Modal>

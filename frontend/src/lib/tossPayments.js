@@ -131,7 +131,7 @@ export async function confirmPayment(params) {
 
     if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.message || 'Payment confirmation failed');
+        throw Object.assign(new Error(error.message || 'Payment confirmation failed'), { code: error.code });
     }
 
     return response.json();

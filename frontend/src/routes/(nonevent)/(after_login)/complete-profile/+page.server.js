@@ -47,7 +47,7 @@ export const actions = {
         const response = await post('api/me', data, cookies);
 
         if (!response.ok || response.status !== 200) {
-            throw error(response.status, { message: 'Server error. If this persists, please contact the administrator.' });
+            throw error(response.status, { code: 'server_error' });
         }
 
         // Redirect to next after successful update

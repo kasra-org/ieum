@@ -16,6 +16,7 @@
     import { renderPayPalButtons } from '$lib/paypalPayments.js';
     import { requestNicePayPayment } from '$lib/nicepayPayments.js';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { formatDateRange, onlyLatinChars, generateOrderId, getCategoryLabel } from '$lib/utils.js';
     import 'academicons';
@@ -283,15 +284,14 @@
             );
 
             if (!response.ok || response.status !== 200) {
-                let msg = 'Registration failed';
+                let msg = m.eventRegister_registrationFailed();
                 try {
                     const contentType = response.headers.get('content-type');
                     if (contentType && contentType.includes('application/json')) {
                         const rtn = await response.json();
-                        msg = rtn.error?.message || msg;
+                        msg = apiMessage(rtn.error, msg);
                     } else {
-                        const text = await response.text();
-                        msg = text || msg;
+                        // Not JSON: nothing to show beyond the generic message.
                     }
                 } catch (parseErr) {}
                 handleRegistrationError(msg);
@@ -304,7 +304,7 @@
             currentStep = 3;
         } catch (err) {
             console.error('Registration error:', err);
-            handleRegistrationError(err.message || 'Registration failed');
+            handleRegistrationError(m.eventRegister_registrationFailed());
         }
     }
 
@@ -342,7 +342,7 @@
             });
         } catch (err) {
             console.error('Payment initiation failed:', err);
-            error_message = err.message || m.eventRegister_paymentError?.() || 'Payment failed';
+            error_message = apiMessage(err, m.eventRegister_paymentError);
             isSubmittingFinal = false;
             // Clear stored data on error
             sessionStorage.removeItem('pendingPayment');
@@ -367,7 +367,7 @@
             });
         } catch (err) {
             console.error('NicePay payment initiation failed:', err);
-            error_message = err.message || m.eventRegister_paymentError?.() || 'Payment failed';
+            error_message = apiMessage(err, m.eventRegister_paymentError);
             isSubmittingFinal = false;
         }
     }
@@ -390,15 +390,14 @@
             );
 
             if (!response.ok || response.status !== 200) {
-                let msg = 'Registration failed';
+                let msg = m.eventRegister_registrationFailed();
                 try {
                     const contentType = response.headers.get('content-type');
                     if (contentType && contentType.includes('application/json')) {
                         const rtn = await response.json();
-                        msg = rtn.error?.message || msg;
+                        msg = apiMessage(rtn.error, msg);
                     } else {
-                        const text = await response.text();
-                        msg = text || msg;
+                        // Not JSON: nothing to show beyond the generic message.
                     }
                 } catch (parseErr) {}
                 handleRegistrationError(msg);
@@ -410,7 +409,7 @@
             goto(`/event/${event.id}`);
         } catch (err) {
             console.error('Registration error:', err);
-            handleRegistrationError(err.message || 'Registration failed');
+            handleRegistrationError(m.eventRegister_registrationFailed());
         }
     }
 
@@ -472,12 +471,12 @@
     // Handle PayPal payment error
     function handlePayPalError(error) {
         console.error('PayPal payment error:', error);
-        error_message = error.message || m.eventRegister_paymentError?.() || 'Payment failed';
+        error_message = apiMessage(error, m.eventRegister_paymentError);
     }
 
     // Handle PayPal payment cancellation
     function handlePayPalCancel() {
-        error_message = m.eventRegister_paymentCancelled?.() || 'Payment was cancelled';
+        error_message = m.eventRegister_paymentCancelled();
     }
 </script>
 

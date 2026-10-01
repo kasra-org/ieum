@@ -14,7 +14,7 @@ export async function GET({ cookies, fetch }) {
         headers: { Cookie: cookieHeader, Accept: 'application/gzip' },
     });
     if (!upstream.ok) {
-        throw error(upstream.status, 'Backup could not be created.');
+        throw error(upstream.status, { code: 'backup_failed' });
     }
     return new Response(upstream.body, {
         headers: {

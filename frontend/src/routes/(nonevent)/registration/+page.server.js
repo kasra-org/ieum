@@ -116,10 +116,12 @@ export const actions = {
             if (response.status === 400) {
                 let rtn = {};
                 for (const error of response.data.errors) {
+                    // Codes, not allauth's English text: the page shows each
+                    // in the visitor's language (apiMessage).
                     if (error.code === 'username_taken') {
-                        rtn.email = 'This email address is already taken.';
+                        rtn.email = 'email_taken';
                     } else {
-                        rtn[`${error.param}`] = error.message;
+                        rtn[`${error.param}`] = error.code;
                     }
                 }
                 throw error(response.status, rtn);
@@ -127,8 +129,8 @@ export const actions = {
                 // email verification required
                 throw error(response.status, {redirect: true});
             }
-            throw error(response.status, { message: 'Failed due to server error. It this persists, please contact the admininistrator.' });
+            throw error(response.status, { code: 'server_error' });
         }
-        throw error(response.status, { message: 'Server error. It this persists, please contact the admininistrator.' }); // You can't arrive here!
+        throw error(response.status, { code: 'server_error' }); // You can't arrive here!
     }
 };

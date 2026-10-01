@@ -34,7 +34,7 @@ export const actions = {
         const turnstileToken = formdata.get(TURNSTILE_FIELD);
         formdata.delete(TURNSTILE_FIELD);
         if (!(await verifyTurnstile(turnstileToken))) {
-            return fail(400, { error: true, message: 'Please complete the verification and try again.' });
+            return fail(400, { error: true, code: 'turnstile_failed' });
         }
 
         const response = await post('_allauth/browser/v1/auth/login', formdata, cookies);
@@ -49,14 +49,14 @@ export const actions = {
                 if (verificationKey) {
                     return fail(response.status, {
                         error: true,
-                        message: 'Email not verified. Please check your mailbox.',
+                        code: 'email_not_verified',
                         email: email,
                         verificationKey: verificationKey,
                         needsVerification: true
                     });
                 }
             }
-            return fail(response.status, { error: true, message: 'Login Failed. Check your credentials.' });
+            return fail(response.status, { error: true, code: 'login_failed' });
         }
         cookies.set('sessionid', response.sessionid, {
             path: '/',
@@ -78,7 +78,7 @@ export const actions = {
         if (!response.ok || response.status !== 200) {
             return fail(response.status, {
                 error: true,
-                message: 'Failed to resend verification email.',
+                code: 'resend_failed',
                 email: email,
                 needsVerification: true
             });
@@ -86,7 +86,6 @@ export const actions = {
 
         return {
             success: true,
-            message: 'Verification email sent successfully. Please check your mailbox.',
             email: email
         };
 	},

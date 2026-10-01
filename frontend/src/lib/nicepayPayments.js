@@ -109,7 +109,7 @@ export async function requestNicePayPayment(options) {
 
     const result = await response.json().catch(() => ({}));
     if (!response.ok) {
-        throw new Error(result.message || 'Could not start the payment');
+        throw Object.assign(new Error(result.message || 'Could not start the payment'), { code: result.code || 'order_id_error' });
     }
 
     await loadSdk(result.jsSdkUrl);

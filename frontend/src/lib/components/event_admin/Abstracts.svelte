@@ -7,6 +7,7 @@
     import { error } from '@sveltejs/kit';
     import { browser } from '$app/environment';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { getDisplayInstitute, getDisplayName, getPresentationTypeLabel } from '$lib/utils.js';
     import UserSelectionModal from '$lib/components/UserSelectionModal.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
@@ -152,7 +153,7 @@
                 abstract_modal = false;
                 update_abstract_error = '';
             } else {
-                update_abstract_error = result.error.message;
+                update_abstract_error = apiMessage(result.error);
             }
         }
     };
@@ -165,7 +166,7 @@
                 abstract_delete_modal = false;
                 delete_abstract_error = '';
             } else {
-                delete_abstract_error = result.error.message;
+                delete_abstract_error = apiMessage(result.error);
             }
         }
     };

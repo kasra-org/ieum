@@ -269,7 +269,7 @@
                 {#if navigating && allEvents.length === 0}
                     <div class="text-center py-16">
                         <Spinner size="12" />
-                        <p class="text-gray-600 mt-4">Loading events...</p>
+                        <p class="text-gray-600 mt-4">{m.home_loadingEvents()}</p>
                     </div>
                 {:else if allEvents.length === 0}
                     <div class="text-center py-16">
@@ -398,11 +398,11 @@
                         {#if navigating}
                             <div class="text-center py-8">
                                 <Spinner size="8" />
-                                <p class="text-gray-600 mt-2 text-sm">Loading more events...</p>
+                                <p class="text-gray-600 mt-2 text-sm">{m.home_loadingMoreEvents()}</p>
                             </div>
                         {:else if hasMore}
                             <div class="text-center py-8">
-                                <p class="text-gray-500 text-sm">Scroll down to load more events</p>
+                                <p class="text-gray-500 text-sm">{m.home_scrollForMore()}</p>
                             </div>
                         {/if}
                     </div>

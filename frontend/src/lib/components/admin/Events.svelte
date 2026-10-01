@@ -4,6 +4,7 @@
     import { Archive, CircleCheck, Settings } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { getDisplayVenue, getDisplayVenueAddress } from '$lib/utils.js';
 
     import EventAdminForm from '$lib/components/event_admin/EventAdminForm.svelte';
@@ -33,7 +34,7 @@
                 archive_modal = false;
                 archive_error = '';
             } else {
-                archive_error = result.error.message;
+                archive_error = apiMessage(result.error);
             }
         }
     };
@@ -100,7 +101,7 @@
                 };
                 selectedOrganizerIds = [];
             } else {
-                create_error = result.error.message;
+                create_error = apiMessage(result.error);
             }
         }
     };

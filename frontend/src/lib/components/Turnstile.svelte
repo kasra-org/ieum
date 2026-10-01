@@ -4,6 +4,7 @@
     // to the form would otherwise show no widget. The widget puts its token in
     // a hidden `cf-turnstile-response` input inside the enclosing form.
     import { onMount } from 'svelte';
+    import { languageTag } from '$lib/paraglide/runtime.js';
 
     let { sitekey } = $props();
 
@@ -31,7 +32,12 @@
         let destroyed = false;
         loadScript()
             .then(() => {
-                if (!destroyed) widgetId = window.turnstile.render(container, { sitekey });
+                if (!destroyed) widgetId = window.turnstile.render(container, {
+                    sitekey,
+                    // The site's language, not the browser's: someone reading the
+                    // page in Korean gets the widget in Korean too.
+                    language: languageTag(),
+                });
             })
             .catch((error) => console.error(error));
         return () => {

@@ -12,5 +12,5 @@ export async function load({ parent, params, cookies }) {
     }
 
     // If no receipt URL, show error
-    throw error(404, response.data?.message || 'Receipt not available');
+    throw error(404, { code: response.data?.code || 'no_receipt' });
 }

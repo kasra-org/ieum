@@ -49,7 +49,7 @@ export const actions = {
         const response = await post('api/me', data, cookies);
 
         if (!response.ok || response.status !== 200) {
-            throw error(response.status, { message: 'Server error. If this persists, please contact the administrator.' });
+            throw error(response.status, { code: 'server_error' });
         }
     },
     search_institutions: async ({ cookies, request }) => {
@@ -83,7 +83,7 @@ export const actions = {
         const response = await post('_allauth/browser/v1/auth/password/request', { email }, cookies);
 
         if (!response.ok || response.status !== 200) {
-            throw error(response.status, { message: 'Server error. If this persists, please contact the administrator.' });
+            throw error(response.status, { code: 'server_error' });
         }
 
         return { success: true };
@@ -96,8 +96,7 @@ export const actions = {
 
         if (!response.ok || response.status !== 200) {
             // Return the error message from the API
-            const errorMessage = response.data?.error?.message || 'Server error. If this persists, please contact the administrator.';
-            return { success: false, error: errorMessage };
+            return { success: false, code: response.data?.error?.code || 'server_error' };
         }
 
         // Clear session cookie after account deletion

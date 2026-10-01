@@ -6,6 +6,7 @@
     import { CircleX, Paperclip } from '@lucide/svelte';
     import { deserialize } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     let { value = $bindable([]), name = '', label = '' } = $props();
 
@@ -44,7 +45,7 @@
         if (result.type === 'success' && result.data?.url) {
             return { url: result.data.url, filename: result.data.filename || file.name, size: file.size };
         }
-        throw new Error(result.data?.message || m.emailAttachments_uploadFailed());
+        throw new Error(apiMessage(result.data, m.emailAttachments_uploadFailed));
     }
 
     async function handleFiles(event) {

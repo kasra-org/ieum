@@ -81,7 +81,7 @@ export async function createPayPalOrder(options) {
     const result = deserialize(await response.text());
 
     if (result.type !== 'success' || !result.data?.success) {
-        throw new Error(result.data?.error || 'Failed to create PayPal order');
+        throw Object.assign(new Error(result.data?.error || 'Failed to create PayPal order'), { code: result.data?.code || 'paypal_error' });
     }
 
     return result.data.orderId;
@@ -106,7 +106,7 @@ export async function capturePayPalOrder(options) {
     const result = deserialize(await response.text());
 
     if (result.type !== 'success' || !result.data?.success) {
-        throw new Error(result.data?.error || 'Failed to capture PayPal payment');
+        throw Object.assign(new Error(result.data?.error || 'Failed to capture PayPal payment'), { code: result.data?.code || 'paypal_error' });
     }
 
     return result.data.data;

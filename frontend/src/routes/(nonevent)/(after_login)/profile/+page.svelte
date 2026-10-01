@@ -9,6 +9,7 @@
     import { CircleUser } from '@lucide/svelte';
     import { goto } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
 
@@ -51,9 +52,9 @@
                 window.location.href = '/';
                 return;
             }
-            deleteAccountError = data.error || m.profile_deleteAccountIncorrectPassword();
+            deleteAccountError = apiMessage(data, m.profile_deleteAccountIncorrectPassword);
         } catch (err) {
-            deleteAccountError = err.message || m.profile_deleteAccountIncorrectPassword();
+            deleteAccountError = m.profile_deleteAccountIncorrectPassword();
         }
         deleteAccountLoading = false;
     }
@@ -72,12 +73,12 @@
             });
             if (!response.ok || response.status !== 200) {
                 const rtn = await response.json();
-                throw new Error(rtn.error?.message || 'Failed to send reset email');
+                throw new Error(apiMessage(rtn.error));
             }
             resetPasswordSuccess = true;
             showResetPasswordModal = false;
         } catch (err) {
-            resetPasswordError = err.message || 'An error occurred';
+            resetPasswordError = err.message || m.common_error();
         } finally {
             resetPasswordLoading = false;
         }
@@ -85,14 +86,14 @@
 
     const schema = yup.object({
         email: yup.string().email().required(),
-        first_name: yup.string().required('First name is required.'),
-        last_name: yup.string().required('Last name is required.'),
+        first_name: yup.string().required(m.validation_firstNameRequired()),
+        last_name: yup.string().required(m.validation_lastNameRequired()),
         middle_initial: yup.string().max(1),
         korean_name: yup.string(),
         nationality: yup.string().required(),
         job_title: yup.string().required(m.validation_jobTitleRequired()),
         department: yup.string(),
-        institute: yup.number().required('Institute is required.'),
+        institute: yup.number().required(m.validation_instituteRequired()),
         orcid: yup.string(),
         google: yup.string(),
         disability: yup.string(),

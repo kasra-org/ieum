@@ -456,7 +456,7 @@ export const actions = {
         if (response.ok && response.status === 200) {
             return { success: true, ...response.data };
         } else {
-            return { success: false, error: response.data?.message || 'Failed to reorder organizers' };
+            return { success: false, code: response.data?.code, error: response.data?.message || 'Failed to reorder organizers' };
         }
     },
     update_onsite_attendee: async ({ cookies, params, request }) => {
@@ -515,7 +515,7 @@ export const actions = {
         let formdata = await request.formData();
         const attendee_id = parseInt(formdata.get('attendee_id'));
         if (isNaN(attendee_id)) {
-            error(400, { message: 'Attendee is required' });
+            error(400, { code: 'attendee_required' });
         }
         const data = {
             attendee_id,

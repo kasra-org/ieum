@@ -9,6 +9,7 @@
     import { CircleUser } from '@lucide/svelte';
     import { goto } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { onlyLatinChars } from '$lib/utils.js';
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
@@ -94,7 +95,7 @@
                     return;
                 }
                 const rtn = await response.json();
-                serverError = rtn.error?.message || 'An error occurred. Please try again.';
+                serverError = apiMessage(rtn.error);
                 throw rtn.error;
             }
             // If we get here, the server should have redirected us

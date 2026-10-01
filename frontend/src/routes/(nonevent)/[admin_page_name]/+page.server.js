@@ -115,14 +115,14 @@ export const actions = {
         // it is shown once and never retrievable again.
         return response.ok
             ? { success: true, secret: response.data.message }
-            : { success: false, error: response.data?.message || 'Failed to create key' };
+            : { success: false, code: response.data?.code, error: response.data?.message || 'Failed to create key' };
     },
     'rotate_api_key': async ({ cookies, request }) => {
         const formdata = await request.formData();
         const response = await post(`api/admin/apikey/${formdata.get('key_id')}/rotate`, {}, cookies);
         return response.ok
             ? { success: true, secret: response.data.message }
-            : { success: false, error: response.data?.message || 'Failed to rotate key' };
+            : { success: false, code: response.data?.code, error: response.data?.message || 'Failed to rotate key' };
     },
     'revoke_api_key': async ({ cookies, request }) => {
         const formdata = await request.formData();
@@ -195,7 +195,7 @@ export const actions = {
         if (response.ok && response.status === 200) {
             return { success: true, institution: response.data };
         } else {
-            return { success: false, error: response.data?.error || 'Failed to create institution' };
+            return { success: false, code: response.data?.code, error: response.data?.error || 'Failed to create institution' };
         }
     },
     'update_institution': async ({ cookies, request }) => {
@@ -209,7 +209,7 @@ export const actions = {
         if (response.ok && response.status === 200) {
             return { success: true, ...response.data };
         } else {
-            return { success: false, error: response.data?.message || 'Failed to update institution' };
+            return { success: false, code: response.data?.code, error: response.data?.message || 'Failed to update institution' };
         }
     },
     'delete_institution': async ({ cookies, request }) => {
@@ -219,7 +219,7 @@ export const actions = {
         if (response.ok && response.status === 200) {
             return { success: true, ...response.data };
         } else {
-            return { success: false, error: response.data?.message || 'Failed to delete institution' };
+            return { success: false, code: response.data?.code, error: response.data?.message || 'Failed to delete institution' };
         }
     },
     'update_user': async ({ cookies, request }) => {

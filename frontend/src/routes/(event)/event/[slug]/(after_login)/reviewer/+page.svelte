@@ -1,4 +1,6 @@
 <script>
+    import { apiMessage } from '$lib/apiMessages.js';
+    import * as m from '$lib/paraglide/messages.js';
     import { invalidateAll } from '$app/navigation';
     import { browser } from '$app/environment';
     import { Heading, Button, Input, Textarea, Alert, Card, Checkbox } from '$lib/components/ui';
@@ -38,35 +40,35 @@
             invalidateAll();
         } else {
             const data = await response.json();
-            error_message = data.message;
+            error_message = apiMessage(data.error ?? data);
         }
     };
 </script>
 
 <svelte:head>
-    <title>Abstract Voting - {data.event.name} | {data.site_settings?.site_name ?? 'IEUM'}</title>
+    <title>{m.reviewer_title()} - {data.event.name} | {data.site_settings?.site_name ?? 'IEUM'}</title>
 </svelte:head>
 
-<Heading tag="h1" class="text-2xl font-bold mb-3">Abstract Voting</Heading>
-<p class="mb-6">Please review the abstract below and vote for the ones you think are the best.</p>
+<Heading tag="h1" class="text-2xl font-bold mb-3">{m.reviewer_title()}</Heading>
+<p class="mb-6">{m.reviewer_description()}</p>
 
 {#if data.vote.voted_abstracts.length > 0}
-    <p class="mt-12 mb-6 text-center">You have already voted for this event.</p>
+    <p class="mt-12 mb-6 text-center">{m.reviewer_alreadyVoted()}</p>
     <div class="flex justify-center">
-        <Button href={`/event/${data.event.id}`} class="mt-6" size="lg" color="primary">Go Back</Button>
+        <Button href={`/event/${data.event.id}`} class="mt-6" size="lg" color="primary">{m.common_goBack()}</Button>
     </div>
 {:else}
     {#if data.abstracts.length === 0}
-    <Alert type="info" class="mb-6">No abstracts to review.</Alert>
+    <Alert type="info" class="mb-6">{m.reviewer_noAbstracts()}</Alert>
     {:else}
-    <Alert type="info" class="mb-6">You can vote up to {max_votes} abstracts (remaining votes: {max_votes - voted_abstracts.length})</Alert>
+    <Alert type="info" class="mb-6">{m.reviewer_voteLimit({ max: max_votes, remaining: max_votes - voted_abstracts.length })}</Alert>
     {/if}
 
     {#each data.abstracts as abstract}
     <Card size="xl" class="text-black mt-6">
         <div class="text-center">
             <h3 class="text-lg font-bold">{abstract.title}</h3>
-            <p class="text-sm text-gray-600 mb-6">Presented by {abstract.attendee.name}</p>
+            <p class="text-sm text-gray-600 mb-6">{m.reviewer_presentedBy({ name: abstract.attendee?.name ?? '' })}</p>
         </div>
         <hr class="mb-5 border-gray-200" />
         {@html sanitizeHtml(abstract?.body)}
@@ -80,7 +82,7 @@
                 } else {
                     voted_abstracts = voted_abstracts.filter((id) => id !== abstract.id);
                 }
-            }} value={voted_abstracts.includes(abstract.id)}>Vote to this abstract</Checkbox>
+            }} value={voted_abstracts.includes(abstract.id)}>{m.reviewer_voteCheckbox()}</Checkbox>
         </div>
     </Card>
     {/each}
@@ -90,7 +92,7 @@
     {/if}
 
     <div class="flex justify-center gap-5">
-        <Button size="lg" class="mt-6" onclick={submitVotes} disabled={voted_abstracts.length === 0}>Submit Votes</Button>
-        <Button href={`/event/${data.event.id}`} class="mt-6" size="lg" color="alternative">Go Back</Button>
+        <Button size="lg" class="mt-6" onclick={submitVotes} disabled={voted_abstracts.length === 0}>{m.reviewer_submit()}</Button>
+        <Button href={`/event/${data.event.id}`} class="mt-6" size="lg" color="alternative">{m.common_goBack()}</Button>
     </div>
 {/if}

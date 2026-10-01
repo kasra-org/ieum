@@ -158,7 +158,7 @@
     {:else}
         <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
             <Alert color="red">
-                Unable to load registration details. Please try again later.
+                {m.registrationDetails_loadError()}
             </Alert>
         </div>
     {/if}

@@ -2,6 +2,7 @@
     import { Button, Alert } from '$lib/components/ui';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     let { data } = $props();
 
@@ -37,7 +38,7 @@
                 payment_settings_error = '';
                 setTimeout(() => { payment_settings_success = false; }, 3000);
             } else {
-                payment_settings_error = result.error?.message || 'An error occurred';
+                payment_settings_error = apiMessage(result.error);
                 payment_settings_success = false;
             }
         }

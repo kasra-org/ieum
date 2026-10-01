@@ -4,6 +4,7 @@
     import { enhance } from '$app/forms';
     import { CircleX, Pencil, Plus } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { getCategoryLabel } from '$lib/utils.js';
 
@@ -273,7 +274,7 @@
                 create_modal = false;
                 create_error = '';
             } else {
-                create_error = result.error?.message || m.transactions_createError();
+                create_error = apiMessage(result.error, m.transactions_createError);
             }
         };
     };
@@ -301,7 +302,7 @@
                 note_error = '';
                 setTimeout(() => { note_success = false; }, 2000);
             } else {
-                note_error = result.error?.message || m.transactions_noteError();
+                note_error = apiMessage(result.error, m.transactions_noteError);
             }
         };
     };
@@ -339,7 +340,7 @@
                 cancel_modal = false;
                 cancel_error = '';
             } else {
-                cancel_error = result.error?.message || m.transactions_cancelError();
+                cancel_error = apiMessage(result.error, m.transactions_cancelError);
             }
         };
     };

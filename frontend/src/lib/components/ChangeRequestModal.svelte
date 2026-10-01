@@ -1,6 +1,7 @@
 <script>
     import { Button, Alert, Modal, Textarea, Spinner } from '$lib/components/ui';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { enhance } from '$app/forms';
 
     let { open = $bindable(false), actionUrl = '?/changeRequest', eventId = null } = $props();
@@ -20,7 +21,7 @@
                 submitSuccess = true;
                 changeRequestMessage = '';
             } else {
-                submitError = result.data?.error || m.common_error();
+                submitError = apiMessage(result.data, m.common_error);
             }
         };
     }

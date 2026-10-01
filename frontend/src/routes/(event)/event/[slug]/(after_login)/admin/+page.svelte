@@ -118,11 +118,11 @@
         <div class="relative z-10">
             <h1 class="text-3xl font-bold text-white">{data.event.name}</h1>
             <p class="text-slate-200 mt-2">
-                <a href="/" class="hover:underline">Events</a>
+                <a href="/" class="hover:underline">{m.eventAdmin_breadcrumbEvents()}</a>
                 <span class="mx-2">/</span>
                 <a href="/event/{data.event.id}" class="hover:underline">{data.event.name}</a>
                 <span class="mx-2">/</span>
-                <span class="text-white font-medium">Admin Panel</span>
+                <span class="text-white font-medium">{m.eventAdmin_panelTitle()}</span>
             </p>
         </div>
     </div>

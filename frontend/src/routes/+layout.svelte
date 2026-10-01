@@ -243,7 +243,7 @@
 				</a>
 				<p class="mt-4 text-xs leading-relaxed text-gray-400">
 					© {new Date().getFullYear()} {m.footer_copyright()}<br />
-					Powered by
+					{m.footer_poweredBy()}
 					<a
 						href="https://github.com/pjb7687/ieum"
 						target="_blank"

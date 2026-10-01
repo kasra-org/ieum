@@ -12,6 +12,7 @@
     import * as m from '$lib/paraglide/messages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { onlyLatinChars } from '$lib/utils.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     // Step management
     let currentStep = $state(1);
@@ -131,10 +132,12 @@
         onError: (errors) => {
             if (errors.redirect) {
                 goto(`/verify-email?next=${page_data.next}`);
-            } else {
-                window.scrollTo(0, 0);
+                return {};
             }
-            return errors;
+            window.scrollTo(0, 0);
+            // The action sends an error code per field; show it translated.
+            return Object.fromEntries(
+                Object.entries(errors).map(([field, code]) => [field, apiMessage({ code })]));
         }
     });
 </script>

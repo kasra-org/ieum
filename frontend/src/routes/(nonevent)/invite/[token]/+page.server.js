@@ -21,7 +21,7 @@ export async function load({ parent, params, cookies, url }) {
 
     const info = await get(`api/invitation/${encodeURIComponent(params.token)}`, cookies);
     if (!info.ok || info.status !== 200) {
-        throw error(404, 'This invitation link is not valid.');
+        throw error(404, { code: 'invalid_invitation_link' });
     }
     data.invitation = { ...info.data, token: params.token };
 

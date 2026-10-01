@@ -26,9 +26,9 @@ export const actions = {
         const response = await post(`api/event/${params.slug}/abstract`, formdata, cookies);
         if (!response.ok || response.status !== 200) {
             if (response.status === 400) {
-                throw error(response.status, { error: true, message: response.data.message });
+                throw error(response.status, { error: true, code: response.data?.code, message: response.data?.message });
             }
-            throw error(response.status, { error: true, message: 'Submission failed. If this persists, please contact the admin.' });
+            throw error(response.status, { error: true, code: 'submission_failed' });
         }
         return;
     },

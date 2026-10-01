@@ -17,12 +17,12 @@ export const actions = {
 
         if (!response.ok || response.status !== 200) {
             if (response.status === 400) {
-                throw error(response.status, { message: response.data.errors[0].message });
+                throw error(response.status, { code: response.data.errors[0].code, message: response.data.errors[0].message });
             } else if (response.status === 401) {
                 // Success, but we got 401 because the user is not logged in
                 return;
             }
-            throw error(response.status, { message: 'Server error. It this persists, please contact the admininistrator.' });
+            throw error(response.status, { code: 'server_error' });
         }
     }
 };

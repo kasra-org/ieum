@@ -5,6 +5,7 @@
     import { enhance, deserialize } from '$app/forms';
     import { invalidateAll } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import SearchableUserList from '$lib/components/SearchableUserList.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
@@ -144,7 +145,7 @@
                 organizer_modal = false;
                 update_organizer_error = '';
             } else {
-                update_organizer_error = result.error.message;
+                update_organizer_error = apiMessage(result.error);
             }
         }
     };

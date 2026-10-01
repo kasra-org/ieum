@@ -29,9 +29,9 @@ export const actions = {
 
         if (!response.ok || response.status !== 200) {
             if (response.status === 400) {
-                throw error(response.status, { error: true, message: response.data.message });
+                throw error(response.status, { error: true, code: response.data?.code, message: response.data?.message });
             }
-            throw error(response.status, { error: true, message: 'Failed due to server error. It this persists, please contact the admininistrator.' });
+            throw error(response.status, { error: true, code: 'server_error' });
         }
         let rtn = await response.data;
         // Carry the amount for display only - the stored registration is what

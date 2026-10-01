@@ -21,7 +21,7 @@ export const actions = {
         const response = await post('_allauth/browser/v1/auth/password/request', formdata, cookies);
 
         if (!response.ok || response.status !== 200) {
-            throw error(response.status, { message: 'Server error. It this persists, please contact the admininistrator.' });
+            throw error(response.status, { code: 'server_error' });
         }
     }
 };

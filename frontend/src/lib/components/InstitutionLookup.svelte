@@ -3,6 +3,7 @@
   import { Input, Label, Alert, Modal, Button, ButtonGroup } from '$lib/components/ui';
   import { Search } from '@lucide/svelte';
   import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
   import { languageTag } from '$lib/paraglide/runtime.js';
   import { enhance, deserialize } from '$app/forms';
 
@@ -159,7 +160,7 @@
         // Close modal after dispatching events (effect will reset modal state)
         modal_open = false;
       } else {
-        create_error = result.data?.error || 'Failed to create institution';
+        create_error = apiMessage(result.data ?? result.error);
       }
     };
   };

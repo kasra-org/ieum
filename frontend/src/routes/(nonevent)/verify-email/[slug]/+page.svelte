@@ -5,6 +5,7 @@
     import { CircleCheck, Mail } from '@lucide/svelte';
     import { goto } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     let verifying = $state(false);
     let success = $state(false);
@@ -28,7 +29,7 @@
         if (!response.ok || response.status !== 200) {
             verifying = false;
             const rtn = await response.json();
-            errorMessage = rtn.error?.message || 'An error occurred during verification.';
+            errorMessage = apiMessage(rtn.error);
         } else {
             success = true;
             // Show success message briefly, then redirect to login

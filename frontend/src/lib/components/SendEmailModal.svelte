@@ -3,6 +3,7 @@
     import { CircleX } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { getDisplayName } from '$lib/utils.js';
     import MarkdownEditor from '$lib/components/MarkdownEditor.svelte';
     import EmailAttachments from '$lib/components/EmailAttachments.svelte';
@@ -172,7 +173,7 @@
             } else {
                 // The API says why (a template that will not render, no valid
                 // recipients); a generic line would hide that.
-                message_error = result.error?.message || m.attendees_sendEmailError();
+                message_error = apiMessage(result.error, m.attendees_sendEmailError);
             }
         };
     };

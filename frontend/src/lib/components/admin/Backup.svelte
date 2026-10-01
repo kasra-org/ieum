@@ -4,6 +4,7 @@
     import { page } from '$app/stores';
     import { invalidateAll } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     // Everything here is under /[admin_page_name]; build the proxy URLs from the
     // segment this admin page was reached on.
@@ -32,12 +33,12 @@
             const res = await fetch(`${base}/restore`, { method: 'POST', body: form });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
-                result = { ok: true, message: data.message || m.backup_restoreSuccess() };
+                result = { ok: true, message: m.backup_restoreSuccess() };
                 // The restore replaced the session table; reload so the app
                 // reflects the restored state (and a fresh login if needed).
                 await invalidateAll();
             } else {
-                result = { ok: false, message: data.message || m.backup_restoreFailed() };
+                result = { ok: false, message: apiMessage(data, m.backup_restoreFailed) };
             }
         } catch (err) {
             result = { ok: false, message: m.backup_restoreFailed() };

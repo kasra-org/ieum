@@ -22,11 +22,11 @@ export const actions = {
             cookies.delete('post_verify_next', { path: '/' });
             throw redirect(303, next !== '/' ? `/login?next=${encodeURIComponent(next)}` : '/login');
         } else if (response.status === 400) {
-            throw error(response.status, 'Oops! It seems to be an invalid or expired verification link.');
+            throw error(response.status, { code: 'invalid_verification_link' });
         } else if (response.status === 409) {
-            throw error(response.status, 'Oops! This email address was already verified.');
+            throw error(response.status, { code: 'already_verified' });
         } else {
-            throw error(response.status, 'Server error. If this persists, please contact the administrator.');
+            throw error(response.status, { code: 'server_error' });
         }
     }
 };

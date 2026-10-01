@@ -15,7 +15,7 @@ export async function POST({ request, cookies }) {
 
     if (!response.ok) {
         return json(
-            { message: response.data?.message || 'Could not start the payment' },
+            { code: response.data?.code || 'order_id_error', message: response.data?.message || 'Could not start the payment' },
             { status: response.status || 500 },
         );
     }

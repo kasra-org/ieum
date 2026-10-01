@@ -2,6 +2,7 @@
     import { Button, Alert } from '$lib/components/ui';
     import { CircleCheck, CircleX } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
 
     let { data } = $props();
@@ -56,7 +57,7 @@
                 {:else if data.outcome.code === 'event_full'}
                     <p class="text-gray-700 mb-4">{m.invitePage_eventFull()}</p>
                 {:else}
-                    <p class="text-gray-700 mb-4">{data.outcome.message || m.invitePage_genericError()}</p>
+                    <p class="text-gray-700 mb-4">{apiMessage(data.outcome, m.invitePage_genericError)}</p>
                 {/if}
             </div>
         </div>

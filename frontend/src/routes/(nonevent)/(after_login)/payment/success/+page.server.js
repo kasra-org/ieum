@@ -18,7 +18,7 @@ export async function load({ url, cookies }) {
         return {
             provider,
             orderId,
-            nicepayError: response.data?.message || 'Payment not found',
+            nicepayError: { code: response.data?.code || 'payment_not_found' },
         };
     }
 
@@ -49,6 +49,7 @@ export const actions = {
         if (!response.ok) {
             return {
                 success: false,
+                code: response.data?.code,
                 error: response.data?.message || 'Payment confirmation failed',
             };
         }

@@ -738,7 +738,7 @@
         <Alert type="error" color="red" class="mb-4">{cert_message.message}</Alert>
     {/if}
     <iframe id="cert" class="w-full h-[500px]" src={selected_cert} title="Certificate">
-        Your browser does not support iframes.
+        {m.common_iframeUnsupported()}
     </iframe>
     <div class="flex justify-center mt-6 gap-2">
         <Button color="primary" onclick={() => {

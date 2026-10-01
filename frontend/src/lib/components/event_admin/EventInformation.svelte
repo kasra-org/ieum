@@ -2,6 +2,7 @@
     import { Alert, Button, Heading } from '$lib/components/ui';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     import EventAdminForm from '$lib/components/event_admin/EventAdminForm.svelte';
 
@@ -20,10 +21,10 @@
         return async ({ result, action, update }) => {
             console.log(result);
             if (result.type === "success") {
-                success = result.data.message;
+                success = m.common_saved();
                 failure = "";
             } else {
-                failure = result.error.message;
+                failure = apiMessage(result.error);
                 success = "";
             }
         }

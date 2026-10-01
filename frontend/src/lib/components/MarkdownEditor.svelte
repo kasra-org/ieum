@@ -19,6 +19,7 @@
              Strikethrough, Underline as UnderlineIcon } from '@lucide/svelte';
     import { deserialize } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     let { value = $bindable(), name = '', id = '', label = '', placeholder = '', rows = 10, required = false } = $props();
 
@@ -459,7 +460,7 @@
 
             // Handle error cases
             if (result.type === 'error' || result.type === 'failure') {
-                throw new Error(result.data?.message || m.markdownEditor_uploadFailed());
+                throw new Error(apiMessage(result.data, m.markdownEditor_uploadFailed));
             }
 
             throw new Error(m.markdownEditor_uploadFailed());

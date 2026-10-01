@@ -4,6 +4,7 @@
     import { Settings, Trash2 } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     let { data } = $props();
 
@@ -41,7 +42,7 @@
                 institution_error = '';
                 selected_institution = null;
             } else {
-                institution_error = result.data?.error || result.error?.message || 'An error occurred';
+                institution_error = apiMessage(result.data?.code ? result.data : result.error);
             }
         }
     };

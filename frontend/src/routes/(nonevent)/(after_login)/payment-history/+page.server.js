@@ -28,7 +28,7 @@ export const actions = {
         const response = await post(`api/event/${eventId}/change-request`, { message }, cookies);
 
         if (!response.ok) {
-            return { success: false, error: response.data?.message || 'An error occurred' };
+            return { success: false, code: response.data?.code, error: response.data?.message || 'An error occurred' };
         }
 
         return { success: true };

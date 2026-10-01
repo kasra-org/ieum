@@ -2,6 +2,7 @@
     import { Button, Alert, Helper, Textarea } from '$lib/components/ui';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
 
     let { data } = $props();
 
@@ -18,7 +19,7 @@
                 save_error = '';
                 setTimeout(() => { save_success = false; }, 3000);
             } else {
-                save_error = result.error?.message || 'An error occurred';
+                save_error = apiMessage(result.error);
                 save_success = false;
             }
         }

@@ -97,9 +97,9 @@ export const actions = {
 
         if (!response.ok || response.status !== 200) {
             if (response.status === 400) {
-                throw error(response.status, { error: true, message: response.data.message });
+                throw error(response.status, { error: true, code: response.data?.code, message: response.data?.message });
             }
-            throw error(response.status, { error: true, message: 'Failed due to server error. It this persists, please contact the admininistrator.' });
+            throw error(response.status, { error: true, code: 'server_error' });
         }
         return;
     },
@@ -114,7 +114,7 @@ export const actions = {
         }, cookies);
 
         if (!response.ok) {
-            return { success: false, error: response.data?.message || 'Failed to create PayPal order' };
+            return { success: false, code: response.data?.code, error: response.data?.message || 'Failed to create PayPal order' };
         }
 
         return { success: true, orderId: response.data.orderId };
@@ -130,7 +130,7 @@ export const actions = {
         }, cookies);
 
         if (!response.ok) {
-            return { success: false, error: response.data?.message || 'Failed to capture PayPal payment' };
+            return { success: false, code: response.data?.code, error: response.data?.message || 'Failed to capture PayPal payment' };
         }
 
         return { success: true, data: response.data };

@@ -4,6 +4,7 @@
     import { KeyRound, UserPen } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
@@ -79,7 +80,7 @@
                 pw_done = true;
                 pw_error = '';
             } else {
-                pw_error = result.error?.message || 'An error occurred';
+                pw_error = apiMessage(result.error);
             }
         }
     };
@@ -91,7 +92,7 @@
                 guest_error = '';
                 await update({ reset: false });
             } else {
-                guest_error = result.error?.message || 'An error occurred';
+                guest_error = apiMessage(result.error);
             }
         }
     };
@@ -110,7 +111,7 @@
                 user_edit_error = '';
                 selected_user = null;
             } else {
-                user_edit_error = result.error?.message || 'An error occurred';
+                user_edit_error = apiMessage(result.error);
             }
         }
     };

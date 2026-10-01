@@ -4,6 +4,7 @@
     import { ChevronDown, UserMinus, UserPen } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { getDisplayInstitute, getDisplayName, getCategoryLabel } from '$lib/utils.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
@@ -155,7 +156,7 @@
                 await update({ reset: false });
                 edit_modal = false;
             } else {
-                edit_message = { type: 'error', message: result.error?.message || 'An error occurred' };
+                edit_message = { type: 'error', message: apiMessage(result.error) };
             }
         };
     };
@@ -175,7 +176,7 @@
                 deregister_modal = false;
                 deregister_error = '';
             } else {
-                deregister_error = result.error?.message || 'An error occurred';
+                deregister_error = apiMessage(result.error);
             }
         };
     };
