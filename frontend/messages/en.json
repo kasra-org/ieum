@@ -542,7 +542,7 @@
 	"invitePage_feeDue": "The registration fee is still due; you can pay it from the event page.",
 	"invitePage_goToEvent": "Go to the event",
 	"invitePage_notApplied": "This invitation could not be applied",
-	"invitePage_wrongAccount": "This invitation was sent to {email}. You are signed in with a different account.",
+	"invitePage_wrongAccount": "This invitation was sent to {email}, but you are signed in as {current}. If this is your account, add {email} under Email addresses on your profile and verify it, then open the invitation link again.",
 	"invitePage_switchAccount": "Sign out and use that account",
 	"invitePage_eventFull": "Sorry, the event is full.",
 	"invitePage_genericError": "Something went wrong. Please contact the organisers.",

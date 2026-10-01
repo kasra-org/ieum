@@ -1264,6 +1264,21 @@ class EventInvitation(models.Model):
     def matches(self, email):
         return bool(email) and email.strip().lower() == self.email.strip().lower()
 
+    def matches_user(self, user):
+        """True when `user` owns the invited address.
+
+        Either as the account's own email, or as another address on the account
+        that they have verified - someone invited at their institutional
+        address often signs in with a personal or Google one. Unverified
+        addresses do not count: adding someone else's address to your account
+        must not let you take their invitation.
+        """
+        if self.matches(user.email):
+            return True
+        from allauth.account.models import EmailAddress
+        return EmailAddress.objects.filter(
+            user=user, email__iexact=self.email.strip(), verified=True).exists()
+
 
 # Speakers are not charged. The exemption is read from the speaker list rather
 # than recorded as a payment: nothing was transacted, so there is nothing to

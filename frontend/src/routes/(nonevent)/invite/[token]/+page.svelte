@@ -51,7 +51,7 @@
             <div class="flex-1">
                 <h2 class="text-xl font-semibold text-gray-900 mb-3">{m.invitePage_notApplied()}</h2>
                 {#if data.outcome.code === 'wrong_account'}
-                    <p class="text-gray-700 mb-4">{m.invitePage_wrongAccount({ email: inv.email })}</p>
+                    <p class="text-gray-700 mb-4">{m.invitePage_wrongAccount({ email: inv.email, current: data.user?.email ?? '' })}</p>
                     <Button color="primary" href="/logout?next={encodeURIComponent(`/invite/${data.invitation.token ?? ''}`)}">{m.invitePage_switchAccount()}</Button>
                 {:else if data.outcome.code === 'event_full'}
                     <p class="text-gray-700 mb-4">{m.invitePage_eventFull()}</p>

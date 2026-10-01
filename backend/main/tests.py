@@ -1931,6 +1931,38 @@ class InvitationTests(TestCase):
         self.assertFalse(invitation.is_accepted)
 
     @patch('main.invitations.send_mail')
+    def test_a_verified_second_address_on_the_account_counts(self, mock_send):
+        # Invited at work, signed in with a personal account that also holds
+        # the work address, verified.
+        from allauth.account.models import EmailAddress
+        self.event.registration_deadline = date(2020, 1, 1)
+        self.event.save()
+        self.invite(['jp24@kaist.ac.kr'], as_speaker=True)
+        invitation = EventInvitation.objects.get(email='jp24@kaist.ac.kr')
+        user = self.make_user('personal@gmail.com')
+        EmailAddress.objects.create(user=user, email='personal@gmail.com', verified=True, primary=True)
+        EmailAddress.objects.create(user=user, email='JP24@kaist.ac.kr', verified=True, primary=False)
+        self.client.force_login(user)
+
+        response = self.client.post(f'/api/invitation/{invitation.token}/accept')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Attendee.objects.filter(event=self.event, user=user).exists())
+        self.assertTrue(self.event.speakers.filter(email__iexact='personal@gmail.com', is_speaker=True).exists())
+
+    @patch('main.invitations.send_mail')
+    def test_an_unverified_second_address_does_not_count(self, mock_send):
+        from allauth.account.models import EmailAddress
+        self.invite(['jp24@kaist.ac.kr'])
+        invitation = EventInvitation.objects.get(email='jp24@kaist.ac.kr')
+        user = self.make_user('personal@gmail.com')
+        EmailAddress.objects.create(user=user, email='jp24@kaist.ac.kr', verified=False, primary=False)
+        self.client.force_login(user)
+
+        response = self.client.post(f'/api/invitation/{invitation.token}/accept')
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()['code'], 'wrong_account')
+
+    @patch('main.invitations.send_mail')
     def test_the_address_match_ignores_case(self, mock_send):
         self.invite(['Guest@Example.com'])
         invitation = EventInvitation.objects.get(email='Guest@Example.com')

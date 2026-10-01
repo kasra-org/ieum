@@ -115,7 +115,7 @@ def accept(invitation, user):
     an invitation after the deadline is the override - but capacity is, since
     the room does not get bigger for an invited guest.
     """
-    if not invitation.matches(user.email):
+    if not invitation.matches_user(user):
         raise InvitationError(
             'wrong_account',
             'This invitation was sent to a different email address. '
