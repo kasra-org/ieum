@@ -6,7 +6,7 @@
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
-    import { getCategoryLabel } from '$lib/utils.js';
+    import { getCategoryLabel, matchesSearch } from '$lib/utils.js';
 
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ConfirmModal from '$lib/components/ConfirmModal.svelte';
@@ -137,13 +137,16 @@
 
     let payments = $derived(data.payments || []);
 
+    let searchField = $state('all');
+    const searchFields = [
+        { value: 'name', name: m.search_name(), get: r => [r.attendee_name, r.attendee_name_ko] },
+        { value: 'email', name: m.search_email(), get: r => r.attendee_email },
+        { value: 'institute', name: m.search_institute(), get: r => [r.attendee_institute, r.attendee_institute_ko] },
+        { value: 'number', name: m.search_number(), get: r => [r.number, String(r.number).padStart(6, '0')] },
+    ];
+
     let filteredPayments = $derived(
-        payments.filter((item) =>
-            item.attendee_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (item.attendee_name_ko && item.attendee_name_ko.includes(searchTerm)) ||
-            item.attendee_email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            item.number.toString().includes(searchTerm)
-        )
+        payments.filter((item) => matchesSearch(item, searchTerm, searchField, searchFields))
     );
 
     // Reset to page 1 when search changes
@@ -461,7 +464,7 @@
     </Button>
 </div>
 
-<TableSearch placeholder={m.transactions_searchPlaceholder()} hoverable={true} bind:inputValue={searchTerm}>
+<TableSearch placeholder={m.transactions_searchPlaceholder()} hoverable={true} bind:inputValue={searchTerm} bind:field={searchField} fields={searchFields}>
     <TableHead>
         <TableHeadCell>{m.transactions_id()}</TableHeadCell>
         <TableHeadCell>{m.transactions_date()}</TableHeadCell>

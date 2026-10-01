@@ -5,7 +5,7 @@
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
-    import { getDisplayVenue, getDisplayVenueAddress } from '$lib/utils.js';
+    import { getDisplayVenue, getDisplayVenueAddress, matchesSearch } from '$lib/utils.js';
 
     import EventAdminForm from '$lib/components/event_admin/EventAdminForm.svelte';
     import MultiUserSelector from '$lib/components/MultiUserSelector.svelte';
@@ -17,13 +17,18 @@
     let archive_modal = $state(false);
 
     let search_term = $state('');
+    let search_field = $state('all');
+    const search_fields = [
+        { value: 'name', name: m.search_name(), get: r => r.name },
+        { value: 'venue', name: m.search_venue(), get: r => [r.venue, r.venue_ko] },
+        { value: 'id', name: m.search_id(), get: r => r.id },
+    ];
     let show_archived = $state(false);
 
     let filtered_events = $derived(
         data.admin.events.filter((item) => {
-            const matchesSearch = item.name.toLowerCase().indexOf(search_term.toLowerCase()) !== -1;
             const matchesArchiveFilter = show_archived || !item.is_archived;
-            return matchesSearch && matchesArchiveFilter;
+            return matchesSearch(item, search_term, search_field, search_fields) && matchesArchiveFilter;
         })
     );
 
@@ -133,7 +138,7 @@
     <Button color="primary" onclick={() => create_modal = true}>{m.admin_createEvent()}</Button>
 </div>
 
-<TableSearch placeholder={m.admin_searchEvents()} bind:inputValue={search_term} hoverable={true}>
+<TableSearch placeholder={m.admin_searchEvents()} bind:inputValue={search_term} bind:field={search_field} fields={search_fields} hoverable={true}>
     <TableHead>
         <TableHeadCell>{m.admin_tableId()}</TableHeadCell>
         <TableHeadCell>{m.admin_tableName()}</TableHeadCell>

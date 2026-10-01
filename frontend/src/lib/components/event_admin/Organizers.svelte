@@ -1,4 +1,5 @@
 <script>
+    import { matchesSearch } from '$lib/utils.js';
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Input, Card } from '$lib/components/ui';
     import { Button, Modal, Label, Alert } from '$lib/components/ui';
     import { ChevronDown, ChevronUp, UserMinus, UserPen } from '@lucide/svelte';
@@ -17,17 +18,21 @@
     let currentPage = $state(1);
     const itemsPerPage = 10;
 
+    let searchField = $state('all');
+    const searchFields = [
+        { value: 'name', name: m.search_name(), get: r => [r.name, r.korean_name] },
+        { value: 'email', name: m.search_email(), get: r => r.email },
+        { value: 'institute', name: m.search_institute(), get: r => [r.affiliation, r.affiliation_ko] },
+    ];
+
     let filteredOrganizers = $derived(
-        data.organizers.filter((item) => {
-            const searchLower = searchTermOrganizer.toLowerCase();
-            return item.name.toLowerCase().includes(searchLower) ||
-                   (item.korean_name && item.korean_name.toLowerCase().includes(searchLower));
-        })
+        data.organizers.filter((item) => matchesSearch(item, searchTermOrganizer, searchField, searchFields))
     );
 
     // Reset to page 1 when search changes
     $effect(() => {
         searchTermOrganizer;
+        searchField;
         currentPage = 1;
     });
 
@@ -169,7 +174,7 @@
 <div class="flex justify-end gap-2 mb-4">
     <Button color="primary" size="sm" onclick={addOrganizerModal}>{m.organizers_addOrganizer()}</Button>
 </div>
-<TableSearch placeholder={m.organizers_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermOrganizer}>
+<TableSearch placeholder={m.organizers_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermOrganizer} bind:field={searchField} fields={searchFields}>
     <TableHead>
         <TableHeadCell class="w-1">{m.organizers_order()}</TableHeadCell>
         <TableHeadCell>{m.organizers_name()}</TableHeadCell>

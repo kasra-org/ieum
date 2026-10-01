@@ -5,22 +5,22 @@
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
-    import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
+    import { getDisplayInstitute, getDisplayName, matchesSearch } from '$lib/utils.js';
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
 
     let { data } = $props();
 
     let user_search_term = $state('');
+    let user_search_field = $state('all');
+    const user_search_fields = [
+        { value: 'name', name: m.search_name(), get: r => [r.name, r.korean_name] },
+        { value: 'email', name: m.search_email(), get: r => r.email },
+        { value: 'institute', name: m.search_institute(), get: r => [r.institute_en, r.institute_ko] },
+        { value: 'job_title', name: m.search_jobTitle(), get: r => r.job_title },
+    ];
     let filtered_users = $derived(
-        data.admin.users.filter((user) => {
-            const searchLower = user_search_term.toLowerCase();
-            return user.name.toLowerCase().includes(searchLower) ||
-                   (user.korean_name && user.korean_name.toLowerCase().includes(searchLower)) ||
-                   user.email.toLowerCase().includes(searchLower) ||
-                   (user.institute_en && user.institute_en.toLowerCase().includes(searchLower)) ||
-                   (user.institute_ko && user.institute_ko.toLowerCase().includes(searchLower));
-        })
+        data.admin.users.filter((user) => matchesSearch(user, user_search_term, user_search_field, user_search_fields))
     );
 
     let selected_user = $state(null);
@@ -124,7 +124,7 @@
     <Button color="primary" size="sm" onclick={openGuestModal}>{m.admin_guestUser_add()}</Button>
 </div>
 
-<TableSearch placeholder={m.admin_searchUsers()} bind:inputValue={user_search_term} hoverable={true}>
+<TableSearch placeholder={m.admin_searchUsers()} bind:inputValue={user_search_term} bind:field={user_search_field} fields={user_search_fields} hoverable={true}>
     <TableHead>
         <TableHeadCell>{m.admin_tableId()}</TableHeadCell>
         <TableHeadCell>{m.admin_tableUserName()}</TableHeadCell>

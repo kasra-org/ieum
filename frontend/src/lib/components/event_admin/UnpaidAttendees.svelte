@@ -6,7 +6,7 @@
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
-    import { getDisplayInstitute, getDisplayName, getCategoryLabel } from '$lib/utils.js';
+    import { getDisplayInstitute, getDisplayName, getCategoryLabel, matchesSearch } from '$lib/utils.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
@@ -53,15 +53,20 @@
     let currentPage = $state(1);
     const itemsPerPage = 10;
 
-    let filtered = $derived(
-        unpaid.filter(a => {
-            const q = searchTerm.toLowerCase();
-            return a.name.toLowerCase().includes(q) || a.email.toLowerCase().includes(q);
-        })
-    );
+    let searchField = $state('all');
+    const searchFields = [
+        { value: 'name', name: m.search_name(), get: r => [r.name, r.korean_name] },
+        { value: 'email', name: m.search_email(), get: r => r.email },
+        { value: 'institute', name: m.search_institute(), get: r => [r.institute_en, r.institute_ko] },
+        { value: 'category', name: m.search_category(), get: r => [r.category_name, r.category_name_ko] },
+        { value: 'id', name: m.search_id(), get: r => r.nametag_id },
+    ];
+
+    let filtered = $derived(unpaid.filter(a => matchesSearch(a, searchTerm, searchField, searchFields)));
 
     $effect(() => {
         searchTerm;
+        searchField;
         currentPage = 1;
     });
 
@@ -200,7 +205,7 @@
         </Dropdown>
     </div>
 
-    <TableSearch placeholder={m.unpaidAttendees_searchPlaceholder()} hoverable={true} bind:inputValue={searchTerm}>
+    <TableSearch placeholder={m.unpaidAttendees_searchPlaceholder()} hoverable={true} bind:inputValue={searchTerm} bind:field={searchField} fields={searchFields}>
         <TableHead>
             <TableHeadCell class="w-1">
                 <input type="checkbox" checked={allOnPageSelected} onchange={toggleAllOnPage}

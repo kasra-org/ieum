@@ -7,7 +7,7 @@
     import { error } from '@sveltejs/kit';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
-    import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
+    import { getDisplayInstitute, getDisplayName, matchesSearch } from '$lib/utils.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import SearchableUserList from '$lib/components/SearchableUserList.svelte';
@@ -22,17 +22,22 @@
     let currentPage = $state(1);
     const itemsPerPage = 10;
 
+    let searchField = $state('all');
+    const searchFields = [
+        { value: 'name', name: m.search_name(), get: r => [r.name, r.korean_name] },
+        { value: 'email', name: m.search_email(), get: r => r.email },
+        { value: 'institute', name: m.search_institute(), get: r => [r.affiliation, r.affiliation_ko] },
+        { value: 'role', name: m.search_role(), get: r => [r.is_speaker && m.speakers_roleSpeaker(), r.is_chair && m.speakers_roleChair()].filter(Boolean) },
+    ];
+
     let filteredSpeakers = $derived(
-        data.speakers.filter((item) => {
-            const searchLower = searchTermSpeaker.toLowerCase();
-            return item.name.toLowerCase().includes(searchLower) ||
-                   (item.korean_name && item.korean_name.toLowerCase().includes(searchLower));
-        })
+        data.speakers.filter((item) => matchesSearch(item, searchTermSpeaker, searchField, searchFields))
     );
 
     // Reset to page 1 when search changes
     $effect(() => {
         searchTermSpeaker;
+        searchField;
         currentPage = 1;
     });
 
@@ -230,7 +235,7 @@
     <Button color="primary" size="sm" onclick={() => invite_modal = true}>{m.speakers_inviteByEmail()}</Button>
     <Button color="primary" size="sm" onclick={addSpeakerModal}>{m.speakers_addSpeaker()}</Button>
 </div>
-<TableSearch placeholder={m.speakers_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermSpeaker}>
+<TableSearch placeholder={m.speakers_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermSpeaker} bind:field={searchField} fields={searchFields}>
     <TableHead>
         <TableHeadCell class="w-1"><Checkbox
             checked={selectedSpeakers.length > 0 && selectedSpeakers.length === data.speakers.length}

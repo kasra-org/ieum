@@ -1375,5 +1375,22 @@
 	"registrationDetails_loadError": "등록 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
 	"common_copy": "복사",
 	"footer_poweredBy": "Powered by",
-	"payment_confirmingPayment": "결제를 확인하는 중입니다..."
+	"payment_confirmingPayment": "결제를 확인하는 중입니다...",
+	"search_field": "검색 항목",
+	"search_all": "전체",
+	"search_placeholder": "검색어 입력…",
+	"search_name": "이름",
+	"search_email": "이메일",
+	"search_institute": "소속",
+	"search_category": "등록 구분",
+	"search_id": "번호",
+	"search_jobTitle": "직위",
+	"search_title": "제목",
+	"search_presenter": "발표자",
+	"search_type": "유형",
+	"search_role": "역할",
+	"search_number": "거래번호",
+	"search_venue": "장소",
+	"search_nameEn": "영문명",
+	"search_nameKo": "국문명"
 }

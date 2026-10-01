@@ -1,4 +1,5 @@
 <script>
+    import { matchesSearch } from '$lib/utils.js';
     import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
     import { Modal, Button, Alert } from '$lib/components/ui';
     import { Settings, Trash2 } from '@lucide/svelte';
@@ -9,11 +10,14 @@
     let { data } = $props();
 
     let institution_search_term = $state('');
+    let institution_search_field = $state('all');
+    const institution_search_fields = [
+        { value: 'name_en', name: m.search_nameEn(), get: r => r.name_en },
+        { value: 'name_ko', name: m.search_nameKo(), get: r => r.name_ko },
+    ];
     let filtered_institutions = $derived(
         data.admin.institutions.filter((inst) =>
-            inst.name_en.toLowerCase().indexOf(institution_search_term.toLowerCase()) !== -1 ||
-            inst.name_ko.toLowerCase().indexOf(institution_search_term.toLowerCase()) !== -1
-        )
+            matchesSearch(inst, institution_search_term, institution_search_field, institution_search_fields))
     );
 
     let selected_institution = $state(null);
@@ -54,7 +58,7 @@
 </div>
 <p class="text-gray-600 mb-6">{m.admin_manageInstitutions_description()}</p>
 
-<TableSearch placeholder={m.admin_searchInstitutions()} bind:inputValue={institution_search_term} hoverable={true}>
+<TableSearch placeholder={m.admin_searchInstitutions()} bind:inputValue={institution_search_term} bind:field={institution_search_field} fields={institution_search_fields} hoverable={true}>
     <TableHead>
         <TableHeadCell>{m.admin_tableId()}</TableHeadCell>
         <TableHeadCell>{m.admin_tableInstitutionNameEn()}</TableHeadCell>

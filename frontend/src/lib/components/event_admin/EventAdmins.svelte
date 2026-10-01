@@ -6,7 +6,7 @@
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import * as m from '$lib/paraglide/messages.js';
-    import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
+    import { getDisplayInstitute, getDisplayName, matchesSearch } from '$lib/utils.js';
     import UserSelectionModal from '$lib/components/UserSelectionModal.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
@@ -21,17 +21,21 @@
     let currentPage = $state(1);
     const itemsPerPage = 10;
 
+    let searchField = $state('all');
+    const searchFields = [
+        { value: 'name', name: m.search_name(), get: r => [r.name, r.korean_name] },
+        { value: 'email', name: m.search_email(), get: r => r.email },
+        { value: 'institute', name: m.search_institute(), get: r => [r.institute_en, r.institute_ko] },
+    ];
+
     let filteredEventAdmins = $derived(
-        data.eventadmins.filter((item) => {
-            const searchLower = searchTermEventAdmin.toLowerCase();
-            return item.name.toLowerCase().includes(searchLower) ||
-                   (item.korean_name && item.korean_name.toLowerCase().includes(searchLower));
-        })
+        data.eventadmins.filter((item) => matchesSearch(item, searchTermEventAdmin, searchField, searchFields))
     );
 
     // Reset to page 1 when search changes
     $effect(() => {
         searchTermEventAdmin;
+        searchField;
         currentPage = 1;
     });
 
@@ -97,7 +101,7 @@
 <div class="flex justify-end gap-2">
     <Button color="primary" size="sm" onclick={addEventAdminModal}>{m.eventAdmins_addAdmin()}</Button>
 </div>
-<TableSearch placeholder={m.eventAdmins_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermEventAdmin}>
+<TableSearch placeholder={m.eventAdmins_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermEventAdmin} bind:field={searchField} fields={searchFields}>
     <TableHead>
         <TableHeadCell>{m.eventAdmins_name()}</TableHeadCell>
         <TableHeadCell>{m.eventAdmins_email()}</TableHeadCell>

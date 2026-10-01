@@ -310,3 +310,19 @@ export function tsvCell(value) {
 export function toTsv(rows) {
     return rows.map((row) => row.map(tsvCell).join('\t')).join('\r\n');
 }
+
+/**
+ * Whether a table row matches a search, for the admin tables' search boxes.
+ *
+ * `fields` is the table's list of `{ value, name, get }`, where `get(row)`
+ * returns the text (or an array of texts, e.g. English and Korean names) that
+ * field searches. `field` is the chosen one, or 'all' to search every field.
+ * Case-insensitive substring match; an empty term matches everything.
+ */
+export function matchesSearch(row, term, field, fields) {
+    const q = (term ?? '').trim().toLowerCase();
+    if (!q) return true;
+    const defs = field && field !== 'all' ? fields.filter(f => f.value === field) : fields;
+    return defs.some(f => [].concat(f.get(row))
+        .some(v => v !== null && v !== undefined && String(v).toLowerCase().includes(q)));
+}

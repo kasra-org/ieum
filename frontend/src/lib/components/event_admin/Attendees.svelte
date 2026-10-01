@@ -10,7 +10,7 @@
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
-    import { getCategoryLabel, toTsv } from '$lib/utils.js';
+    import { getCategoryLabel, toTsv, matchesSearch } from '$lib/utils.js';
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
@@ -177,13 +177,24 @@
     let currentPage = $state(1);
     const itemsPerPage = 10;
 
+    let searchField = $state('all');
+    const searchFields = [
+        { value: 'name', name: m.search_name(), get: r => [r.name, r.korean_name, `${r.first_name} ${r.last_name}`] },
+        { value: 'email', name: m.search_email(), get: r => r.email },
+        { value: 'institute', name: m.search_institute(), get: r => [r.institute_en, r.institute_ko, r.department] },
+        { value: 'category', name: m.search_category(), get: r => [r.category_name, r.category_name_ko] },
+        { value: 'job_title', name: m.search_jobTitle(), get: r => r.job_title },
+        { value: 'id', name: m.search_id(), get: r => r.attendee_nametag_id },
+    ];
+
     let filteredAttendees = $derived(
-        table_data_attendees.filter((item) => item.name.toLowerCase().includes(searchTermAttendee.toLowerCase()))
+        table_data_attendees.filter((item) => matchesSearch(item, searchTermAttendee, searchField, searchFields))
     );
 
     // Reset to page 1 when search changes
     $effect(() => {
         searchTermAttendee;
+        searchField;
         currentPage = 1;
     });
 
@@ -664,7 +675,7 @@
     <Alert type="error" color="red" class="mt-3">{bulk_cert_message.message}</Alert>
 {/if}
 <p class="mt-5 mb-3 text-sm text-right">{table_data_attendees.length} {m.attendees_peopleRegistered()}</p>
-<TableSearch placeholder={m.attendees_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermAttendee}>
+<TableSearch placeholder={m.attendees_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermAttendee} bind:field={searchField} fields={searchFields}>
     <TableHead>
         <TableHeadCell class="w-1">
             <Checkbox

@@ -8,7 +8,7 @@
     import { browser } from '$app/environment';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
-    import { getDisplayInstitute, getDisplayName, getPresentationTypeLabel } from '$lib/utils.js';
+    import { getDisplayInstitute, getDisplayName, getPresentationTypeLabel, matchesSearch } from '$lib/utils.js';
     import UserSelectionModal from '$lib/components/UserSelectionModal.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
@@ -43,18 +43,40 @@
     let abstractCurrentPage = $state(1);
     const itemsPerPage = 10;
 
+    let reviewerSearchField = $state('all');
+    const reviewerSearchFields = [
+        { value: 'name', name: m.search_name(), get: r => [r.name, r.korean_name] },
+        { value: 'email', name: m.search_email(), get: r => [r.user?.email, r.user_email] },
+        { value: 'institute', name: m.search_institute(), get: r => [r.institute, r.institute_ko] },
+    ];
+
     let filteredReviewers = $derived(
-        data.reviewers.filter((item) => {
-            const searchLower = searchTermReviewer.toLowerCase();
-            return item.name.toLowerCase().includes(searchLower) ||
-                   (item.korean_name && item.korean_name.toLowerCase().includes(searchLower));
-        })
+        data.reviewers.filter((item) => matchesSearch(item, searchTermReviewer, reviewerSearchField, reviewerSearchFields))
     );
 
     // Reset to page 1 when search changes
     $effect(() => {
         searchTermReviewer;
+        reviewerSearchField;
         reviewerCurrentPage = 1;
+    });
+
+    // The abstract list's search box used to be bound to nothing.
+    let searchTermAbstract = $state('');
+    let abstractSearchField = $state('all');
+    const abstractSearchFields = [
+        { value: 'title', name: m.search_title(), get: r => r.title },
+        { value: 'presenter', name: m.search_presenter(), get: r => [getDisplayName(r.attendee), r.attendee?.name, r.attendee?.korean_name] },
+        { value: 'institute', name: m.search_institute(), get: r => [r.attendee?.institute, r.attendee?.institute_ko] },
+        { value: 'type', name: m.search_type(), get: r => getPresentationTypeLabel(r, m) },
+    ];
+    let filteredAbstracts = $derived(
+        data.abstracts.filter((item) => matchesSearch(item, searchTermAbstract, abstractSearchField, abstractSearchFields))
+    );
+    $effect(() => {
+        searchTermAbstract;
+        abstractSearchField;
+        abstractCurrentPage = 1;
     });
 
     let reviewerTotalPages = $derived(Math.ceil(filteredReviewers.length / itemsPerPage));
@@ -62,9 +84,9 @@
         filteredReviewers.slice((reviewerCurrentPage - 1) * itemsPerPage, reviewerCurrentPage * itemsPerPage)
     );
 
-    let abstractTotalPages = $derived(Math.ceil(data.abstracts.length / itemsPerPage));
+    let abstractTotalPages = $derived(Math.ceil(filteredAbstracts.length / itemsPerPage));
     let paginatedAbstracts = $derived(
-        data.abstracts.slice((abstractCurrentPage - 1) * itemsPerPage, abstractCurrentPage * itemsPerPage)
+        filteredAbstracts.slice((abstractCurrentPage - 1) * itemsPerPage, abstractCurrentPage * itemsPerPage)
     );
 
     function handleReviewerPageChange(page) {
@@ -180,7 +202,7 @@
     <Button color="primary" size="sm" disabled={selectedReviewers.length === 0} onclick={showSendEmailModal}>{m.abstracts_sendEmailToSelected()}</Button>
     <Button color="primary" size="sm" onclick={addReviewerModal}>{m.abstracts_addReviewer()}</Button>
 </div>
-<TableSearch placeholder={m.abstracts_searchReviewerPlaceholder()} hoverable={true} bind:inputValue={searchTermReviewer}>
+<TableSearch placeholder={m.abstracts_searchReviewerPlaceholder()} hoverable={true} bind:inputValue={searchTermReviewer} bind:field={reviewerSearchField} fields={reviewerSearchFields}>
     <TableHead>
         <TableHeadCell class="w-1"><Checkbox
             checked={selectedReviewers.length > 0 && selectedReviewers.length === data.reviewers.length}
@@ -235,7 +257,7 @@
 <TablePagination currentPage={reviewerCurrentPage} totalPages={reviewerTotalPages} onPageChange={handleReviewerPageChange} />
 
 <Heading tag="h3" class="text-lg font-bold mt-12 mb-3">{m.abstracts_abstractsTitle()}</Heading>
-<TableSearch placeholder={m.abstracts_searchAbstractPlaceholder()} hoverable={true}>
+<TableSearch placeholder={m.abstracts_searchAbstractPlaceholder()} hoverable={true} bind:inputValue={searchTermAbstract} bind:field={abstractSearchField} fields={abstractSearchFields}>
     <TableHead>
         <TableHeadCell>{m.abstracts_title()}</TableHeadCell>
         <TableHeadCell>{m.abstracts_presenter()}</TableHeadCell>

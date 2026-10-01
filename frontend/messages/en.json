@@ -1375,5 +1375,22 @@
 	"registrationDetails_loadError": "Unable to load registration details. Please try again later.",
 	"common_copy": "Copy",
 	"footer_poweredBy": "Powered by",
-	"payment_confirmingPayment": "Confirming your payment..."
+	"payment_confirmingPayment": "Confirming your payment...",
+	"search_field": "Search in",
+	"search_all": "All",
+	"search_placeholder": "Search…",
+	"search_name": "Name",
+	"search_email": "Email",
+	"search_institute": "Affiliation",
+	"search_category": "Category",
+	"search_id": "No.",
+	"search_jobTitle": "Job title",
+	"search_title": "Title",
+	"search_presenter": "Presenter",
+	"search_type": "Type",
+	"search_role": "Role",
+	"search_number": "Transaction no.",
+	"search_venue": "Venue",
+	"search_nameEn": "English name",
+	"search_nameKo": "Korean name"
 }
