@@ -1518,7 +1518,14 @@ def submit_abstract(request, event_id: int):
         return reject("payment_required", "Please complete your registration payment before submitting an abstract.")
 
     data = json.loads(request.body)
-    if event.abstract_deadline is not None and datetime.now().date() > event.abstract_deadline:
+    # A listed speaker who has not submitted yet is still let in after the
+    # deadline: their talk is already on the programme and the abstract is
+    # owed, not competing for a slot. Chairs give no talk, so the deadline
+    # holds for them. One abstract each still applies (checked above).
+    is_listed_speaker = event.speakers.filter(
+        email__iexact=attendee.email, is_speaker=True).exists() if attendee.email else False
+    if (event.abstract_deadline is not None and datetime.now().date() > event.abstract_deadline
+            and not is_listed_speaker):
         return reject("deadline_passed", "Sorry, abstract submission deadline has passed.")
     
     if event.capacity_abstract > 0 and event.capacity_abstract <= event.abstracts.count():

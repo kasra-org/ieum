@@ -2384,6 +2384,71 @@ class PaidSpeakerExemptionTests(TestCase):
         self.assertTrue(other_attendee.fee_waived)
 
 
+class SpeakerLateAbstractTests(TestCase):
+    """A listed speaker may submit after the deadline, once."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Late Talks', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, accepts_abstract=True, capacity_abstract=0,
+            abstract_deadline=date(2000, 1, 1),
+            email_template_abstract_submission=EmailTemplate.objects.create(subject='S', body='B'),
+        )
+        self.user = User.objects.create_user(
+            username='talk@example.com', email='talk@example.com', password='pw12345!aA')
+        self.attendee = Attendee.objects.create(
+            user=self.user, event=self.event, first_name='Ta', last_name='Lk',
+            nationality=1, institute='PNU')
+        self.event.attendees.add(self.attendee)
+        self.client.force_login(self.user)
+
+    def list_as(self, **roles):
+        self.event.speakers.create(
+            name='Ta Lk', email='Talk@Example.com', affiliation='PNU',
+            is_domestic=True, type='invited', **roles)
+
+    @patch('main.apis.send_mail')
+    def submit(self, mock_send):
+        import io
+        import docx
+        buf = io.BytesIO()
+        doc = docx.Document()
+        doc.add_paragraph('An abstract.')
+        doc.save(buf)
+        return self.client.post(
+            f'/api/event/{self.event.id}/abstract',
+            data=json.dumps({
+                'title': 'Late but listed', 'presentation_type': 'invited',
+                'file_name': 'a.docx',
+                'file_content': 'data:application/octet-stream;base64,'
+                                + base64.b64encode(buf.getvalue()).decode(),
+            }),
+            content_type='application/json')
+
+    def test_an_ordinary_registrant_is_held_to_the_deadline(self):
+        response = self.submit()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'deadline_passed')
+
+    def test_a_chair_is_held_to_the_deadline(self):
+        self.list_as(is_speaker=False, is_chair=True)
+        self.assertEqual(self.submit().json()['code'], 'deadline_passed')
+
+    def test_a_listed_speaker_gets_past_the_deadline(self):
+        self.list_as(is_speaker=True)
+        response = self.submit()
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(Abstract.objects.filter(attendee=self.attendee).exists())
+
+    def test_but_only_once(self):
+        self.list_as(is_speaker=True)
+        Abstract.objects.create(attendee=self.attendee, event=self.event,
+                                title='Already', file_path='a/b.docx')
+        response = self.submit()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'already_submitted')
+
+
 class ReceiptLookupTests(TestCase):
     """The receipt link has to resolve for payments with no gateway order id."""
 
