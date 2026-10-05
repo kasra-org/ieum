@@ -1392,5 +1392,10 @@
 	"search_number": "거래번호",
 	"search_venue": "장소",
 	"search_nameEn": "영문명",
-	"search_nameKo": "국문명"
+	"search_nameKo": "국문명",
+	"abstracts_filterType": "발표 유형",
+	"abstracts_resultCount": "{count}건",
+	"abstracts_emailActions": "발표자에게 이메일",
+	"abstracts_emailFiltered": "현재 목록 전체 ({count}명)",
+	"abstracts_emailSelected": "선택한 발표자 ({count}명)"
 }

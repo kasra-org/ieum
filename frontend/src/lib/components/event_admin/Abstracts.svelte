@@ -1,8 +1,8 @@
 <script>
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from '$lib/components/ui';
     import { Button, Modal, Label, Input, Select, Textarea, Alert } from '$lib/components/ui';
-    import { Tabs, TabItem } from '$lib/components/ui';
-    import { Download, Pencil, Trash2, UserMinus } from '@lucide/svelte';
+    import { Tabs, TabItem, Dropdown, DropdownItem } from '$lib/components/ui';
+    import { ChevronDown, Download, Pencil, Trash2, UserMinus } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import { browser } from '$app/environment';
@@ -70,14 +70,50 @@
         { value: 'institute', name: m.search_institute(), get: r => [r.attendee?.institute, r.attendee?.institute_ko] },
         { value: 'type', name: m.search_type(), get: r => getPresentationTypeLabel(r, m) },
     ];
+    // Presentation type filter - the abstract table only; the reviewer table
+    // above keeps its own search. Older rows predate presentation_type and are
+    // read the same way getPresentationTypeLabel reads them.
+    const PRESENTATION_TYPES = ['poster', 'short_talk_poster', 'short_talk', 'flash_talk_poster', 'invited'];
+    const typeOf = (r) => r.presentation_type
+        ?? (r.type === 'speaker' ? 'short_talk' : (r.wants_short_talk ? 'short_talk_poster' : 'poster'));
+    let abstractTypeFilter = $state('all');
+    // How many abstracts each type has, so a filter button says what it holds.
+    let abstractTypeCounts = $derived(
+        data.abstracts.reduce((acc, r) => { acc[typeOf(r)] = (acc[typeOf(r)] ?? 0) + 1; return acc; }, {})
+    );
+
     let filteredAbstracts = $derived(
-        data.abstracts.filter((item) => matchesSearch(item, searchTermAbstract, abstractSearchField, abstractSearchFields))
+        data.abstracts.filter((item) =>
+            (abstractTypeFilter === 'all' || typeOf(item) === abstractTypeFilter)
+            && matchesSearch(item, searchTermAbstract, abstractSearchField, abstractSearchFields))
     );
     $effect(() => {
         searchTermAbstract;
         abstractSearchField;
+        abstractTypeFilter;
         abstractCurrentPage = 1;
     });
+
+    // Ticked abstract rows. Only those the current filter shows are acted on,
+    // so a row ticked under another filter is never emailed unseen.
+    let selectedAbstracts = $state([]);
+    let activeAbstractSelection = $derived(
+        selectedAbstracts.filter(id => filteredAbstracts.some(a => a.id === id))
+    );
+    const presenterEmail = (r) => r.attendee?.user?.email || r.attendee?.user_email || '';
+    let abstract_email_modal = $state(false);
+    let abstract_email_scope = $state('selected');
+    const showAbstractEmailModal = (scope) => {
+        abstract_email_scope = scope;
+        abstract_email_modal = true;
+    };
+    let abstractEmailRecipients = $derived.by(() => {
+        const rows = abstract_email_scope === 'filtered'
+            ? filteredAbstracts
+            : filteredAbstracts.filter(a => activeAbstractSelection.includes(a.id));
+        return [...new Set(rows.map(presenterEmail).filter(Boolean))].join('; ');
+    });
+    let filteredPresenterCount = $derived(new Set(filteredAbstracts.map(presenterEmail).filter(Boolean)).size);
 
     let reviewerTotalPages = $derived(Math.ceil(filteredReviewers.length / itemsPerPage));
     let paginatedReviewers = $derived(
@@ -257,8 +293,38 @@
 <TablePagination currentPage={reviewerCurrentPage} totalPages={reviewerTotalPages} onPageChange={handleReviewerPageChange} />
 
 <Heading tag="h3" class="text-lg font-bold mt-12 mb-3">{m.abstracts_abstractsTitle()}</Heading>
+<div class="flex flex-wrap items-center justify-between gap-3 mb-2">
+    <div class="flex flex-wrap items-center gap-2" role="group" aria-label={m.abstracts_filterType()}>
+        <Button size="xs" color={abstractTypeFilter === 'all' ? 'primary' : 'light'} onclick={() => abstractTypeFilter = 'all'}>
+            {m.search_all()} ({data.abstracts.length})
+        </Button>
+        {#each PRESENTATION_TYPES as t}
+            <Button size="xs" color={abstractTypeFilter === t ? 'primary' : 'light'} onclick={() => abstractTypeFilter = t}>
+                {getPresentationTypeLabel({ presentation_type: t }, m)} ({abstractTypeCounts[t] ?? 0})
+            </Button>
+        {/each}
+    </div>
+    <div class="flex items-center gap-2">
+        <Button color="primary" size="sm">{m.abstracts_emailActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
+        <Dropdown class="w-auto list-none p-1">
+            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showAbstractEmailModal('filtered')} disabled={filteredPresenterCount === 0}>
+                {m.abstracts_emailFiltered({ count: filteredPresenterCount })}
+            </DropdownItem>
+            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showAbstractEmailModal('selected')} disabled={activeAbstractSelection.length === 0}>
+                {m.abstracts_emailSelected({ count: activeAbstractSelection.length })}
+            </DropdownItem>
+        </Dropdown>
+    </div>
+</div>
+<p class="text-sm text-gray-600 mb-1">{m.abstracts_resultCount({ count: filteredAbstracts.length })}</p>
 <TableSearch placeholder={m.abstracts_searchAbstractPlaceholder()} hoverable={true} bind:inputValue={searchTermAbstract} bind:field={abstractSearchField} fields={abstractSearchFields}>
     <TableHead>
+        <TableHeadCell class="w-1"><Checkbox
+            checked={activeAbstractSelection.length > 0 && activeAbstractSelection.length === filteredAbstracts.length}
+            onclick={(e) => {
+                selectedAbstracts = e.target.checked ? filteredAbstracts.map(a => a.id) : [];
+            }}
+        /></TableHeadCell>
         <TableHeadCell>{m.abstracts_title()}</TableHeadCell>
         <TableHeadCell>{m.abstracts_presenter()}</TableHeadCell>
         <TableHeadCell>{m.abstracts_type()}</TableHeadCell>
@@ -268,6 +334,11 @@
     <TableBody tableBodyClass="divide-y">
         {#each paginatedAbstracts as row}
             <TableBodyRow>
+                <TableBodyCell><Checkbox checked={selectedAbstracts.includes(row.id)} onclick={(e) => {
+                    selectedAbstracts = e.target.checked
+                        ? [...selectedAbstracts, row.id]
+                        : selectedAbstracts.filter(id => id !== row.id);
+                }} /></TableBodyCell>
                 <TableBodyCell>{(row.title.length > 10)?row.title.slice(0, 10)+'...':row.title}</TableBodyCell>
                 <TableBodyCell>{getDisplayName(row.attendee)}</TableBodyCell>
                 <TableBodyCell>{getPresentationTypeLabel(row, m)}</TableBodyCell>
@@ -303,7 +374,7 @@
         {/each}
         {#if filteredAbstracts.length === 0}
             <TableBodyRow>
-                <TableBodyCell colspan="5" class="text-center">{m.abstracts_noRecords()}</TableBodyCell>
+                <TableBodyCell colspan="6" class="text-center">{m.abstracts_noRecords()}</TableBodyCell>
             </TableBodyRow>
         {/if}
     </TableBody>
@@ -336,6 +407,7 @@
 </Modal>
 
 <SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
+<SendEmailModal bind:open={abstract_email_modal} recipients={abstractEmailRecipients} eventadmins={data.eventadmins} />
 
 <Modal id="abstract_modal" size="lg" title={m.abstracts_detailsTitle()} bind:open={abstract_modal} outsideclose>
     <form method="post" action="?/update_abstract" use:enhance={afterUpdateAbstract}>

@@ -1392,5 +1392,10 @@
 	"search_number": "Transaction no.",
 	"search_venue": "Venue",
 	"search_nameEn": "English name",
-	"search_nameKo": "Korean name"
+	"search_nameKo": "Korean name",
+	"abstracts_filterType": "Presentation type",
+	"abstracts_resultCount": "{count} abstract(s)",
+	"abstracts_emailActions": "Email presenters",
+	"abstracts_emailFiltered": "Everyone in this list ({count})",
+	"abstracts_emailSelected": "Selected ({count})"
 }
