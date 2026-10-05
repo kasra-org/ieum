@@ -135,7 +135,7 @@
 
 Each short talk is allotted **10 minutes**. Please prepare your slides so that your presentation fits within this time. **We kindly ask that you keep strictly to the 10-minute limit**, as the programme runs on a tight schedule and every speaker's time depends on the session staying on track. The session chair will keep time and may ask you to conclude once your time is up.{% elif ${FLASH} %}We are pleased to inform you that your abstract, "{{ abstract.title }}", has been selected for a **flash talk** at {{ event.name }}. Congratulations!
 
-A flash talk is a brief introduction to your work, designed to draw participants to your poster. Please prepare **no more than 2 slides**. **We kindly ask that you keep strictly to both the 2-slide limit and your allotted time**, as many flash talks are presented back to back and the session runs on a tight schedule. Presentations that exceed the limit may be cut short by the session chair.{% endif %}
+A flash talk is a brief introduction to your work, designed to draw participants to your poster. Each flash talk is allotted **3 minutes**, and please prepare **no more than 2 slides**. **We kindly ask that you keep strictly to both the 3-minute and the 2-slide limits**, as many flash talks are presented back to back and the session runs on a tight schedule. Presentations that exceed the limit may be cut short by the session chair.{% endif %}
 
 If you have any questions, please do not hesitate to contact us.
 
