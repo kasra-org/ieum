@@ -30,16 +30,42 @@
         { value: 'role', name: m.search_role(), get: r => [r.is_speaker && m.speakers_roleSpeaker(), r.is_chair && m.speakers_roleChair()].filter(Boolean) },
     ];
 
+    // Abstract status only means something when the event collects abstracts
+    // here; an external system's submissions are not visible to us.
+    const tracksAbstracts = $derived(
+        data.event.accepts_abstract && data.event.abstract_submission_type === 'internal'
+    );
+    const hasAbstract = (r) => Boolean(r.abstract_title);
+
+    // Role filter. Someone who is both appears under each.
+    let roleFilter = $state('all');
+    const roleFilters = $derived([
+        { value: 'all', label: m.search_all(), test: () => true },
+        { value: 'speaker', label: m.speakers_roleSpeaker(), test: r => r.is_speaker },
+        { value: 'chair', label: m.speakers_roleChair(), test: r => r.is_chair },
+        ...(tracksAbstracts
+            ? [{ value: 'no_abstract', label: m.speakers_filterNoAbstract(), test: r => r.is_speaker && !hasAbstract(r) }]
+            : []),
+    ]);
+    let roleTest = $derived((roleFilters.find(f => f.value === roleFilter) ?? roleFilters[0]).test);
+
     let filteredSpeakers = $derived(
-        data.speakers.filter((item) => matchesSearch(item, searchTermSpeaker, searchField, searchFields))
+        data.speakers.filter((item) => roleTest(item) && matchesSearch(item, searchTermSpeaker, searchField, searchFields))
     );
 
     // Reset to page 1 when search changes
     $effect(() => {
         searchTermSpeaker;
         searchField;
+        roleFilter;
         currentPage = 1;
     });
+
+    // Only ticked rows the current filter shows are acted on, so a row ticked
+    // under another filter is never emailed unseen.
+    let activeSelection = $derived(
+        selectedSpeakers.filter(id => filteredSpeakers.some(s => s.id === id))
+    );
 
     let totalPages = $derived(Math.ceil(filteredSpeakers.length / itemsPerPage));
     let paginatedSpeakers = $derived(
@@ -216,11 +242,13 @@
     let emailRecipients = $derived.by(() => {
         const rows = email_audience === 'speakers' ? data.speakers.filter(s => s.is_speaker)
             : email_audience === 'chairs' ? data.speakers.filter(s => s.is_chair)
-            : selectedSpeakers.map(id => data.speakers.find(a => a.id === id));
-        return rows.map(r => r?.email).filter(Boolean).join("; ");
+            : email_audience === 'filtered' ? filteredSpeakers
+            : filteredSpeakers.filter(s => activeSelection.includes(s.id));
+        return [...new Set(rows.map(r => r?.email).filter(Boolean))].join("; ");
     });
     let speakerCount = $derived(data.speakers.filter(s => s.is_speaker).length);
     let chairCount = $derived(data.speakers.filter(s => s.is_chair).length);
+    let filteredCount = $derived(new Set(filteredSpeakers.map(s => s.email).filter(Boolean)).size);
 </script>
 
 <Heading tag="h2" class="text-xl font-bold mb-3">{m.speakers_title()}</Heading>
@@ -230,18 +258,23 @@
     <Dropdown class="w-auto list-none p-1">
         <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showSendEmailModal('speakers')} disabled={speakerCount === 0}>{m.speakers_emailSpeakers()}</DropdownItem>
         <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showSendEmailModal('chairs')} disabled={chairCount === 0}>{m.speakers_emailChairs()}</DropdownItem>
-        <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showSendEmailModal('selected')} disabled={selectedSpeakers.length === 0}>{m.speakers_sendEmailToSelected()}</DropdownItem>
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showSendEmailModal('filtered')} disabled={filteredCount === 0}>{m.speakers_emailFiltered({ count: filteredCount })}</DropdownItem>
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showSendEmailModal('selected')} disabled={activeSelection.length === 0}>{m.speakers_sendEmailToSelected()}</DropdownItem>
     </Dropdown>
     <Button color="primary" size="sm" onclick={() => invite_modal = true}>{m.speakers_inviteByEmail()}</Button>
     <Button color="primary" size="sm" onclick={addSpeakerModal}>{m.speakers_addSpeaker()}</Button>
 </div>
+<div class="flex flex-wrap items-center gap-2 mt-4" role="group" aria-label={m.speakers_role()}>
+    {#each roleFilters as f}
+        <Button size="xs" color={roleFilter === f.value ? 'primary' : 'light'} onclick={() => roleFilter = f.value}>
+            {f.label} ({data.speakers.filter(f.test).length})
+        </Button>
+    {/each}
+</div>
 <TableSearch placeholder={m.speakers_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermSpeaker} bind:field={searchField} fields={searchFields}>
     <TableHead>
         <TableHeadCell class="w-1"><Checkbox
-            checked={selectedSpeakers.length > 0 && selectedSpeakers.length === data.speakers.length}
-            intermediate={
-                selectedSpeakers.length > 0 && (selectedSpeakers.length < data.speakers.length)
-            }
+            checked={activeSelection.length > 0 && activeSelection.length === filteredSpeakers.length}
             onclick={(e) => {
                 if (e.target.checked) {
                     selectedSpeakers = filteredSpeakers.map(a => a.id);
@@ -252,6 +285,7 @@
         /></TableHeadCell>
         <TableHeadCell>{m.speakers_name()}</TableHeadCell>
         <TableHeadCell>{m.speakers_role()}</TableHeadCell>
+        {#if tracksAbstracts}<TableHeadCell>{m.speakers_abstract()}</TableHeadCell>{/if}
         <TableHeadCell>{m.speakers_email()}</TableHeadCell>
         <TableHeadCell>{m.speakers_affiliation()}</TableHeadCell>
         <TableHeadCell>{m.speakers_domestic()}</TableHeadCell>
@@ -274,13 +308,27 @@
                     {#if row.korean_name}<div class="text-sm text-gray-500">{row.korean_name}</div>{/if}
                 </TableBodyCell>
                 <TableBodyCell class="whitespace-nowrap">{roleLabel(row)}</TableBodyCell>
+                {#if tracksAbstracts}
+                    <TableBodyCell class="whitespace-nowrap">
+                        {#if !row.is_speaker}
+                            <span class="text-gray-400">—</span>
+                        {:else if hasAbstract(row)}
+                            <span class="inline-flex items-center gap-1 text-green-700" title={row.abstract_title}>
+                                <Check class="w-4 h-4" />{m.speakers_abstractSubmitted()}
+                            </span>
+                            <div class="text-xs text-gray-500 max-w-48 truncate" title={row.abstract_title}>{row.abstract_title}</div>
+                        {:else}
+                            <span class="text-red-600">{m.speakers_abstractMissing()}</span>
+                        {/if}
+                    </TableBodyCell>
+                {/if}
                 <TableBodyCell>{row.email}</TableBodyCell>
                 <TableBodyCell>
                     <div>{row.affiliation}</div>
                     {#if row.affiliation_ko}<div class="text-sm text-gray-500">{row.affiliation_ko}</div>{/if}
                 </TableBodyCell>
                 <TableBodyCell>{#if row.is_domestic}<Check class="w-4 h-4 text-green-500 inline mr-2" />{/if}</TableBodyCell>
-                <TableBodyCell>{format_type(row.type)}</TableBodyCell>
+                <TableBodyCell class="whitespace-nowrap">{format_type(row.type)}</TableBodyCell>
                 <TableBodyCell>
                     <Checkbox checked={row.is_payment_exempt && !row.has_paid} disabled={row.has_paid}
                         title={row.has_paid ? m.speakers_alreadyPaid() : undefined}
@@ -304,7 +352,7 @@
         {/each}
         {#if filteredSpeakers.length === 0}
             <TableBodyRow>
-                <TableBodyCell colspan="8" class="text-center">{m.speakers_noRecords()}</TableBodyCell>
+                <TableBodyCell colspan={tracksAbstracts ? 10 : 9} class="text-center">{m.speakers_noRecords()}</TableBodyCell>
             </TableBodyRow>
         {/if}
     </TableBody>

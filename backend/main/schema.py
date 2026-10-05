@@ -470,6 +470,20 @@ class SpeakerSchema(Schema):
         from main.models import has_paid_for
         return has_paid_for(speaker.event, speaker.email)
 
+    # The abstract they submitted for this event, if any - matched through
+    # their registration by address, as the fee exemption is. Admin-only: the
+    # public speaker list carries none of this.
+    abstract_title: str = ''
+
+    @staticmethod
+    def resolve_abstract_title(speaker) -> str:
+        from main.models import Abstract, attendees_for_email
+        attendees = attendees_for_email(speaker.event, speaker.email)
+        if not attendees:
+            return ''
+        abstract = Abstract.objects.filter(event=speaker.event, attendee__in=attendees).first()
+        return abstract.title if abstract else ''
+
 class AbstractShortSchema(Schema):
     id: int
     attendee: AttendeeSchema

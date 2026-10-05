@@ -2468,6 +2468,46 @@ class SpeakerLateAbstractTests(TestCase):
         self.assertEqual(response.json()['code'], 'already_submitted')
 
 
+class SpeakerAbstractStatusTests(TestCase):
+    """The admin speaker list says whether each speaker has submitted."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Talks', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, published=True, accepts_abstract=True)
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        for email, first in (('done@example.com', 'Done'), ('owes@example.com', 'Owes')):
+            user = User.objects.create_user(username=email, email=email, password='pw12345!aA')
+            attendee = Attendee.objects.create(user=user, event=self.event, first_name=first,
+                                               last_name='X', nationality=1, institute='PNU')
+            self.event.attendees.add(attendee)
+            self.event.speakers.create(name=f'{first} X', email=email.upper(), affiliation='PNU',
+                                       is_domestic=True, type='invited')
+        Abstract.objects.create(attendee=Attendee.objects.get(user__email='done@example.com'),
+                                event=self.event, title='My talk', file_path='a/b.docx')
+        # Same person, another event's abstract: must not count here.
+        other = Event.objects.create(name='Other', start_date=date(2026, 1, 1),
+                                     end_date=date(2026, 1, 2), venue='Busan', capacity=10)
+        other_att = Attendee.objects.create(user=User.objects.get(email='owes@example.com'),
+                                            event=other, first_name='Owes', last_name='X',
+                                            nationality=1, institute='PNU')
+        Abstract.objects.create(attendee=other_att, event=other, title='Elsewhere', file_path='a/c.docx')
+
+    def test_admin_list_reports_each_speakers_abstract(self):
+        self.client.force_login(self.admin_user)
+        rows = {r['email'].lower(): r for r in
+                self.client.get(f'/api/event/{self.event.id}/admin/speakers').json()}
+        self.assertEqual(rows['done@example.com']['abstract_title'], 'My talk')
+        self.assertEqual(rows['owes@example.com']['abstract_title'], '')
+
+    def test_the_public_list_does_not_carry_it(self):
+        rows = self.client.get(f'/api/event/{self.event.id}/speakers').json()
+        self.assertTrue(rows)
+        self.assertNotIn('abstract_title', rows[0])
+
+
 class ReceiptLookupTests(TestCase):
     """The receipt link has to resolve for payments with no gateway order id."""
 

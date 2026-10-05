@@ -1398,5 +1398,10 @@
 	"abstracts_emailActions": "Email presenters",
 	"abstracts_emailFiltered": "Everyone in this list ({count})",
 	"abstracts_emailSelected": "Selected ({count})",
-	"abstracts_presetTalkNotice": "Insert talk notice (short / flash talk)"
+	"abstracts_presetTalkNotice": "Insert talk notice (short / flash talk)",
+	"speakers_filterNoAbstract": "Speakers without an abstract",
+	"speakers_abstract": "Abstract",
+	"speakers_abstractSubmitted": "Submitted",
+	"speakers_abstractMissing": "Not submitted",
+	"speakers_emailFiltered": "Everyone in this list ({count})"
 }
