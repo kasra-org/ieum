@@ -1397,5 +1397,6 @@
 	"abstracts_resultCount": "{count}건",
 	"abstracts_emailActions": "발표자에게 이메일",
 	"abstracts_emailFiltered": "현재 목록 전체 ({count}명)",
-	"abstracts_emailSelected": "선택한 발표자 ({count}명)"
+	"abstracts_emailSelected": "선택한 발표자 ({count}명)",
+	"abstracts_presetTalkNotice": "발표 안내 문구 넣기 (Short talk / Flash talk)"
 }

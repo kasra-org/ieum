@@ -1749,8 +1749,8 @@ def send_emails(request, event_id: int):
     # "Dear {{ attendee.first_name }}". A broken template fails here, before
     # anything is queued, rather than in the worker after half have gone out.
     try:
-        render_email_template(subject, {"event": event, "attendee": None})
-        render_email_template(body, {"event": event, "attendee": None})
+        render_email_template(subject, {"event": event, "attendee": None, "abstract": None})
+        render_email_template(body, {"event": event, "attendee": None, "abstract": None})
     except TemplateSyntaxError as exc:
         # The admin sees the reason in the modal; keep a copy here so a report
         # of "it says 400" can be traced to the exact construct that failed.
@@ -1766,7 +1766,11 @@ def send_emails(request, event_id: int):
         # An address with no registration (a CC'd colleague, say) still gets the
         # email; the attendee variables just render empty.
         matches = attendees_for_email(event, recipient)
-        context = {"event": event, "attendee": matches[0] if matches else None}
+        attendee = matches[0] if matches else None
+        # Their abstract too, so one email to every presenter can branch on
+        # {% if abstract.presentation_type == "..." %} and name the title.
+        abstract = attendee.abstracts.filter(event=event).first() if attendee else None
+        context = {"event": event, "attendee": attendee, "abstract": abstract}
         send_mail.delay(
             render_email_template(subject, context),
             render_email_template(body, context),

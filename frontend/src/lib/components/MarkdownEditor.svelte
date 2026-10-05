@@ -401,6 +401,9 @@
         md = md.replace(/&lt;/g, '<');
         md = md.replace(/&gt;/g, '>');
         md = md.replace(/&quot;/g, '"');
+        // Template filters quote their arguments - date:'F d, Y' - and a quote
+        // left as an entity is a template the server cannot parse.
+        md = md.replace(/&#0*39;|&#x0*27;|&apos;/gi, "'");
 
         md = healVariables(md);
 

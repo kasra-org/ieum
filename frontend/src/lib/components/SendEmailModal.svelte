@@ -8,7 +8,10 @@
     import MarkdownEditor from '$lib/components/MarkdownEditor.svelte';
     import EmailAttachments from '$lib/components/EmailAttachments.svelte';
 
-    let { open = $bindable(false), recipients = '', action = '?/send_emails', eventadmins = [] } = $props();
+    // presets: optional [{ label, subject, body }] - buttons that fill the
+    // subject and message with a ready-made text, e.g. a body that branches
+    // per presentation type.
+    let { open = $bindable(false), recipients = '', action = '?/send_emails', eventadmins = [], presets = [] } = $props();
 
     let message_error = $state('');
     let ccEmails = $state([]);
@@ -20,7 +23,16 @@
     let successModal = $state(false);
     let sentCount = $state(0);
     let body = $state('');
+    let subject = $state('');
     let attachments = $state([]);
+    // The editor reads its value once, when created; bumping this rebuilds it
+    // so a preset shows up in it rather than only in the hidden field.
+    let editorKey = $state(0);
+    function applyPreset(preset) {
+        subject = preset.subject;
+        body = preset.body;
+        editorKey++;
+    }
 
     let suggestions = $derived(
         ccInput.trim()
@@ -158,6 +170,7 @@
             selectedBadge = -1;
             message_error = '';
             body = '';
+            subject = '';
             attachments = [];
         }
     });
@@ -242,9 +255,17 @@
         </div>
         <div class="mb-6">
             <Label for="subject" class="block mb-2">{m.attendees_subject()}</Label>
-            <input id="subject" name="subject" type="text" class="block w-full border border-gray-300 rounded-lg bg-gray-50 p-2.5 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600" />
+            <input id="subject" name="subject" type="text" bind:value={subject} class="block w-full border border-gray-300 rounded-lg bg-gray-50 p-2.5 text-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600" />
         </div>
         <div class="mb-6">
+            {#if presets.length}
+                <div class="flex flex-wrap gap-2 mb-2">
+                    {#each presets as preset}
+                        <Button type="button" size="xs" color="light" onclick={() => applyPreset(preset)}>{preset.label}</Button>
+                    {/each}
+                </div>
+            {/if}
+            {#key editorKey}
             <MarkdownEditor
                 bind:value={body}
                 id="body"
@@ -252,6 +273,7 @@
                 label={m.attendees_message()}
                 rows={10}
             />
+            {/key}
             <p class="mt-1 text-xs text-gray-500">{m.attendees_messageVariablesHelp({ variables: '{{ attendee.first_name }}, {{ attendee.name }}, {{ event.name }}, {{ event.venue }}, {{ event.organizers_en }}' })}</p>
         </div>
         <div class="mb-6">

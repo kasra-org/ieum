@@ -1397,5 +1397,6 @@
 	"abstracts_resultCount": "{count} abstract(s)",
 	"abstracts_emailActions": "Email presenters",
 	"abstracts_emailFiltered": "Everyone in this list ({count})",
-	"abstracts_emailSelected": "Selected ({count})"
+	"abstracts_emailSelected": "Selected ({count})",
+	"abstracts_presetTalkNotice": "Insert talk notice (short / flash talk)"
 }

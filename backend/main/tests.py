@@ -2240,6 +2240,25 @@ class ManualEmailTests(TestCase):
         self.assertEqual(out, f'See [Songdo Meeting](https://example.com/{self.event.id})')
 
     @patch('main.apis.send_mail')
+    def test_each_presenter_reads_the_branch_for_their_own_abstract(self, mock_send):
+        ann = Attendee.objects.get(user__email='ann@example.com')
+        bob = Attendee.objects.get(user__email='bob@example.com')
+        Abstract.objects.create(attendee=ann, event=self.event, title='Ann talk',
+                                file_path='a/a.docx', presentation_type='short_talk_poster')
+        Abstract.objects.create(attendee=bob, event=self.event, title='Bob flash',
+                                file_path='a/b.docx', presentation_type='flash_talk_poster')
+        body = ('{% if abstract.presentation_type == "short_talk" or '
+                'abstract.presentation_type == "short_talk_poster" %}SHORT {{ abstract.title }}'
+                '{% elif abstract.presentation_type == "flash_talk_poster" %}FLASH {{ abstract.title }}{% endif %}')
+        response = self.send('ann@example.com; bob@example.com; nobody@example.com', body)
+        self.assertEqual(response.status_code, 200, response.content)
+        sent = {call.args[2]: call.args[1] for call in mock_send.delay.call_args_list}
+        self.assertEqual(sent['ann@example.com'], 'SHORT Ann talk')
+        self.assertEqual(sent['bob@example.com'], 'FLASH Bob flash')
+        # No abstract: no branch, and no error.
+        self.assertEqual(sent['nobody@example.com'], '')
+
+    @patch('main.apis.send_mail')
     def test_a_broken_template_sends_nothing(self, mock_send):
         response = self.send('ann@example.com', 'Hello {% if attendee %}unclosed')
         self.assertEqual(response.status_code, 400)

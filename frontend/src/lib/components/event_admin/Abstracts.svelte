@@ -115,6 +115,32 @@
     });
     let filteredPresenterCount = $derived(new Set(filteredAbstracts.map(presenterEmail).filter(Boolean)).size);
 
+    // Ready-made texts for the presenter email. Rendered per recipient on the
+    // server, so one send covers every type: each person reads the paragraph
+    // for their own presentation type. Double quotes only - the editor's round
+    // trip is safe for them, and the template parser needs them intact.
+    const SHORT = 'abstract.presentation_type == "short_talk" or abstract.presentation_type == "short_talk_poster"';
+    const FLASH = 'abstract.presentation_type == "flash_talk_poster"';
+    const abstractEmailPresets = [{
+        label: m.abstracts_presetTalkNotice(),
+        subject: `[{{ event.name }}] Your Abstract Has Been Selected for a {% if ${FLASH} %}Flash Talk{% elif ${SHORT} %}Short Talk{% else %}Presentation{% endif %}`,
+        body: `Dear {{ attendee.first_name }},
+
+{% if ${SHORT} %}We are pleased to inform you that your abstract, "{{ abstract.title }}", has been selected for a **short talk** at {{ event.name }}. Congratulations!
+
+Each short talk is allotted **10 minutes**. Please prepare your slides so that your presentation fits within this time. **We kindly ask that you keep strictly to the 10-minute limit**, as the programme runs on a tight schedule and every speaker's time depends on the session staying on track. The session chair will keep time and may ask you to conclude once your time is up.{% elif ${FLASH} %}We are pleased to inform you that your abstract, "{{ abstract.title }}", has been selected for a **flash talk** at {{ event.name }}. Congratulations!
+
+A flash talk is a brief introduction to your work, designed to draw participants to your poster. Please prepare **no more than 2 slides**. **We kindly ask that you keep strictly to both the 2-slide limit and your allotted time**, as many flash talks are presented back to back and the session runs on a tight schedule. Presentations that exceed the limit may be cut short by the session chair.{% endif %}
+
+If you have any questions, please do not hesitate to contact us.
+
+We look forward to your presentation.
+
+Yours sincerely,
+The Organising Committee
+{{ event.name }}`,
+    }];
+
     let reviewerTotalPages = $derived(Math.ceil(filteredReviewers.length / itemsPerPage));
     let paginatedReviewers = $derived(
         filteredReviewers.slice((reviewerCurrentPage - 1) * itemsPerPage, reviewerCurrentPage * itemsPerPage)
@@ -407,7 +433,7 @@
 </Modal>
 
 <SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
-<SendEmailModal bind:open={abstract_email_modal} recipients={abstractEmailRecipients} eventadmins={data.eventadmins} />
+<SendEmailModal bind:open={abstract_email_modal} recipients={abstractEmailRecipients} eventadmins={data.eventadmins} presets={abstractEmailPresets} />
 
 <Modal id="abstract_modal" size="lg" title={m.abstracts_detailsTitle()} bind:open={abstract_modal} outsideclose>
     <form method="post" action="?/update_abstract" use:enhance={afterUpdateAbstract}>
