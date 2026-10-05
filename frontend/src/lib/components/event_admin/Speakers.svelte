@@ -14,6 +14,7 @@
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
     import InviteModal from '$lib/components/InviteModal.svelte';
+    import { page } from '$app/state';
 
     let { data } = $props();
 
@@ -249,6 +250,30 @@
     let speakerCount = $derived(data.speakers.filter(s => s.is_speaker).length);
     let chairCount = $derived(data.speakers.filter(s => s.is_chair).length);
     let filteredCount = $derived(new Set(filteredSpeakers.map(s => s.email).filter(Boolean)).size);
+
+    // Ready-made reminder for speakers who have not submitted. The link is
+    // written out in full here: a template variable inside a markdown link's
+    // URL would put spaces in it and break the link.
+    let abstractUrl = $derived(`${page.url.origin}/event/${data.event.id}/abstract`);
+    let speakerEmailPresets = $derived(tracksAbstracts ? [{
+        label: m.speakers_presetAbstractReminder(),
+        subject: '[{{ event.name }}] Kind Reminder: Abstract Submission',
+        body: `Dear {{ attendee.first_name }},
+
+Thank you for kindly agreeing to speak at {{ event.name }}. We are delighted to have you with us.
+
+As we are now preparing the programme and abstract book, we would be grateful if you could submit your abstract **at your earliest convenience**. You can submit it through the link below:
+
+[${abstractUrl}](${abstractUrl})
+
+If you have already sent your abstract to us by other means, or if there is anything we can do to help, please do not hesitate to let us know.
+
+Thank you very much for your contribution, and we look forward to welcoming you.
+
+Yours sincerely,
+The Organising Committee
+{{ event.name }}`,
+    }] : []);
 </script>
 
 <Heading tag="h2" class="text-xl font-bold mb-3">{m.speakers_title()}</Heading>
@@ -467,7 +492,7 @@
     </form>
 </Modal>
 
-<SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
+<SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} presets={speakerEmailPresets} />
 <InviteModal bind:open={invite_modal} template={data.email_templates?.invitation} requireRole={true} />
 
 <!-- Row controls post through these rather than opening the edit modal. The

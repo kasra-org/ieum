@@ -1403,5 +1403,6 @@
 	"speakers_abstract": "Abstract",
 	"speakers_abstractSubmitted": "Submitted",
 	"speakers_abstractMissing": "Not submitted",
-	"speakers_emailFiltered": "Everyone in this list ({count})"
+	"speakers_emailFiltered": "Everyone in this list ({count})",
+	"speakers_presetAbstractReminder": "Insert abstract reminder"
 }
