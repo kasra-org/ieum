@@ -1484,6 +1484,52 @@ Please review and respond to this request.
 
     return {"code": "success", "message": "Your request has been submitted."}
 
+def store_abstract_file(file_name, raw):
+    """Decode, validate and save an uploaded abstract file.
+
+    Returns (file_path, None, None) on success, or (None, code, message) when
+    the file is refused. Shared by a registrant's own submission and an admin
+    adding one for them, so both accept exactly the same files.
+    """
+    # An absent file used to reach the decoder and be reported as bad encoding,
+    # which sent people looking at their document rather than at the upload.
+    raw = raw or ""
+    if not isinstance(raw, str) or "," not in raw or raw in ("null", "undefined"):
+        return None, "no_file", "No abstract file was received. Please attach the file and try again."
+    try:
+        file_content = base64.b64decode(raw.split(",", 1)[1])
+    except (ValueError, IndexError):
+        return None, "invalid_file", "The uploaded file did not arrive intact. Please try uploading it again."
+
+    # Validate file upload for security
+    is_valid, error_message = validate_abstract_file(file_name, file_content)
+    if not is_valid:
+        return None, "invalid_file", error_message
+
+    # Use sanitized filename
+    safe_filename = sanitize_filename(file_name)
+    file_path = f"abstracts/{uuid.uuid4()}/{safe_filename}"
+    default_storage.save(file_path, ContentFile(file_content))
+    return file_path, None, None
+
+
+def send_abstract_confirmation(event, attendee, abstract):
+    """The submission confirmation, to the registrant's address."""
+    to = attendee.email
+    template = event.email_template_abstract_submission
+    if not to or template is None:
+        return
+    reply_to = event.main_admin.email if event.main_admin else None
+    send_mail.delay(
+        render_email_template(template.subject, {"event": event, "abstract": abstract}),
+        render_email_template(template.body, {"attendee": attendee, "event": event, "abstract": abstract}),
+        to,
+        reply_to=reply_to,
+        rich=True,
+        attachments=template_attachment_paths(template),
+    )
+
+
 @api.post("/event/{event_id}/abstract", response=MessageSchema)
 def submit_abstract(request, event_id: int):
     event = Event.objects.get(id=event_id)
@@ -1533,28 +1579,9 @@ def submit_abstract(request, event_id: int):
 
     # create the abstract with the post json data
     data = json.loads(request.body)
-    file_name = data["file_name"]
-
-    # An absent file used to reach the decoder and be reported as bad encoding,
-    # which sent people looking at their document rather than at the upload.
-    raw = data.get("file_content") or ""
-    if not isinstance(raw, str) or "," not in raw or raw in ("null", "undefined"):
-        return reject("no_file", "No abstract file was received. Please attach the file and try again.")
-    try:
-        file_content = base64.b64decode(raw.split(",", 1)[1])
-    except (ValueError, IndexError):
-        return reject("invalid_file", "The uploaded file did not arrive intact. Please try uploading it again.")
-
-    # Validate file upload for security
-    is_valid, error_message = validate_abstract_file(file_name, file_content)
-    if not is_valid:
-        return reject("invalid_file", error_message)
-
-    # Use sanitized filename
-    safe_filename = sanitize_filename(file_name)
-    file_path = f"abstracts/{uuid.uuid4()}/{safe_filename}"
-    file = ContentFile(file_content)
-    default_storage.save(file_path, file)
+    file_path, code, message = store_abstract_file(data["file_name"], data.get("file_content"))
+    if file_path is None:
+        return reject(code, message)
 
     # type/wants_short_talk are derived in Abstract.save(), so only the
     # requested presentation format needs to be validated here.
@@ -1562,7 +1589,7 @@ def submit_abstract(request, event_id: int):
     if presentation_type not in dict(Abstract.PRESENTATION_TYPE_CHOICES):
         presentation_type = "poster"
 
-    Abstract.objects.create(
+    abstract = Abstract.objects.create(
         attendee=attendee,
         event=event,
         title=data["title"],
@@ -1570,17 +1597,58 @@ def submit_abstract(request, event_id: int):
         file_path=file_path,
     )
 
-    reply_to = event.main_admin.email if event.main_admin else None
-    send_mail.delay(
-        render_email_template(event.email_template_abstract_submission.subject, {"event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)}),
-        render_email_template(event.email_template_abstract_submission.body, {"attendee": attendee, "event": event, "abstract": Abstract.objects.get(attendee=attendee, event=event)}),
-        attendee.user.email,
-        reply_to=reply_to,
-        rich=True,
-        attachments=template_attachment_paths(event.email_template_abstract_submission),
-    )
+    send_abstract_confirmation(event, attendee, abstract)
 
     return {"code": "success", "message": "Successfully submitted!"}
+
+
+@api.post("/event/{event_id}/admin/abstract/add", response=MessageSchema)
+@ensure_event_staff
+def add_abstract_for_attendee(request, event_id: int):
+    """An event admin adds an abstract on a registrant's behalf.
+
+    For an abstract that arrived some other way - by email, on paper. The admin
+    is the override, so the deadline, the payment gate and the abstract limit do
+    not apply; one abstract per registrant still does, and the file goes through
+    the same checks as a registrant's own upload. No confirmation is sent
+    unless the admin asks for one.
+    """
+    event = Event.objects.get(id=event_id)
+    data = json.loads(request.body)
+
+    def reject(code, message):
+        return api.create_response(request, {"code": code, "message": message}, status=400)
+
+    if not event.accepts_abstract:
+        return reject("not_accepted", "This event does not accept abstracts.")
+
+    attendee = Attendee.objects.filter(id=data.get("attendee_id"), event=event).first()
+    if attendee is None:
+        return reject("invalid_attendee", "Choose a registrant of this event.")
+    if attendee.abstracts.filter(event=event).exists():
+        return reject("already_submitted", "This registrant already has an abstract.")
+
+    title = (data.get("title") or "").strip()
+    if not title:
+        return reject("missing_title", "Enter the abstract title.")
+
+    presentation_type = data.get("presentation_type", "poster")
+    if presentation_type not in dict(Abstract.PRESENTATION_TYPE_CHOICES):
+        presentation_type = "poster"
+
+    file_path, code, message = store_abstract_file(data.get("file_name") or "", data.get("file_content"))
+    if file_path is None:
+        return reject(code, message)
+
+    abstract = Abstract.objects.create(
+        attendee=attendee, event=event, title=title,
+        presentation_type=presentation_type, file_path=file_path,
+    )
+    if data.get("send_confirmation"):
+        send_abstract_confirmation(event, attendee, abstract)
+    logger.info("Abstract %s added by admin %s for attendee %s",
+                abstract.id, request.user.username, attendee.id)
+    return {"code": "success", "message": "Abstract added."}
 
 @api.get("/event/{event_id}/speakers", response=List[PublicSpeakerSchema], auth=None)
 def get_speakers(request, event_id: int):

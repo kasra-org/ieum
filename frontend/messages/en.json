@@ -1404,5 +1404,11 @@
 	"speakers_abstractSubmitted": "Submitted",
 	"speakers_abstractMissing": "Not submitted",
 	"speakers_emailFiltered": "Everyone in this list ({count})",
-	"speakers_presetAbstractReminder": "Insert abstract reminder"
+	"speakers_presetAbstractReminder": "Insert abstract reminder",
+	"abstracts_addManually": "Add abstract manually",
+	"abstracts_addManuallyHelp": "For an abstract that reached you another way, such as by email. It is added for the chosen registrant regardless of the deadline, payment, or the abstract limit. Registrants who already have an abstract are not listed.",
+	"abstracts_registrant": "Registrant",
+	"abstracts_file": "Abstract file (DOCX or ODT, up to 1 MB)",
+	"abstracts_sendConfirmation": "Send the submission confirmation email to the registrant",
+	"abstracts_addManuallyError": "Failed to add the abstract."
 }

@@ -318,6 +318,23 @@ export const actions = {
         }
         return;
     },
+    add_abstract: async ({ cookies, params, request }) => {
+        const formdata = await request.formData();
+        const response = await post(`api/event/${params.slug}/admin/abstract/add`, {
+            attendee_id: parseInt(formdata.get('attendee_id'), 10),
+            title: formdata.get('title') || '',
+            presentation_type: formdata.get('presentation_type') || 'poster',
+            file_name: formdata.get('file_name') || '',
+            file_content: formdata.get('file_content') || '',
+            send_confirmation: formdata.get('send_confirmation') === 'true',
+        }, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            error(response.status, response.data);
+        }
+        return;
+    },
     add_reviewer: async ({ cookies, params, request }) => {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/reviewer/add`, {

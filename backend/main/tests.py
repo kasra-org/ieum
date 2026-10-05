@@ -2508,6 +2508,101 @@ class SpeakerAbstractStatusTests(TestCase):
         self.assertNotIn('abstract_title', rows[0])
 
 
+@temp_media
+class AdminAddAbstractTests(TestCase):
+    """An event admin adds an abstract on a registrant's behalf."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Manual', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, accepts_abstract=True, capacity_abstract=1,
+            abstract_deadline=date(2000, 1, 1),   # long past
+            email_template_abstract_submission=EmailTemplate.objects.create(subject='S', body='B'),
+        )
+        category, = add_categories(self.event, ('Regular', 200000))
+        self.user = User.objects.create_user(
+            username='author@example.com', email='author@example.com', password='pw12345!aA')
+        # Unpaid on purpose: the admin path is the override.
+        self.attendee = Attendee.objects.create(
+            user=self.user, event=self.event, first_name='Au', last_name='Thor',
+            nationality=1, institute='PNU', category=category)
+        self.event.attendees.add(self.attendee)
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.client.force_login(self.admin_user)
+
+    def docx(self):
+        import io
+        import docx
+        buf = io.BytesIO()
+        doc = docx.Document(); doc.add_paragraph('An abstract.'); doc.save(buf)
+        return 'data:application/octet-stream;base64,' + base64.b64encode(buf.getvalue()).decode()
+
+    def add(self, **extra):
+        payload = {'attendee_id': self.attendee.id, 'title': 'Sent by email',
+                   'presentation_type': 'short_talk', 'file_name': 'a.docx',
+                   'file_content': self.docx()}
+        payload.update(extra)
+        return self.client.post(f'/api/event/{self.event.id}/admin/abstract/add',
+                                data=json.dumps(payload), content_type='application/json')
+
+    @patch('main.apis.send_mail')
+    def test_an_admin_adds_one_past_the_deadline_and_the_payment_gate(self, mock_send):
+        response = self.add()
+        self.assertEqual(response.status_code, 200, response.content)
+        abstract = Abstract.objects.get(event=self.event)
+        self.assertEqual(abstract.attendee, self.attendee)
+        self.assertEqual(abstract.title, 'Sent by email')
+        self.assertEqual(abstract.presentation_type, 'short_talk')
+        self.assertTrue(default_storage.exists(abstract.file_path))
+        # No confirmation unless asked for.
+        mock_send.delay.assert_not_called()
+
+    @patch('main.apis.send_mail')
+    def test_the_limit_does_not_stop_an_admin(self, mock_send):
+        other = Attendee.objects.create(event=self.event, first_name='O', last_name='T',
+                                        nationality=1, institute='PNU')
+        Abstract.objects.create(attendee=other, event=self.event, title='First', file_path='a/b.docx')
+        self.assertEqual(self.add().status_code, 200)
+
+    @patch('main.apis.send_mail')
+    def test_a_confirmation_goes_out_when_asked(self, mock_send):
+        self.assertEqual(self.add(send_confirmation=True).status_code, 200)
+        self.assertEqual(mock_send.delay.call_args.args[2], 'author@example.com')
+
+    @patch('main.apis.send_mail')
+    def test_one_abstract_per_registrant_still_holds(self, mock_send):
+        self.add()
+        response = self.add()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'already_submitted')
+
+    def test_another_events_registrant_is_refused(self):
+        other = Event.objects.create(name='Other', start_date=date(2026, 1, 1),
+                                     end_date=date(2026, 1, 2), venue='Busan', capacity=10)
+        theirs = Attendee.objects.create(event=other, first_name='X', last_name='Y',
+                                         nationality=1, institute='PNU')
+        response = self.add(attendee_id=theirs.id)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'invalid_attendee')
+
+    def test_the_file_is_checked_like_a_registrants_own(self):
+        response = self.add(file_content='data:application/octet-stream;base64,'
+                                         + base64.b64encode(b'not a document').decode())
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'invalid_file')
+        self.assertFalse(Abstract.objects.filter(event=self.event).exists())
+
+    def test_a_title_is_required(self):
+        self.assertEqual(self.add(title='  ').json()['code'], 'missing_title')
+
+    def test_a_non_admin_cannot_add(self):
+        self.client.force_login(self.user)
+        self.assertEqual(self.add().status_code, 403)
+        self.assertFalse(Abstract.objects.filter(event=self.event).exists())
+
+
 class ReceiptLookupTests(TestCase):
     """The receipt link has to resolve for payments with no gateway order id."""
 

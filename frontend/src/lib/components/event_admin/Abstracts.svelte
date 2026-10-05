@@ -10,6 +10,7 @@
     import { apiMessage } from '$lib/apiMessages.js';
     import { getDisplayInstitute, getDisplayName, getPresentationTypeLabel, matchesSearch } from '$lib/utils.js';
     import UserSelectionModal from '$lib/components/UserSelectionModal.svelte';
+    import SearchableUserList from '$lib/components/SearchableUserList.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
@@ -163,6 +164,72 @@ The Organising Committee
     function handleAbstractPageChange(page) {
         abstractCurrentPage = page;
     }
+
+    // Adding an abstract on a registrant's behalf - one that arrived by email
+    // or on paper. Only registrants without one are offered: one each.
+    let add_abstract_modal = $state(false);
+    let newAbstractAttendeeId = $state(null);
+    let newAbstractTitle = $state('');
+    let newAbstractType = $state('poster');
+    let newAbstractFile = $state({ name: '', content: '' });
+    let newAbstractSendConfirmation = $state(false);
+    let add_abstract_error = $state('');
+    let adding_abstract = $state(false);
+    let abstractFileInput = $state(null);
+    const attendeesWithoutAbstract = $derived.by(() => {
+        const taken = new Set(data.abstracts.map(a => a.attendee?.id));
+        return attendeeUserList.filter(a => !taken.has(a.id));
+    });
+    const showAddAbstractModal = () => {
+        newAbstractAttendeeId = null;
+        newAbstractTitle = '';
+        newAbstractType = 'poster';
+        newAbstractFile = { name: '', content: '' };
+        newAbstractSendConfirmation = false;
+        add_abstract_error = '';
+        add_abstract_modal = true;
+    };
+    // Same limits as a registrant's own upload; the server checks again.
+    function pickAbstractFile(event) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        if (ext !== 'docx' && ext !== 'odt') {
+            add_abstract_error = m.abstractSubmission_invalidFileFormat();
+            event.target.value = '';
+            return;
+        }
+        if (file.size > 1048576) {
+            add_abstract_error = m.abstractSubmission_fileSizeExceeds();
+            event.target.value = '';
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            add_abstract_error = '';
+            newAbstractFile = { name: file.name, content: e.target.result };
+        };
+        reader.onerror = () => {
+            newAbstractFile = { name: '', content: '' };
+            add_abstract_error = m.abstractSubmission_fileReadFailed();
+        };
+        reader.readAsDataURL(file);
+    }
+    let canAddAbstract = $derived(
+        !!newAbstractAttendeeId && newAbstractTitle.trim() !== '' && !!newAbstractFile.content && !adding_abstract
+    );
+    const afterAddAbstract = () => {
+        adding_abstract = true;
+        return async ({ result, update }) => {
+            adding_abstract = false;
+            if (result.type === 'success') {
+                await update({ reset: false });
+                add_abstract_modal = false;
+            } else {
+                add_abstract_error = apiMessage(result.error, m.abstracts_addManuallyError);
+            }
+        };
+    };
 
     let reviewer_modal = $state(false);
     let delete_reviewer_modal = $state(false);
@@ -336,6 +403,7 @@ The Organising Committee
         {/each}
     </div>
     <div class="flex items-center gap-2">
+        <Button color="primary" size="sm" onclick={showAddAbstractModal}>{m.abstracts_addManually()}</Button>
         <Button color="primary" size="sm">{m.abstracts_emailActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
         <Dropdown class="w-auto list-none p-1">
             <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showAbstractEmailModal('filtered')} disabled={filteredPresenterCount === 0}>
@@ -438,6 +506,53 @@ The Organising Committee
 </Modal>
 
 <SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
+<Modal id="add_abstract_modal" size="lg" title={m.abstracts_addManually()} bind:open={add_abstract_modal}>
+    <form method="post" action="?/add_abstract" use:enhance={afterAddAbstract}>
+        <p class="text-sm text-gray-600 mb-6">{m.abstracts_addManuallyHelp()}</p>
+        <input type="hidden" name="attendee_id" value={newAbstractAttendeeId ?? ''} />
+        <input type="hidden" name="file_name" value={newAbstractFile.name} />
+        <input type="hidden" name="file_content" value={newAbstractFile.content} />
+        <input type="hidden" name="send_confirmation" value={newAbstractSendConfirmation ? 'true' : 'false'} />
+
+        <div class="mb-6">
+            <Label class="block mb-2">{m.abstracts_registrant()} <span class="text-red-500">*</span></Label>
+            <SearchableUserList
+                items={attendeesWithoutAbstract}
+                bind:selectedId={newAbstractAttendeeId}
+                maxHeight="max-h-60"
+                showChangeButton={true}
+                getItemName={getDisplayName}
+                getItemInstitute={getDisplayInstitute}
+                getItemEmail={(a) => a.email || a.user?.email || a.user_email || ''}
+            />
+        </div>
+        <div class="mb-6">
+            <Label for="new_abstract_title" class="block mb-2">{m.abstracts_titleField()} <span class="text-red-500">*</span></Label>
+            <Input id="new_abstract_title" name="title" type="text" bind:value={newAbstractTitle} />
+        </div>
+        <div class="mb-6">
+            <Label for="new_abstract_type" class="block mb-2">{m.abstracts_type()}</Label>
+            <Select id="new_abstract_type" name="presentation_type" bind:value={newAbstractType} items={PRESENTATION_TYPES.map(t => ({ value: t, name: getPresentationTypeLabel({ presentation_type: t }, m) }))} />
+        </div>
+        <div class="mb-6">
+            <Label for="new_abstract_file" class="block mb-2">{m.abstracts_file()} <span class="text-red-500">*</span></Label>
+            <input id="new_abstract_file" type="file" accept=".docx,.odt" bind:this={abstractFileInput} onchange={pickAbstractFile}
+                class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50" />
+            {#if newAbstractFile.name}<p class="mt-1 text-xs text-gray-500">{newAbstractFile.name}</p>{/if}
+        </div>
+        <div class="mb-6">
+            <Checkbox bind:checked={newAbstractSendConfirmation}>{m.abstracts_sendConfirmation()}</Checkbox>
+        </div>
+        {#if add_abstract_error}
+            <Alert color="red" class="mb-6">{add_abstract_error}</Alert>
+        {/if}
+        <div class="flex justify-center gap-2">
+            <Button color="alternative" type="button" onclick={() => add_abstract_modal = false}>{m.common_cancel()}</Button>
+            <Button color="primary" type="submit" disabled={!canAddAbstract}>{m.abstracts_add()}</Button>
+        </div>
+    </form>
+</Modal>
+
 <SendEmailModal bind:open={abstract_email_modal} recipients={abstractEmailRecipients} eventadmins={data.eventadmins} presets={abstractEmailPresets} />
 
 <Modal id="abstract_modal" size="lg" title={m.abstracts_detailsTitle()} bind:open={abstract_modal} outsideclose>

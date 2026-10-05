@@ -1404,5 +1404,11 @@
 	"speakers_abstractSubmitted": "제출",
 	"speakers_abstractMissing": "미제출",
 	"speakers_emailFiltered": "현재 목록 전체 ({count}명)",
-	"speakers_presetAbstractReminder": "초록 제출 요청 문구 넣기"
+	"speakers_presetAbstractReminder": "초록 제출 요청 문구 넣기",
+	"abstracts_addManually": "초록 수동 추가",
+	"abstracts_addManuallyHelp": "이메일 등 다른 경로로 받은 초록을 등록자 대신 추가합니다. 마감일, 결제 여부, 초록 수 제한과 관계없이 추가됩니다. 이미 초록이 있는 등록자는 목록에 나오지 않습니다.",
+	"abstracts_registrant": "등록자",
+	"abstracts_file": "초록 파일 (DOCX 또는 ODT, 1MB 이하)",
+	"abstracts_sendConfirmation": "등록자에게 초록 제출 확인 메일 보내기",
+	"abstracts_addManuallyError": "초록을 추가하지 못했습니다."
 }
