@@ -114,6 +114,11 @@
         return [...new Set(rows.map(presenterEmail).filter(Boolean))].join('; ');
     });
     let filteredPresenterCount = $derived(new Set(filteredAbstracts.map(presenterEmail).filter(Boolean)).size);
+    // People, not rows: a row whose presenter has no address on file cannot be
+    // emailed, and counting it would open the window with nobody to send to.
+    let selectedPresenterCount = $derived(new Set(
+        filteredAbstracts.filter(a => activeAbstractSelection.includes(a.id)).map(presenterEmail).filter(Boolean)
+    ).size);
 
     // Ready-made texts for the presenter email. Rendered per recipient on the
     // server, so one send covers every type: each person reads the paragraph
@@ -336,8 +341,8 @@ The Organising Committee
             <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showAbstractEmailModal('filtered')} disabled={filteredPresenterCount === 0}>
                 {m.abstracts_emailFiltered({ count: filteredPresenterCount })}
             </DropdownItem>
-            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showAbstractEmailModal('selected')} disabled={activeAbstractSelection.length === 0}>
-                {m.abstracts_emailSelected({ count: activeAbstractSelection.length })}
+            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showAbstractEmailModal('selected')} disabled={selectedPresenterCount === 0}>
+                {m.abstracts_emailSelected({ count: selectedPresenterCount })}
             </DropdownItem>
         </Dropdown>
     </div>
