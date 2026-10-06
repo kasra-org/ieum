@@ -345,6 +345,32 @@ export const actions = {
         }
         return;
     },
+    lookup_user: async ({ cookies, params, request }) => {
+        const formdata = await request.formData();
+        const email = (formdata.get('email') || '').trim();
+        const response = await get(`api/event/${params.slug}/admin/user-lookup?email=${encodeURIComponent(email)}`, cookies);
+        if (response.ok && response.status === 200) {
+            return { found: true, user: response.data };
+        }
+        if (response.status === 404) {
+            return { found: false };
+        }
+        error(response.status, response.data);
+    },
+    register_attendee: async ({ cookies, params, request }) => {
+        const formdata = await request.formData();
+        const response = await post(`api/event/${params.slug}/admin/attendee/add`, {
+            email: formdata.get('email') || '',
+            category: parseInt(formdata.get('category'), 10),
+            send_confirmation: formdata.get('send_confirmation') === 'true',
+        }, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            error(response.status, response.data);
+        }
+        return;
+    },
     add_reviewer: async ({ cookies, params, request }) => {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/reviewer/add`, {

@@ -1410,5 +1410,16 @@
 	"abstracts_registrant": "Registrant",
 	"abstracts_file": "Abstract file (DOCX or ODT, up to 1 MB)",
 	"abstracts_sendConfirmation": "Send the submission confirmation email to the registrant",
-	"abstracts_addManuallyError": "Failed to add the abstract."
+	"abstracts_addManuallyError": "Failed to add the abstract.",
+	"unpaidAttendees_register": "Register an account",
+	"unpaidAttendees_registerHelp": "Registers someone who already has an account on this site - for example, someone who registered by phone or email. Their registration is filled from their profile and left unpaid; they pay online after logging in.",
+	"unpaidAttendees_registerEmail": "Their account email",
+	"unpaidAttendees_registerFind": "Find",
+	"unpaidAttendees_registerNoAccount": "No account uses that email address. They need to sign up on the site first.",
+	"unpaidAttendees_registerAlready": "This person is already registered for the event.",
+	"unpaidAttendees_registerFree": "free",
+	"unpaidAttendees_registerFreeHint": "This category is free, so they will appear on the attendee list rather than here.",
+	"unpaidAttendees_registerSendConfirmation": "Send them the registration confirmation email",
+	"unpaidAttendees_registerSubmit": "Register",
+	"unpaidAttendees_registerError": "Failed to register."
 }

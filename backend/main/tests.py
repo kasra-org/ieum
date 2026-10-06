@@ -2711,6 +2711,95 @@ class AdminListQueryCountTests(TestCase):
         self.assertEqual(abstracts[0]['votes'], 0)
 
 
+class AdminRegisterAccountTests(TestCase):
+    """An admin registers an existing account for the event, unpaid."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Phone-in', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, registration_deadline=date(2000, 1, 1),
+            email_template_registration=EmailTemplate.objects.create(subject='Registered', body='Hi'))
+        self.paid, self.free = add_categories(self.event, ('Regular', 200000), ('Invited', 0))
+        institution = Institution.objects.create(name_en='PNU', name_ko='부산대')
+        self.person = User.objects.create_user(
+            username='caller@example.com', email='caller@example.com', password='pw12345!aA',
+            first_name='Cal', last_name='Ler', nationality=1, job_title='Prof', institute=institution)
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.client.force_login(self.admin_user)
+
+    def register(self, **extra):
+        payload = {'email': 'Caller@Example.com', 'category': self.paid.id}
+        payload.update(extra)
+        return self.client.post(f'/api/event/{self.event.id}/admin/attendee/add',
+                                data=json.dumps(payload), content_type='application/json')
+
+    @patch('main.invitations.send_mail')
+    def test_registers_from_the_profile_as_unpaid_past_the_deadline(self, mock_send):
+        response = self.register()
+        self.assertEqual(response.status_code, 200, response.content)
+        attendee = Attendee.objects.select_related('event').get(event=self.event, user=self.person)
+        self.assertEqual(attendee.institute_ko, '부산대')
+        self.assertEqual(attendee.category, self.paid)
+        self.assertEqual(attendee.payment_status, 'pending')
+        self.assertTrue(self.event.attendees.filter(id=attendee.id).exists())
+        mock_send.delay.assert_not_called()
+
+    @patch('main.invitations.send_mail')
+    def test_confirmation_only_when_asked(self, mock_send):
+        self.register(send_confirmation=True)
+        self.assertEqual(mock_send.delay.call_args.args[2], 'caller@example.com')
+
+    def test_a_free_category_is_simply_registered(self):
+        self.register(category=self.free.id)
+        attendee = Attendee.objects.select_related('event').get(event=self.event, user=self.person)
+        self.assertEqual(attendee.payment_status, 'free')
+
+    def test_an_unknown_address_is_refused(self):
+        response = self.register(email='nobody@example.com')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()['code'], 'no_account')
+
+    def test_twice_is_refused(self):
+        self.register()
+        self.assertEqual(self.register().json()['code'], 'already_registered')
+        self.assertEqual(Attendee.objects.filter(event=self.event, user=self.person).count(), 1)
+
+    def test_another_events_category_is_refused(self):
+        other = Event.objects.create(name='Other', start_date=date(2026, 1, 1),
+                                     end_date=date(2026, 1, 2), venue='Busan', capacity=10)
+        theirs, = add_categories(other, ('Theirs', 1))
+        self.assertEqual(self.register(category=theirs.id).json()['code'], 'invalid_category')
+
+    def test_capacity_still_applies(self):
+        self.event.capacity = 1
+        self.event.save()
+        filler = Attendee.objects.create(event=self.event, first_name='F', last_name='L',
+                                         nationality=1, institute='PNU')
+        self.event.attendees.add(filler)
+        self.assertEqual(self.register().json()['code'], 'event_full')
+
+    def test_lookup_shows_who_and_whether_registered(self):
+        url = f'/api/event/{self.event.id}/admin/user-lookup?email=caller@example.com'
+        body = self.client.get(url).json()
+        self.assertEqual(body['name'], 'Cal Ler')
+        self.assertEqual(body['institute_ko'], '부산대')
+        self.assertFalse(body['already_registered'])
+        self.register()
+        self.assertTrue(self.client.get(url).json()['already_registered'])
+
+    def test_lookup_is_exact_only(self):
+        url = f'/api/event/{self.event.id}/admin/user-lookup?email=caller'
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_a_non_admin_can_do_neither(self):
+        self.client.force_login(self.person)
+        self.assertEqual(self.register().status_code, 403)
+        self.assertEqual(self.client.get(
+            f'/api/event/{self.event.id}/admin/user-lookup?email=caller@example.com').status_code, 403)
+
+
 class ReceiptLookupTests(TestCase):
     """The receipt link has to resolve for payments with no gateway order id."""
 

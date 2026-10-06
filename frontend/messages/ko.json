@@ -1410,5 +1410,16 @@
 	"abstracts_registrant": "등록자",
 	"abstracts_file": "초록 파일 (DOCX 또는 ODT, 1MB 이하)",
 	"abstracts_sendConfirmation": "등록자에게 초록 제출 확인 메일 보내기",
-	"abstracts_addManuallyError": "초록을 추가하지 못했습니다."
+	"abstracts_addManuallyError": "초록을 추가하지 못했습니다.",
+	"unpaidAttendees_register": "계정으로 수동 등록",
+	"unpaidAttendees_registerHelp": "이미 사이트에 가입한 분을 등록합니다(예: 전화나 이메일로 등록을 요청한 경우). 프로필 정보로 등록되며 미결제 상태로 남고, 본인이 로그인해 온라인으로 결제합니다.",
+	"unpaidAttendees_registerEmail": "계정 이메일",
+	"unpaidAttendees_registerFind": "찾기",
+	"unpaidAttendees_registerNoAccount": "이 이메일을 쓰는 계정이 없습니다. 먼저 사이트에 가입해야 합니다.",
+	"unpaidAttendees_registerAlready": "이미 이 행사에 등록된 분입니다.",
+	"unpaidAttendees_registerFree": "무료",
+	"unpaidAttendees_registerFreeHint": "무료 구분이라 미결제 목록이 아닌 참가자 목록에 나타납니다.",
+	"unpaidAttendees_registerSendConfirmation": "등록 확인 메일 보내기",
+	"unpaidAttendees_registerSubmit": "등록",
+	"unpaidAttendees_registerError": "등록하지 못했습니다."
 }

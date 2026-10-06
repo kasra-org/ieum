@@ -1,8 +1,8 @@
 <script>
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
-    import { Button, Modal, Alert, Checkbox, Dropdown, DropdownItem, Label, Select } from '$lib/components/ui';
+    import { Button, Modal, Alert, Checkbox, Dropdown, DropdownItem, Label, Select, Input } from '$lib/components/ui';
     import { ChevronDown, UserMinus, UserPen } from '@lucide/svelte';
-    import { enhance } from '$app/forms';
+    import { enhance, deserialize } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
@@ -166,6 +166,71 @@
         };
     };
 
+    // Registering an existing account by hand - someone who signed up on the
+    // site but registered by phone or email. Found by exact address, so the
+    // admin sees who it is before registering them; they then pay online.
+    let register_modal = $state(false);
+    let register_email = $state('');
+    let register_found = $state(null);      // the account the address belongs to
+    let register_category = $state('');
+    let register_send_confirmation = $state(false);
+    let register_error = $state('');
+    let register_busy = $state(false);
+    const registerCategories = $derived(data.event.registration_categories ?? []);
+    const chosenCategory = $derived(registerCategories.find(c => String(c.id) === String(register_category)));
+    const showRegisterModal = () => {
+        register_email = '';
+        register_found = null;
+        register_category = String(registerCategories.find(c => (c.fee || 0) > 0)?.id ?? registerCategories[0]?.id ?? '');
+        register_send_confirmation = false;
+        register_error = '';
+        register_modal = true;
+    };
+    async function lookupAccount() {
+        register_error = '';
+        register_found = null;
+        const email = register_email.trim();
+        if (!email) return;
+        register_busy = true;
+        try {
+            const body = new FormData();
+            body.append('email', email);
+            const result = deserialize(await (await fetch('?/lookup_user', { method: 'POST', body })).text());
+            if (result.type === 'success' && result.data?.found) {
+                register_found = result.data.user;
+                if (register_found.already_registered) register_error = m.unpaidAttendees_registerAlready();
+            } else if (result.type === 'success') {
+                register_error = m.unpaidAttendees_registerNoAccount();
+            } else {
+                register_error = apiMessage(result.error, m.unpaidAttendees_registerError);
+            }
+        } finally {
+            register_busy = false;
+        }
+    }
+    // A different address means a different person: drop the old result.
+    $effect(() => {
+        register_email;
+        register_found = null;
+    });
+    const canRegister = $derived(!!register_found && !register_found.already_registered && !!register_category && !register_busy);
+    const afterRegister = () => {
+        register_busy = true;
+        return async ({ result, update }) => {
+            register_busy = false;
+            if (result.type === 'success') {
+                await update({ reset: false });
+                register_modal = false;
+            } else {
+                register_error = apiMessage(result.error, m.unpaidAttendees_registerError);
+            }
+        };
+    };
+    function formatCategory(c) {
+        const label = getCategoryLabel(c, languageTag());
+        return (c.fee || 0) > 0 ? `${label} (${formatFee(c.fee)})` : `${label} (${m.unpaidAttendees_registerFree()})`;
+    }
+
     let deregister_modal = $state(false);
     let deregister_target = $state(null);
     let deregister_error = $state('');
@@ -194,6 +259,7 @@
     <Alert color="blue">{m.unpaidAttendees_freeEvent()}</Alert>
 {:else}
     <div class="flex flex-wrap justify-end gap-2 mb-4">
+        <Button color="primary" size="sm" onclick={showRegisterModal}>{m.unpaidAttendees_register()}</Button>
         <Button color="primary" size="sm">{m.unpaidAttendees_emailActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
         <Dropdown class="w-auto list-none p-1">
             <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showEmailModal(true)} disabled={unpaid.length === 0}>
@@ -274,6 +340,46 @@
     <TablePagination {currentPage} {totalPages} onPageChange={(p) => currentPage = p} />
     <p class="mt-5 mb-3 text-sm text-right">{m.unpaidAttendees_count({ count: unpaid.length })}</p>
 {/if}
+
+<Modal id="register_attendee_modal" size="md" title={m.unpaidAttendees_register()} bind:open={register_modal}>
+    <form method="post" action="?/register_attendee" use:enhance={afterRegister}>
+        <p class="text-sm text-gray-600 mb-6">{m.unpaidAttendees_registerHelp()}</p>
+        <div class="mb-4">
+            <Label for="register_email" class="block mb-2">{m.unpaidAttendees_registerEmail()}</Label>
+            <div class="flex gap-2">
+                <Input id="register_email" name="email" type="email" bind:value={register_email}
+                    onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); lookupAccount(); } }} />
+                <Button type="button" color="light" class="shrink-0 whitespace-nowrap" onclick={lookupAccount} disabled={!register_email.trim() || register_busy}>{m.unpaidAttendees_registerFind()}</Button>
+            </div>
+        </div>
+        {#if register_found}
+            <div class="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm">
+                <div class="font-medium">{languageTag() === 'ko' && register_found.korean_name ? register_found.korean_name : register_found.name}</div>
+                <div class="text-gray-600">{languageTag() === 'ko' && register_found.institute_ko ? register_found.institute_ko : register_found.institute}</div>
+                <div class="text-gray-500">{register_found.email}</div>
+            </div>
+            <div class="mb-4">
+                <Label for="register_category" class="block mb-2">{m.attendees_tier()}</Label>
+                <Select id="register_category" name="category" bind:value={register_category}
+                    items={registerCategories.map(c => ({ value: String(c.id), name: formatCategory(c) }))} />
+                {#if chosenCategory && !((chosenCategory.fee || 0) > 0)}
+                    <p class="mt-1 text-xs text-gray-500">{m.unpaidAttendees_registerFreeHint()}</p>
+                {/if}
+            </div>
+            <div class="mb-6">
+                <input type="hidden" name="send_confirmation" value={register_send_confirmation ? 'true' : 'false'} />
+                <Checkbox bind:checked={register_send_confirmation}>{m.unpaidAttendees_registerSendConfirmation()}</Checkbox>
+            </div>
+        {/if}
+        {#if register_error}
+            <Alert color="red" class="mb-6">{register_error}</Alert>
+        {/if}
+        <div class="flex justify-center gap-2">
+            <Button color="alternative" type="button" onclick={() => register_modal = false}>{m.unpaidAttendees_cancel()}</Button>
+            <Button color="primary" type="submit" disabled={!canRegister}>{m.unpaidAttendees_registerSubmit()}</Button>
+        </div>
+    </form>
+</Modal>
 
 <SendEmailModal bind:open={send_email_modal} recipients={emailRecipients} eventadmins={data.eventadmins} />
 

@@ -1116,6 +1116,73 @@ def admin_attendee_rows(queryset):
                               'custom_answers__reference'))
 
 
+@api.get("/event/{event_id}/admin/user-lookup")
+@ensure_event_staff
+def lookup_user_for_registration(request, event_id: int, email: str = ""):
+    """Who an exact address belongs to, so an admin registering someone by
+    hand can see it is the right person first.
+
+    Exact match only - no partial search - so an event admin cannot page
+    through the site's accounts; this says no more than the registration it
+    is about to create would show them anyway.
+    """
+    event = Event.objects.get(id=event_id)
+    user = User.objects.filter(email__iexact=(email or "").strip()).select_related("institute").first()
+    if user is None:
+        return api.create_response(
+            request, {"code": "no_account", "message": "No account uses that email address."}, status=404)
+    return {
+        "id": user.id,
+        "name": f"{user.first_name} {user.last_name}".strip(),
+        "korean_name": user.korean_name,
+        "email": user.email,
+        "institute": user.institute.name_en if user.institute else "",
+        "institute_ko": user.institute.name_ko if user.institute else "",
+        "already_registered": event.attendees.filter(user=user).exists(),
+    }
+
+
+@api.post("/event/{event_id}/admin/attendee/add", response=MessageSchema)
+@ensure_event_staff
+def register_user_for_event(request, event_id: int):
+    """An event admin registers an existing account for the event, unpaid.
+
+    For someone who signed up on the site but registered by phone or email.
+    The registration is filled from their profile, as an accepted invitation
+    is, in the category the admin chose and with no waiver - so in a paid
+    category it waits on the unpaid tab until they log in and pay. The
+    deadline does not apply (the admin is the override); capacity does, as
+    the room does not get bigger.
+    """
+    event = Event.objects.get(id=event_id)
+    data = json.loads(request.body)
+
+    def reject(code, message, status=400):
+        return api.create_response(request, {"code": code, "message": message}, status=status)
+
+    user = User.objects.filter(email__iexact=(data.get("email") or "").strip()).first()
+    if user is None:
+        return reject("no_account", "No account uses that email address.", status=404)
+    if event.attendees.filter(user=user).exists():
+        return reject("already_registered", "This person is already registered for the event.")
+    if event.capacity > 0 and event.capacity <= event.attendees.count():
+        return reject("event_full", "Sorry, the event is full.")
+    # Any of this event's categories, retired ones included, as when an admin
+    # changes someone's category; another event's would price this one.
+    try:
+        category = event.registration_categories.get(id=int(data.get("category")))
+    except (TypeError, ValueError, RegistrationCategory.DoesNotExist):
+        return reject("invalid_category", "Choose a registration category of this event.")
+
+    attendee = invitations.attendee_from_profile(event, user, category)
+    event.attendees.add(attendee)
+    if data.get("send_confirmation"):
+        invitations.send_registration_confirmation(event, attendee, user.email)
+    logger.info("Admin %s registered user %s for event %s (attendee %s)",
+                request.user.username, user.id, event.id, attendee.id)
+    return {"code": "success", "message": "Registered."}
+
+
 @api.get("/event/{event_id}/attendees", response=List[AttendeeSchema])
 @ensure_event_staff
 def get_event_attendees(request, event_id: int, all: bool = False):
