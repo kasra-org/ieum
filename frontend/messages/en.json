@@ -1412,7 +1412,7 @@
 	"abstracts_sendConfirmation": "Send the submission confirmation email to the registrant",
 	"abstracts_addManuallyError": "Failed to add the abstract.",
 	"unpaidAttendees_register": "Register an account",
-	"unpaidAttendees_registerHelp": "Registers someone who already has an account on this site - for example, someone who registered by phone or email. Their registration is filled from their profile and left unpaid; they pay online after logging in.",
+	"unpaidAttendees_registerHelp": "Registers someone who already has an account on this site - for example, someone who registered by phone or email. Accounts already registered for this event are not listed. The registration is filled from their profile and left unpaid; they pay online after logging in.",
 	"unpaidAttendees_registerEmail": "Their account email",
 	"unpaidAttendees_registerFind": "Find",
 	"unpaidAttendees_registerNoAccount": "No account uses that email address. They need to sign up on the site first.",

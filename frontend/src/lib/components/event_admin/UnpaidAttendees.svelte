@@ -11,6 +11,7 @@
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
+    import SearchableUserList from '$lib/components/SearchableUserList.svelte';
 
     let { data } = $props();
 
@@ -167,11 +168,21 @@
     };
 
     // Registering an existing account by hand - someone who signed up on the
-    // site but registered by phone or email. Found by exact address, so the
-    // admin sees who it is before registering them; they then pay online.
+    // site but registered by phone or email; they then pay online.
+    //
+    // Staff pick from every account, as in the other people pickers here,
+    // which likewise get the site's account list only for staff. A non-staff
+    // event admin never sees that list anywhere on this page, so for them the
+    // account is found by its exact address instead.
+    const canBrowseAccounts = $derived(Array.isArray(data.users));
+    const registeredUserIds = $derived(new Set((data.attendees ?? []).map(a => a.user?.id).filter(Boolean)));
+    const registerableAccounts = $derived(
+        canBrowseAccounts ? data.users.filter(u => !registeredUserIds.has(u.id)) : []
+    );
+    let register_user_id = $state(null);    // picked from the list (staff)
     let register_modal = $state(false);
     let register_email = $state('');
-    let register_found = $state(null);      // the account the address belongs to
+    let register_found = $state(null);      // the account the address belongs to (non-staff)
     let register_category = $state('');
     let register_send_confirmation = $state(false);
     let register_error = $state('');
@@ -179,6 +190,7 @@
     const registerCategories = $derived(data.event.registration_categories ?? []);
     const chosenCategory = $derived(registerCategories.find(c => String(c.id) === String(register_category)));
     const showRegisterModal = () => {
+        register_user_id = null;
         register_email = '';
         register_found = null;
         register_category = String(registerCategories.find(c => (c.fee || 0) > 0)?.id ?? registerCategories[0]?.id ?? '');
@@ -213,7 +225,11 @@
         register_email;
         register_found = null;
     });
-    const canRegister = $derived(!!register_found && !register_found.already_registered && !!register_category && !register_busy);
+    // Whichever way the account was found, the server registers it by address.
+    const registerTarget = $derived(canBrowseAccounts
+        ? registerableAccounts.find(u => u.id === register_user_id) ?? null
+        : (register_found && !register_found.already_registered ? register_found : null));
+    const canRegister = $derived(!!registerTarget && !!register_category && !register_busy);
     const afterRegister = () => {
         register_busy = true;
         return async ({ result, update }) => {
@@ -344,20 +360,34 @@
 <Modal id="register_attendee_modal" size="md" title={m.unpaidAttendees_register()} bind:open={register_modal}>
     <form method="post" action="?/register_attendee" use:enhance={afterRegister}>
         <p class="text-sm text-gray-600 mb-6">{m.unpaidAttendees_registerHelp()}</p>
-        <div class="mb-4">
-            <Label for="register_email" class="block mb-2">{m.unpaidAttendees_registerEmail()}</Label>
-            <div class="flex gap-2">
-                <Input id="register_email" name="email" type="email" bind:value={register_email}
-                    onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); lookupAccount(); } }} />
-                <Button type="button" color="light" class="shrink-0 whitespace-nowrap" onclick={lookupAccount} disabled={!register_email.trim() || register_busy}>{m.unpaidAttendees_registerFind()}</Button>
+        <input type="hidden" name="email" value={registerTarget?.email ?? ''} />
+        {#if canBrowseAccounts}
+            <div class="mb-6">
+                <SearchableUserList
+                    items={registerableAccounts}
+                    bind:selectedId={register_user_id}
+                    maxHeight="max-h-72"
+                    showChangeButton={true}
+                />
             </div>
-        </div>
-        {#if register_found}
-            <div class="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm">
-                <div class="font-medium">{languageTag() === 'ko' && register_found.korean_name ? register_found.korean_name : register_found.name}</div>
-                <div class="text-gray-600">{languageTag() === 'ko' && register_found.institute_ko ? register_found.institute_ko : register_found.institute}</div>
-                <div class="text-gray-500">{register_found.email}</div>
+        {:else}
+            <div class="mb-4">
+                <Label for="register_email" class="block mb-2">{m.unpaidAttendees_registerEmail()}</Label>
+                <div class="flex gap-2">
+                    <Input id="register_email" type="email" bind:value={register_email}
+                        onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); lookupAccount(); } }} />
+                    <Button type="button" color="light" class="shrink-0 whitespace-nowrap" onclick={lookupAccount} disabled={!register_email.trim() || register_busy}>{m.unpaidAttendees_registerFind()}</Button>
+                </div>
             </div>
+            {#if register_found}
+                <div class="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm">
+                    <div class="font-medium">{languageTag() === 'ko' && register_found.korean_name ? register_found.korean_name : register_found.name}</div>
+                    <div class="text-gray-600">{languageTag() === 'ko' && register_found.institute_ko ? register_found.institute_ko : register_found.institute}</div>
+                    <div class="text-gray-500">{register_found.email}</div>
+                </div>
+            {/if}
+        {/if}
+        {#if registerTarget}
             <div class="mb-4">
                 <Label for="register_category" class="block mb-2">{m.attendees_tier()}</Label>
                 <Select id="register_category" name="category" bind:value={register_category}
