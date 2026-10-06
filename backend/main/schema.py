@@ -491,6 +491,14 @@ class SpeakerSchema(Schema):
         abstract = Abstract.objects.filter(event=speaker.event, attendee__in=attendees).first()
         return abstract.title if abstract else ''
 
+class AttendeeUpdateSchema(Schema):
+    """An attendee update's answer: the saved row comes back with it, so the
+    admin page can show the change at once instead of reloading every list."""
+    code: str
+    message: str
+    attendee: Optional[AttendeeSchema] = None
+
+
 class AbstractShortSchema(Schema):
     id: int
     attendee: AttendeeSchema

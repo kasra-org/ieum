@@ -63,9 +63,16 @@
             });
         });
         const custom_headers = [...unique_questions];
+        const table_data = attendees.map(item => attendeeRow(item, custom_headers));
 
-        // Create table_data rows
-        const table_data = attendees.map((item, idx) => {
+        return {
+            custom_headers,
+            table_data
+        };
+    }
+
+    // One table row, its answers laid out in the order of `custom_headers`.
+    function attendeeRow(item, custom_headers) {
             // Create a row with empty strings for each question
             const row = {
                 id: item.id,
@@ -108,12 +115,6 @@
             });
 
             return row;
-        });
-
-        return {
-            custom_headers,
-            table_data
-        };
     }
 
     const exportAttendeesAsCSV = () => {
@@ -308,8 +309,25 @@
     const afterSuccessfulSubmitDefaultAnswerChanges = () => {
         return async ({ result, action, update }) => {
             if (result.type === 'success') {
-                await update({ reset: false });
+                // The save answers with the saved attendee, so the row is
+                // shown changed at once; reloading every tab's data first is
+                // what made each save take a second. A category change can
+                // make the person owe money, and unpaid registrations live on
+                // their own tab, so they leave this list then.
+                const saved = result.data?.attendee;
+                if (saved?.payment_status === 'pending') {
+                    // Close first: the modal shows the row at selected_idx,
+                    // which would otherwise be someone else's once this one goes.
+                    attendee_modal = false;
+                    table_data_attendees = table_data_attendees.filter(a => a.id !== saved.id);
+                } else if (saved) {
+                    table_data_attendees = table_data_attendees.map(a =>
+                        a.id === saved.id ? attendeeRow(saved, custom_headers_attendees) : a);
+                }
                 message_default_answer_changes = { type: 'success', message: m.attendees_successUpdate() };
+                // The other tabs still read the change through the page data,
+                // so that refreshes too - just without anyone waiting on it.
+                invalidateAll();
             } else {
                 message_default_answer_changes = { type: 'error', message: m.attendees_errorUpdate() };
             }

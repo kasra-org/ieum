@@ -1526,6 +1526,15 @@ class AdminFeeWaiverTests(TestCase):
         self.assertEqual(response.json()['code'], 'invalid_category')
         self.assertEqual(self.fresh().category, self.category)
 
+    def test_the_update_answers_with_the_saved_row(self):
+        # The admin page shows the change from this, without reloading.
+        student, = add_categories(self.event, ('Student', 50000))
+        body = self.update(category=student.id).json()
+        self.assertEqual(body['attendee']['id'], self.attendee.id)
+        self.assertEqual(body['attendee']['category'], student.id)
+        self.assertEqual(body['attendee']['registration_fee'], 50000)
+        self.assertEqual(body['attendee']['payment_status'], 'pending')
+
     def test_leaving_the_category_out_keeps_it(self):
         self.assertEqual(self.update(is_attended=True).status_code, 200)
         self.assertEqual(self.fresh().category, self.category)

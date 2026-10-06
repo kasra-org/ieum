@@ -1205,7 +1205,7 @@ def get_my_registration_payment(request, event_id: int):
             status=404,
         )
 
-@api.post("/event/{event_id}/attendee/{attendee_id}/update", response=MessageSchema)
+@api.post("/event/{event_id}/attendee/{attendee_id}/update", response=AttendeeUpdateSchema)
 @ensure_event_staff
 def update_attendee(request, event_id: int, attendee_id: int):
     data = json.loads(request.body)
@@ -1265,7 +1265,10 @@ def update_attendee(request, event_id: int, attendee_id: int):
         attendee.dietary = data.get("dietary", "")
 
     attendee.save()
-    return {"code": "success", "message": "Successfully updated."}
+    # Read back with everything the row shows - fee, payment status, answers.
+    saved = admin_attendee_rows(Attendee.objects.filter(id=attendee.id)).get()
+    saved.event = event
+    return {"code": "success", "message": "Successfully updated.", "attendee": saved}
 
 @api.post("/event/{event_id}/attendee/{attendee_id}/answers", response=MessageSchema)
 @ensure_event_staff
