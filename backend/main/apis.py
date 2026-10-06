@@ -24,7 +24,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.template import Template, Context
 from django.db import IntegrityError
-from django.db.models import Max, Q
+from django.db.models import Count, Max, Q
 
 from django.conf import settings
 from django.http import FileResponse
@@ -1102,6 +1102,20 @@ def get_event_stats(request, event_id: int):
         "abstracts": event.abstracts.count(),
     }
 
+def admin_attendee_rows(queryset):
+    """Attendees with everything AttendeeSchema reads, loaded up front.
+
+    The admin page reloads every list after each save, so a query per row
+    made each save slower the larger the event: the account and its
+    institute, linked social accounts, custom answers and their questions,
+    and payments are all fetched here in a fixed number of queries.
+    """
+    return (queryset
+            .select_related('category', 'user__institute')
+            .prefetch_related('payments', 'user__socialaccount_set', 'user__emailaddress_set',
+                              'custom_answers__reference'))
+
+
 @api.get("/event/{event_id}/attendees", response=List[AttendeeSchema])
 @ensure_event_staff
 def get_event_attendees(request, event_id: int, all: bool = False):
@@ -1109,7 +1123,7 @@ def get_event_attendees(request, event_id: int, all: bool = False):
     # prefetch feeds AttendeeSchema.resolve_payment_status without a query per
     # attendee; handing each one the event we already loaded does the same for
     # the fee exemption, which is read from that event's speaker list.
-    attendees = list(event.attendees.select_related('category').prefetch_related('payments'))
+    attendees = list(admin_attendee_rows(event.attendees))
     for attendee in attendees:
         attendee.event = event
 
@@ -1990,7 +2004,10 @@ def send_certificate(request, event_id: int):
 @ensure_event_staff
 def get_reviewers(request, event_id: int):
     event = Event.objects.get(id=event_id)
-    return event.reviewers.all()
+    reviewers = list(admin_attendee_rows(event.reviewers))
+    for reviewer in reviewers:
+        reviewer.event = event
+    return reviewers
 
 @api.post("/event/{event_id}/reviewer/add", response=MessageSchema)
 @ensure_event_staff
@@ -2024,7 +2041,16 @@ def get_abstracts(request, event_id: int):
     # The admin table: every submission with its author's full registration.
     # Reviewers use /review/abstracts, which shows them far less.
     event = Event.objects.get(id=event_id)
-    return event.abstracts.all()
+    abstracts = list(
+        event.abstracts
+        .select_related('attendee__user__institute', 'attendee__category')
+        .prefetch_related('attendee__payments', 'attendee__user__socialaccount_set',
+                          'attendee__user__emailaddress_set', 'attendee__custom_answers__reference')
+        .annotate(vote_count=Count('votes', distinct=True))
+    )
+    for abstract in abstracts:
+        abstract.attendee.event = event
+    return abstracts
 
 def reviewer_attendee(user, event):
     """This user's registration on `event` if they review for it, else None.
@@ -2546,13 +2572,13 @@ def resend_verification_email(request, data: ResendVerificationSchema):
 @api.get("/users", response=List[UserSchema])
 @ensure_staff
 def get_users(request):
-    return User.objects.all()
+    return User.objects.select_related('institute').prefetch_related('socialaccount_set', 'emailaddress_set')
 
 @api.get("/event/{event_id}/eventadmins", response=List[UserSchema])
 @ensure_event_staff
 def get_event_admins(request, event_id: int):
     event = Event.objects.get(id=event_id)
-    return event.admins.all()
+    return event.admins.select_related('institute').prefetch_related('socialaccount_set', 'emailaddress_set')
 
 @api.post("/event/{event_id}/eventadmin/add", response=MessageSchema)
 @ensure_event_staff
@@ -2780,7 +2806,7 @@ def register_on_site(request, event_id: int):
 @ensure_event_staff
 def get_on_site_attendees(request, event_id: int):
     event = Event.objects.get(id=event_id)
-    return event.onsite_attendees.all()
+    return event.onsite_attendees.select_related('category', 'event')
 
 @api.post("/event/{event_id}/onsite/{onsite_id}/delete", response=MessageSchema)
 @ensure_event_staff

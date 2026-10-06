@@ -52,6 +52,16 @@ class InstitutionCreateSchema(Schema):
     name_en: str
     name_ko: str = ""
 
+def linked_account(user, provider):
+    """The user's linked social account for `provider`, or None.
+
+    Reads socialaccount_set.all() rather than filtering, so a list endpoint that
+    prefetched the accounts pays nothing per user. Filtering bypassed the
+    prefetch and cost a count and a fetch per provider - four queries a user.
+    """
+    return next((a for a in user.socialaccount_set.all() if a.provider == provider), None)
+
+
 class UserSchema(Schema):
     id: int
     username: str
@@ -97,21 +107,19 @@ class UserSchema(Schema):
 
     @staticmethod
     def resolve_orcid(user: User) -> str:
-        linked_accounts = user.socialaccount_set.filter(provider='orcid')
-        if linked_accounts.count() > 0:
-            return linked_accounts[0].uid
-        return ""
+        account = linked_account(user, 'orcid')
+        return account.uid if account else ""
 
     @staticmethod
     def resolve_google(user: User) -> str:
-        linked_accounts = user.socialaccount_set.filter(provider='google')
-        if linked_accounts.count() > 0:
-            # Return the Gmail address from extra_data if available
-            extra_data = linked_accounts[0].extra_data
-            if extra_data and 'email' in extra_data:
-                return extra_data['email']
-            return linked_accounts[0].uid
-        return ""
+        account = linked_account(user, 'google')
+        if account is None:
+            return ""
+        # Return the Gmail address from extra_data if available
+        extra_data = account.extra_data
+        if extra_data and 'email' in extra_data:
+            return extra_data['email']
+        return account.uid
 
     @staticmethod
     def resolve_name(user: User) -> str:
@@ -127,11 +135,10 @@ class UserSchema(Schema):
 
     @staticmethod
     def resolve_email_verified(user: User) -> bool:
-        from allauth.account.models import EmailAddress
-        email_address = EmailAddress.objects.filter(user=user, primary=True).first()
-        if email_address:
-            return email_address.verified
-        return False
+        # Through emailaddress_set.all() so a prefetching list pays nothing
+        # per user; a filtered query here was one more query for every row.
+        primary = next((e for e in user.emailaddress_set.all() if e.primary), None)
+        return primary.verified if primary else False
 
 
 class PublicUserSchema(Schema):
@@ -496,7 +503,9 @@ class AbstractShortSchema(Schema):
     link: str
     @staticmethod
     def resolve_votes(abstract: Abstract) -> int:
-        return abstract.votes.count()
+        # The admin list annotates the count; a single abstract still counts.
+        annotated = getattr(abstract, 'vote_count', None)
+        return annotated if annotated is not None else abstract.votes.count()
     @staticmethod
     def resolve_link(abstract: Abstract) -> str:
         from django.conf import settings

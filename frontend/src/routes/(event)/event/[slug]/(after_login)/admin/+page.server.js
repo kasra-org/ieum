@@ -32,23 +32,30 @@ export async function load({ parent, params, cookies, request }) {
         return get_data_or_404(`event/${params.slug}/${item}`);
     }
 
-    rtn.event = await get_data_or_404(`admin/event/${params.slug}`);
-
-    // Superusers (staff) get access to full user list, event admins use attendees
-    if (rtn.user?.is_staff) {
-        rtn.users = await get_data_or_404('users');
-    }
-
-    rtn.attendees = await get_data_or_404_event('attendees?all=true');
-    rtn.questions = await get_data_or_404_event('questions');
-    rtn.speakers = await get_data_or_404_event('admin/speakers');
-    rtn.reviewers = await get_data_or_404_event('reviewers');
-    rtn.abstracts = await get_data_or_404_event('abstracts');
-    rtn.organizers = await get_data_or_404_event('organizers');
-    rtn.eventadmins = await get_data_or_404_event('eventadmins');
-    rtn.email_templates = await get_data_or_404_event('email_templates');
-    rtn.onsite_attendees = await get_data_or_404_event('onsite');
-    rtn.payments = await get_data_or_404_event('payments');
+    // Every tab's data, fetched together: none depends on another, and this
+    // whole load reruns after each save in the admin page, so fetching them
+    // one after another made every save wait for the sum of them all.
+    const [event, users, attendees, questions, speakers, reviewers, abstracts,
+           organizers, eventadmins, email_templates, onsite_attendees, payments] = await Promise.all([
+        get_data_or_404(`admin/event/${params.slug}`),
+        // Superusers (staff) get access to full user list, event admins use attendees
+        rtn.user?.is_staff ? get_data_or_404('users') : Promise.resolve(undefined),
+        get_data_or_404_event('attendees?all=true'),
+        get_data_or_404_event('questions'),
+        get_data_or_404_event('admin/speakers'),
+        get_data_or_404_event('reviewers'),
+        get_data_or_404_event('abstracts'),
+        get_data_or_404_event('organizers'),
+        get_data_or_404_event('eventadmins'),
+        get_data_or_404_event('email_templates'),
+        get_data_or_404_event('onsite'),
+        get_data_or_404_event('payments'),
+    ]);
+    Object.assign(rtn, {
+        event, attendees, questions, speakers, reviewers, abstracts,
+        organizers, eventadmins, email_templates, onsite_attendees, payments,
+    });
+    if (users !== undefined) rtn.users = users;
 
     return rtn;
 }

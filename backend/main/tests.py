@@ -18,7 +18,7 @@ from main import email_body, nicepay
 from main.apis import template_attachment_paths
 from main.tasks import build_email, cleanup_media_files
 from main.utils import render_email_template
-from main.models import Abstract, AbstractVote, Attendee, Institution, EmailAttachment, EmailTemplate, Event, EventInvitation, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory
+from main.models import CustomAnswer, CustomQuestion, Abstract, AbstractVote, Attendee, Institution, EmailAttachment, EmailTemplate, Event, EventInvitation, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory
 
 User = get_user_model()
 
@@ -2637,6 +2637,69 @@ class AdminAddAbstractTests(TestCase):
         self.client.force_login(self.user)
         self.assertEqual(self.add().status_code, 403)
         self.assertFalse(Abstract.objects.filter(event=self.event).exists())
+
+
+class AdminListQueryCountTests(TestCase):
+    """The admin page reloads every list after each save, so a list that costs
+    a query per row makes every save slower the bigger the event gets. Each
+    list must cost the same number of queries for 3 rows as for 9."""
+
+    def setUp(self):
+        from allauth.socialaccount.models import SocialAccount
+        self.SocialAccount = SocialAccount
+        self.event = Event.objects.create(
+            name='Big', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, accepts_abstract=True)
+        self.category, = add_categories(self.event, ('Regular', 1000))
+        self.question = CustomQuestion.objects.create(
+            event=self.event, question={'type': 'text', 'question': 'Q?', 'detail': '', 'options': []})
+        self.institution = Institution.objects.create(name_en='PNU', name_ko='부산대')
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA', is_staff=True)
+        self.event.admins.add(self.admin_user)
+        self.client.force_login(self.admin_user)
+        self.n = 0
+
+    def grow(self, count):
+        for _ in range(count):
+            self.n += 1
+            email = f'p{self.n}@example.com'
+            user = User.objects.create_user(username=email, email=email, password='pw12345!aA',
+                                            institute=self.institution)
+            self.SocialAccount.objects.create(user=user, provider='orcid', uid=f'0000-{self.n}')
+            attendee = Attendee.objects.create(user=user, event=self.event, first_name='P', last_name=str(self.n),
+                                               nationality=1, institute='PNU', category=self.category)
+            self.event.attendees.add(attendee)
+            self.event.reviewers.add(attendee)
+            CustomAnswer.objects.create(reference=self.question, attendee=attendee, question='Q?', answer='A')
+            Abstract.objects.create(attendee=attendee, event=self.event, title=f'T{self.n}', file_path='a/b.docx')
+            OnSiteAttendee.objects.create(event=self.event, name=f'W{self.n}', institute='PNU', category=self.category)
+            PaymentHistory.objects.create(attendee=attendee, event=self.event, amount=1000, status='completed')
+
+    def count(self, url):
+        with CaptureQueriesContext(connection) as q:
+            response = self.client.get(url)
+        self.assertEqual(response.status_code, 200, url)
+        return len(q.captured_queries)
+
+    def test_admin_lists_do_not_query_per_row(self):
+        urls = [f'/api/event/{self.event.id}/{p}' for p in
+                ('attendees?all=true', 'abstracts', 'onsite', 'reviewers', 'admin/speakers', 'eventadmins')]
+        urls.append('/api/users')
+        self.grow(3)
+        small = {u: self.count(u) for u in urls}
+        self.grow(6)
+        large = {u: self.count(u) for u in urls}
+        self.assertEqual(large, small, 'a list grew its query count with its row count')
+
+    def test_linked_accounts_still_resolve(self):
+        self.grow(1)
+        rows = self.client.get(f'/api/event/{self.event.id}/attendees?all=true').json()
+        self.assertEqual(rows[0]['user']['orcid'], '0000-1')
+        self.assertEqual(rows[0]['user']['institute_ko'], '부산대')
+        self.assertEqual(rows[0]['custom_answers'][0]['answer'], 'A')
+        abstracts = self.client.get(f'/api/event/{self.event.id}/abstracts').json()
+        self.assertEqual(abstracts[0]['votes'], 0)
 
 
 class ReceiptLookupTests(TestCase):
