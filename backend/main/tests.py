@@ -2166,6 +2166,36 @@ class InvitationTests(TestCase):
         self.assertTrue(plain.rstrip().endswith('The Organising Committee\nInvited Symposium'))
         self.assertNotIn('On behalf of', plain)
 
+    @patch('main.apis.send_mail')
+    @patch('main.invitations.send_mail')
+    def test_an_invited_speaker_can_submit_an_abstract_after_the_deadline(self, mock_inv, mock_api):
+        # The whole chain: invited as a speaker, accepted, listed, and so let
+        # past the abstract deadline. Losing the role anywhere along it left
+        # invited speakers registered but held to the deadline.
+        import io
+        import docx
+        self.event.accepts_abstract = True
+        self.event.abstract_deadline = date(2000, 1, 1)
+        self.event.email_template_abstract_submission = EmailTemplate.objects.create(subject='S', body='B')
+        self.event.save()
+
+        self.invite(['guest@example.com'], fee_waived=True, as_speaker=True)
+        invitation = EventInvitation.objects.get(email='guest@example.com')
+        self.assertTrue(invitation.as_speaker)
+        user = self.make_user()
+        self.client.force_login(user)
+        self.assertEqual(self.client.post(f'/api/invitation/{invitation.token}/accept').status_code, 200)
+        self.assertTrue(self.event.speakers.filter(email__iexact='guest@example.com', is_speaker=True).exists())
+
+        buf = io.BytesIO(); d = docx.Document(); d.add_paragraph('Abstract.'); d.save(buf)
+        response = self.client.post(
+            f'/api/event/{self.event.id}/abstract',
+            data=json.dumps({'title': 'Invited talk', 'presentation_type': 'invited', 'file_name': 'a.docx',
+                             'file_content': 'data:application/octet-stream;base64,'
+                                             + base64.b64encode(buf.getvalue()).decode()}),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+
     def test_an_older_event_gets_an_invitation_template_on_demand(self):
         self.assertIsNone(self.event.email_template_invitation)
         self.client.force_login(self.admin_user)
@@ -2458,6 +2488,12 @@ class SpeakerLateAbstractTests(TestCase):
         response = self.submit()
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(Abstract.objects.filter(attendee=self.attendee).exists())
+
+    def test_an_event_with_no_abstract_limit_set_accepts_submissions(self):
+        # Events are created with the limit empty; that must mean no limit.
+        Event.objects.filter(id=self.event.id).update(capacity_abstract=None)
+        self.list_as(is_speaker=True)
+        self.assertEqual(self.submit().status_code, 200)
 
     def test_but_only_once(self):
         self.list_as(is_speaker=True)

@@ -232,8 +232,6 @@ export const actions = {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/attendee/${parseInt(formdata.get('id'))}/update`, {
             fee_waived: formdata.get('fee_waived') === 'true',
-            as_speaker: formdata.get('as_speaker') === 'true',
-            as_chair: formdata.get('as_chair') === 'true',
         }, cookies);
         if (response.ok && response.status === 200) {
             return response.data;
@@ -294,6 +292,11 @@ export const actions = {
             subject: formdata.get('subject'),
             body: formdata.get('body'),
             fee_waived: formdata.get('fee_waived') === 'true',
+            // The role the invitee is listed under when they accept. Dropping
+            // these registered speakers without ever listing them - and so
+            // without the abstract deadline exemption listed speakers get.
+            as_speaker: formdata.get('as_speaker') === 'true',
+            as_chair: formdata.get('as_chair') === 'true',
         }, cookies);
         if (response.ok && response.status === 200) {
             return response.data;

@@ -1574,7 +1574,9 @@ def submit_abstract(request, event_id: int):
             and not is_listed_speaker):
         return reject("deadline_passed", "Sorry, abstract submission deadline has passed.")
     
-    if event.capacity_abstract > 0 and event.capacity_abstract <= event.abstracts.count():
+    # An event created without the field leaves it empty, which means no limit
+    # - comparing None with 0 failed every submission with a server error.
+    if (event.capacity_abstract or 0) > 0 and event.capacity_abstract <= event.abstracts.count():
         return reject("event_full", "Sorry, abstract submission limit reached.")
 
     # create the abstract with the post json data
