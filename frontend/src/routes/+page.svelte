@@ -130,6 +130,15 @@
         return event.registration_deadline >= today;
     }
 
+    // Over, not merely closed to registration: only these are dimmed. An event
+    // whose registration has closed but which has yet to happen, or is
+    // happening now, is still very much on and should not look finished.
+    function isEventEnded(event) {
+        if (!event.end_date) return false;
+        const today = new Date().toISOString().split('T')[0];
+        return event.end_date < today;
+    }
+
     function isClosingSoon(event) {
         if (!event.registration_deadline) return false;
         const today = new Date();
@@ -139,12 +148,14 @@
     }
 
     function getStatusColor(event) {
-        if (!isEventOpen(event)) return 'text-gray-500';
+        if (isEventEnded(event)) return 'text-gray-400';
+        if (!isEventOpen(event)) return 'text-gray-600';
         if (isClosingSoon(event)) return 'text-orange-600';
         return 'text-green-600';
     }
 
     function getStatusText(event) {
+        if (isEventEnded(event)) return m.events_ended();
         if (!isEventOpen(event)) return m.events_registrationClosed();
         if (isClosingSoon(event)) return m.events_registrationClosingSoon();
         return m.events_registrationOpen();
@@ -152,7 +163,8 @@
 
     // Get border color based on event status
     function getBorderColor(event) {
-        if (!isEventOpen(event)) return 'bg-gray-400';
+        if (isEventEnded(event)) return 'bg-gray-300';
+        if (!isEventOpen(event)) return 'bg-slate-500';
         if (isClosingSoon(event)) return 'bg-orange-500';
         return 'bg-green-600';
     }
@@ -280,7 +292,7 @@
                 {:else}
                     <div class="divide-y divide-gray-200">
                         {#each allEvents as event}
-                            <a href="/event/{event.id}" class={`flex items-stretch gap-4 sm:gap-6 py-6 -mx-4 sm:-mx-6 px-4 sm:px-6 hover:bg-gray-50 transition-colors cursor-pointer ${!isEventOpen(event) ? 'opacity-50' : ''}`}>
+                            <a href="/event/{event.id}" class={`flex items-stretch gap-4 sm:gap-6 py-6 -mx-4 sm:-mx-6 px-4 sm:px-6 hover:bg-gray-50 transition-colors cursor-pointer ${isEventEnded(event) ? 'opacity-50' : ''}`}>
                                 <!-- Left Color Bar + Date (hidden below 2xl) -->
                                 <div class="hidden 2xl:flex items-center flex-shrink-0">
                                     <div class={`w-1 self-stretch rounded-full ${getBorderColor(event)}`}></div>
@@ -375,8 +387,10 @@
                                 <!-- Right: Registration Status -->
                                 <div
                                     class={`hidden sm:flex flex-shrink-0 items-center gap-1.5 pl-4 text-sm font-medium whitespace-nowrap ${
-                                        !isEventOpen(event)
+                                        isEventEnded(event)
                                             ? 'text-gray-400'
+                                            : !isEventOpen(event)
+                                                ? 'text-gray-600'
                                             : isClosingSoon(event)
                                                 ? 'text-orange-500'
                                                 : 'text-green-600'

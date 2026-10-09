@@ -22,6 +22,7 @@
 	"events_registrationOpen": "Registration Open",
 	"events_registrationClosingSoon": "Closing Soon",
 	"events_registrationClosed": "Registration Closed",
+	"events_ended": "Ended",
 	"eventStatus_draft": "Draft",
 	"eventStatus_draftTooltip": "Draft events are only visible to event admins.",
 	"eventStatus_invitationOnly": "Invitation Only",

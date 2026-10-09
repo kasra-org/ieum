@@ -22,6 +22,7 @@
 	"events_registrationOpen": "등록 가능",
 	"events_registrationClosingSoon": "마감 임박",
 	"events_registrationClosed": "등록 마감",
+	"events_ended": "종료",
 	"eventStatus_draft": "비공개",
 	"eventStatus_draftTooltip": "비공개 행사는 행사 관리자만 볼 수 있습니다.",
 	"eventStatus_invitationOnly": "초청인 한정",
