@@ -58,6 +58,41 @@
 
 @source "./lib/components/ui";
 
+/* Widest screens (the 2xl breakpoint, 96rem/1536px, and up): the page uses
+   90% of the window instead of stopping at 1536px, which left a 1920px
+   display a fifth empty - and every named width grows with it, so forms,
+   cards and modals keep their proportion to the page. Text sizes are left
+   alone.
+
+   `container` sets its widths from the breakpoints, not these variables, so
+   it is extended separately; vw rather than %, so the header and the page
+   line up whatever padding their parents have. The named widths (max-w-md,
+   max-w-4xl, ...) scale by the same 90vw / 96rem: N rem becomes
+   N * 0.9375vw, never less than N rem. */
+@utility container {
+  @media (width >= 96rem) {
+    max-width: 90vw;
+  }
+}
+
+@media (width >= 96rem) {
+  :root {
+    --container-3xs: max(16rem, calc(16 * 0.9375vw));
+    --container-2xs: max(18rem, calc(18 * 0.9375vw));
+    --container-xs: max(20rem, calc(20 * 0.9375vw));
+    --container-sm: max(24rem, calc(24 * 0.9375vw));
+    --container-md: max(28rem, calc(28 * 0.9375vw));
+    --container-lg: max(32rem, calc(32 * 0.9375vw));
+    --container-xl: max(36rem, calc(36 * 0.9375vw));
+    --container-2xl: max(42rem, calc(42 * 0.9375vw));
+    --container-3xl: max(48rem, calc(48 * 0.9375vw));
+    --container-4xl: max(56rem, calc(56 * 0.9375vw));
+    --container-5xl: max(64rem, calc(64 * 0.9375vw));
+    --container-6xl: max(72rem, calc(72 * 0.9375vw));
+    --container-7xl: max(80rem, calc(80 * 0.9375vw));
+  }
+}
+
 @layer base {
   /* Initialize CSS variables for Tailwind ring/shadow utilities */
   *,
