@@ -4,8 +4,6 @@
 
     let { currentPage, totalPages, onPageChange } = $props();
 
-    // Active classes matching PaginationButton's active style
-    const activeClass = "text-blue-600 border border-gray-200 bg-blue-50 hover:bg-blue-100 hover:text-blue-700 dark:border-gray-700 dark:bg-gray-700 dark:text-white";
     const btnClass = "!px-3.5 !py-1.5";
 
     // Generate page numbers to display (show max 5 pages around current)
@@ -49,10 +47,13 @@
                 onclick={() => onPageChange(currentPage - 1)}
             ><ChevronLeft class="h-4 w-4" /></Button>
             {#each visiblePages() as page}
+                <!-- The current page in the primary colour: highlight classes laid
+                     over the light button lost to its own white background. -->
                 <Button
-                    color="light"
+                    color={currentPage === page ? 'primary' : 'light'}
                     size="sm"
-                    class="{btnClass} {currentPage === page ? activeClass : ''}"
+                    class={btnClass}
+                    aria-current={currentPage === page ? 'page' : undefined}
                     onclick={() => onPageChange(page)}
                 >{page}</Button>
             {/each}

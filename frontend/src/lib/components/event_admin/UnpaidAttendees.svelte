@@ -6,7 +6,7 @@
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
-    import { getDisplayInstitute, getDisplayName, getCategoryLabel } from '$lib/utils.js';
+    import { getDisplayInstitute, getDisplayName, getCategoryLabel, downloadTsv } from '$lib/utils.js';
     import { PagedList } from '$lib/pagedList.svelte.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
@@ -49,6 +49,7 @@
         job_title: a.job_title,
         disability: a.disability,
         dietary: a.dietary,
+        custom_answers: a.custom_answers ?? [],
     });
     let paginated = $derived(list.items.map(toRow));
 
@@ -87,6 +88,71 @@
         if (!response.ok) throw new Error(`${response.status}`);
         return (await response.json()).map(toRow);
     }
+
+    // Everyone still owing, whatever the search box says - as "email all"
+    // reads it - with the same columns as the roster's export: names and
+    // institutes in both languages whatever the page is shown in, then the
+    // answers to the event's questions.
+    let csv_exporting = $state(false);
+    let csv_error = $state(false);
+    async function exportUnpaidAsCSV() {
+        if (csv_exporting) return;
+        csv_exporting = true;
+        csv_error = false;
+        let rows;
+        try {
+            rows = await fetchUnpaid();
+        } catch (e) {
+            csv_error = true;
+            return;
+        } finally {
+            csv_exporting = false;
+        }
+        // Every question the event asks, then any older ones only some
+        // answers still carry.
+        const questions = [...new Set([
+            ...data.questions.map(q => q.question.question),
+            ...rows.flatMap(row => row.custom_answers.map(a => a.question)),
+        ])];
+        const headers = [
+            m.unpaidAttendees_id(),
+            m.attendees_nameEn(), m.attendees_nameKo(),
+            m.unpaidAttendees_email(),
+            m.attendees_nationality(),
+            m.attendees_instituteEn(), m.attendees_instituteKo(),
+            m.attendees_department(),
+            m.attendees_jobTitle(),
+            m.attendees_disability(),
+            m.attendees_dietary(),
+            m.attendees_tier(),
+            m.unpaidAttendees_registeredAt(),
+            m.unpaidAttendees_amountDue(),
+            ...questions.map(q => q.replace(/\n/, ' ').replace(/\s+/g, ' ')),
+        ];
+        const dataRows = rows.map(row => [
+            row.nametag_id,
+            [row.first_name, row.middle_initial, row.last_name].map(part => (part ?? '').trim()).filter(Boolean).join(' '),
+            row.korean_name,
+            row.email,
+            nationalityLabel(row.nationality),
+            row.institute_en, row.institute_ko,
+            row.department,
+            row.job_title,
+            row.disability,
+            row.dietary,
+            getCategoryLabel(row, languageTag()),
+            formatDate(row.registered_at),
+            formatFee(row.registration_fee),
+            ...questions.map(q => {
+                const answer = row.custom_answers.find(a => a.question === q)?.answer ?? '';
+                return answer.replace(/^- /, '').replace(/\n- /g, '; ');
+            }),
+        ]);
+        downloadTsv([headers, ...dataRows], 'unpaid_registrations');
+    }
+
+    const nationalityLabel = (value) =>
+        value === '1' ? m.nationality_korean() : value === '2' ? m.nationality_nonKorean() : m.nationality_notSpecified();
 
     function formatDate(iso) {
         if (!iso) return '';
@@ -309,14 +375,24 @@
                 {m.unpaidAttendees_emailSelected()}
             </DropdownItem>
         </Dropdown>
+        <Button color="primary" size="sm" onclick={exportUnpaidAsCSV} disabled={csv_exporting || !list.counts.unpaid}>
+            {csv_exporting ? '...' : m.unpaidAttendees_exportCSV()}
+        </Button>
     </div>
     {#if email_error}
         <Alert color="red" class="mb-4">{email_error}</Alert>
+    {/if}
+    {#if csv_error}
+        <Alert color="red" class="mb-4">{m.common_error()}</Alert>
     {/if}
 
     {#if list.error && list.items.length > 0}
         <Alert color="red" class="mb-3">{m.common_error()}</Alert>
     {/if}
+    <!-- Everyone still owing, whatever the search; blank until the first page arrives. -->
+    <p class="mt-5 mb-3 text-sm text-right">
+        {#if list.counts.unpaid !== undefined}{m.unpaidAttendees_count({ count: list.counts.unpaid })}{:else if list.error && !list.loading}–{:else}<Spinner size="4" />{/if}
+    </p>
     <TableSearch placeholder={m.unpaidAttendees_searchPlaceholder()} hoverable={true} bind:inputValue={list.search} bind:field={list.field} fields={searchFields}>
         <TableHead>
             <TableHeadCell class="w-1">
@@ -386,7 +462,6 @@
     </TableSearch>
 
     <TablePagination currentPage={list.page} totalPages={list.totalPages} onPageChange={(p) => list.goto(p)} />
-    {#if list.loaded}<p class="mt-5 mb-3 text-sm text-right">{m.unpaidAttendees_count({ count: list.counts.unpaid ?? 0 })}</p>{/if}
 {/if}
 
 <Modal id="register_attendee_modal" size="md" title={m.unpaidAttendees_register()} bind:open={register_modal}>
