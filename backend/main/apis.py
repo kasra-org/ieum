@@ -526,9 +526,32 @@ def get_institution(request, institution_id: int):
     except Institution.DoesNotExist:
         return api.create_response(request, {"error": "Institution not found"}, status=404)
 
+# Hangul syllables and jamo, in every block they are encoded in.
+HANGUL = re.compile('[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7af\ud7b0-\ud7ff]')
+
+
+def korean_in_english_name(request, name_en):
+    """A 400 when an institution's English name holds Korean, else None.
+
+    Registrations copy both names when they are made, so an institution
+    created with only its Korean name - typed into both fields on a Korean
+    page - left every registration from it with no English name to export.
+    """
+    if HANGUL.search(name_en or ''):
+        return api.create_response(
+            request,
+            {"code": "korean_in_english_name", "message": "The English name cannot contain Korean."},
+            status=400,
+        )
+    return None
+
+
 @api.post("/institutions", response=InstitutionSchema, auth=None)
 @rate_limit(max_requests=10, window_seconds=60)
 def create_institution(request, data: InstitutionCreateSchema):
+    refused = korean_in_english_name(request, data.name_en)
+    if refused:
+        return refused
 
     # Check if institution already exists
     existing = Institution.objects.filter(name_en=data.name_en).first()
@@ -565,9 +588,14 @@ def get_admin_institution(request, institution_id: int):
 @api.post("/admin/institution/{institution_id}/update", response=InstitutionSchema)
 @ensure_staff
 def update_institution(request, institution_id: int, data: InstitutionCreateSchema):
-
     try:
         institution = Institution.objects.get(id=institution_id)
+        # Ones already saved in Korean stay as they are; their Korean name
+        # can still be edited without first finding an English one.
+        if data.name_en != institution.name_en:
+            refused = korean_in_english_name(request, data.name_en)
+            if refused:
+                return refused
         institution.name_en = data.name_en
         institution.name_ko = data.name_ko
         institution.save()
@@ -1705,8 +1733,13 @@ def update_attendee(request, event_id: int, attendee_id: int):
                 attendee.institute = institution.name_en
                 attendee.institute_ko = institution.name_ko
             except (ValueError, TypeError):
-                # String name passed directly (e.g. from attendee edit modal)
-                attendee.institute = str(institute_val)
+                # A name rather than an id: the edit modals send back the
+                # name they showed when the institute was left alone - the
+                # Korean one on a Korean page. Either stored name means no
+                # change; taking it as the English name lost that one.
+                name = str(institute_val)
+                if name not in (attendee.institute, attendee.institute_ko):
+                    attendee.institute = name
             except Institution.DoesNotExist:
                 return api.create_response(
                     request,

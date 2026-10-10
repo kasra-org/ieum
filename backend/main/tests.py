@@ -1530,6 +1530,23 @@ class AttendeeRoleTests(TestCase):
         self.assertEqual(self.set_roles(attendee, ['speaker']).json()['attendee']['roles'], ['speaker'])
         self.assertEqual(self.set_roles(attendee, None).json()['attendee']['roles'], [])
 
+    def test_saving_with_the_korean_institute_name_keeps_the_english_one(self):
+        # The attendee modal on a Korean page sends back the Korean name it
+        # showed; the English one must survive the save.
+        attendee = self.register('ko@example.com')
+        attendee.institute, attendee.institute_ko = 'Pusan National University', '부산대학교'
+        attendee.save()
+        def save(institute):
+            return self.client.post(
+                f'/api/event/{self.event.id}/attendee/{attendee.id}/update',
+                data=json.dumps({'first_name': 'A', 'last_name': 'B', 'nationality': 1,
+                                 'institute': institute}), content_type='application/json')
+        for shown in ('부산대학교', 'Pusan National University'):
+            self.assertEqual(save(shown).status_code, 200)
+            attendee.refresh_from_db()
+            self.assertEqual((attendee.institute, attendee.institute_ko),
+                             ('Pusan National University', '부산대학교'))
+
     def test_an_unknown_role_is_refused(self):
         attendee = self.register('x@example.com')
         self.set_roles(attendee, ['staff'])
@@ -1556,6 +1573,48 @@ class AttendeeRoleTests(TestCase):
                                is_speaker=False, is_chair=True)
         row, = self.client.get(f'/api/event/{self.event.id}/attendees/export').json()
         self.assertEqual((row['is_speaker'], row['is_chair']), (False, True))
+
+
+class InstitutionEnglishNameTests(TestCase):
+    """An institution's English name may not be Korean: registrations copy it,
+    and the English columns of every export would carry Korean."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username='st@example.com', email='st@example.com', password='pw12345!aA', is_staff=True)
+        self.client.force_login(self.staff)
+
+    def create(self, name_en, name_ko=''):
+        return self.client.post('/api/institutions', data=json.dumps({'name_en': name_en, 'name_ko': name_ko}),
+                                content_type='application/json')
+
+    def update(self, institution, name_en, name_ko):
+        return self.client.post(f'/api/admin/institution/{institution.id}/update',
+                                data=json.dumps({'name_en': name_en, 'name_ko': name_ko}),
+                                content_type='application/json')
+
+    def test_korean_in_the_english_name_is_refused(self):
+        for name in ('부산대학교', 'Pusan 대학교', 'ㅂㅅ'):
+            response = self.create(name, '부산대학교')
+            self.assertEqual(response.status_code, 400, name)
+            self.assertEqual(response.json()['code'], 'korean_in_english_name')
+        self.assertFalse(Institution.objects.exists())
+        self.assertEqual(self.create('Pusan National University', '부산대학교').status_code, 200)
+
+    def test_an_edit_may_not_put_korean_in_the_english_name(self):
+        institution = Institution.objects.create(name_en='Pusan National University', name_ko='부산대학교')
+        response = self.update(institution, '부산대학교', '부산대학교')
+        self.assertEqual(response.json()['code'], 'korean_in_english_name')
+        institution.refresh_from_db()
+        self.assertEqual(institution.name_en, 'Pusan National University')
+
+    def test_one_already_saved_in_korean_can_still_be_edited(self):
+        # Kept as it was: its Korean name can change without an English one.
+        institution = Institution.objects.create(name_en='부산대학교', name_ko='')
+        self.assertEqual(self.update(institution, '부산대학교', '부산대학교').status_code, 200)
+        institution.refresh_from_db()
+        self.assertEqual((institution.name_en, institution.name_ko), ('부산대학교', '부산대학교'))
+        self.assertEqual(self.update(institution, 'Pusan National University', '부산대학교').status_code, 200)
 
 
 class AdminFeeWaiverTests(TestCase):
