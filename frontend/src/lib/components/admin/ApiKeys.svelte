@@ -1,21 +1,16 @@
 <script>
     import { Table, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
-    import { Modal, Button, Alert, Label, Input, Select, Badge } from '$lib/components/ui';
+    import { Modal, Button, Alert, Label, Input, Badge } from '$lib/components/ui';
     import { RefreshCw, Trash2, ShieldOff, ShieldCheck } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import { invalidateAll } from '$app/navigation';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
+    import RemoteSearchList from '$lib/components/RemoteSearchList.svelte';
 
     let { data } = $props();
 
     let keys = $derived(data.admin.apiKeys ?? []);
-    let users = $derived(
-        (data.admin.users ?? []).map((u) => ({
-            value: u.id,
-            name: u.email || u.username
-        }))
-    );
 
     let create_modal = $state(false);
     let new_name = $state('');
@@ -25,10 +20,8 @@
     let revealed_secret = $state('');
     let error = $state('');
 
-    const userLabel = (id) => {
-        const u = (data.admin.users ?? []).find((x) => x.id === id);
-        return u ? (u.email || u.username) : `#${id}`;
-    };
+    // The key carries its owner's email, so the table needs no account list.
+    const userLabel = (key) => key.user_email || `#${key.user_id}`;
 
     const fmt = (iso) => (iso ? new Date(iso).toLocaleString() : m.admin_apiKeys_never());
 
@@ -59,7 +52,7 @@
 {/if}
 
 <div class="mb-4">
-    <Button color="primary" onclick={() => { create_modal = true; error = ''; }}>
+    <Button color="primary" onclick={() => { create_modal = true; error = ''; new_user_id = null; }}>
         {m.admin_apiKeys_create()}
     </Button>
 </div>
@@ -81,7 +74,7 @@
             {#each keys as key (key.id)}
                 <TableBodyRow>
                     <TableBodyCell>{key.name}</TableBodyCell>
-                    <TableBodyCell>{userLabel(key.user_id)}</TableBodyCell>
+                    <TableBodyCell>{userLabel(key)}</TableBodyCell>
                     <TableBodyCell><code class="text-xs">{key.prefix}…</code></TableBodyCell>
                     <TableBodyCell>{fmt(key.created_at)}</TableBodyCell>
                     <TableBodyCell>{fmt(key.last_used_at)}</TableBodyCell>
@@ -140,7 +133,9 @@
         </div>
         <div>
             <Label for="key_user" class="mb-2">{m.admin_apiKeys_user()}</Label>
-            <Select id="key_user" name="user_id" items={users} bind:value={new_user_id} required />
+            <!-- Accounts are searched on the server rather than listed whole. -->
+            <RemoteSearchList url="/api/admin/users" inputId="key_user" showChangeButton={false} bind:selectedId={new_user_id} />
+            <input type="hidden" name="user_id" value={new_user_id ?? ''} />
         </div>
         <Button type="submit" color="primary" disabled={!new_name || !new_user_id}>
             {m.admin_apiKeys_create()}

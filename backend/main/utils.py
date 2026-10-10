@@ -13,7 +13,7 @@ import json
 import random
 import string
 from datetime import date, datetime
-from functools import wraps
+from functools import lru_cache, wraps
 
 from django.core.cache import cache
 from django.http import JsonResponse
@@ -756,6 +756,22 @@ def template_values(value):
 _email_engine = None
 
 
+@lru_cache(maxsize=128)
+def _compile_email_template(template_string):
+    """The compiled template for this text, kept for reuse.
+
+    A bulk email renders the same subject and body once per recipient, and
+    parsing them again each time cost as much as the rendering itself. A
+    compiled template holds no per-render state, so sharing it is safe.
+    """
+    global _email_engine
+    from django.template import Engine
+
+    if _email_engine is None:
+        _email_engine = Engine()
+    return _email_engine.from_string(unmangle_autolinked_variables(template_string))
+
+
 def render_email_template(template_string, context_dict):
     """Render an email template as plain text.
 
@@ -767,11 +783,7 @@ def render_email_template(template_string, context_dict):
     template runs on a bare engine: no template directories to {% include %}
     from and no app tag libraries to {% load %}.
     """
-    global _email_engine
-    from django.template import Context, Engine
+    from django.template import Context
 
-    if _email_engine is None:
-        _email_engine = Engine()
-    template_string = unmangle_autolinked_variables(template_string)
     context = {key: template_values(value) for key, value in context_dict.items()}
-    return _email_engine.from_string(template_string).render(Context(context, autoescape=False))
+    return _compile_email_template(template_string).render(Context(context, autoescape=False))

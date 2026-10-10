@@ -1,4 +1,5 @@
 import json
+import math
 import base64
 import os
 import tempfile
@@ -23,16 +24,19 @@ from allauth.account.models import EmailAddress
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.template import Template, Context
-from django.db import IntegrityError
-from django.db.models import Count, Max, Q
+from django.db import IntegrityError, transaction
+from django.db.models import Case, CharField, Count, Exists, F, Max, OuterRef, Prefetch, Q, Sum, Value, When, prefetch_related_objects
+from django.db.models.functions import Cast, Coalesce, Concat, Length, LPad, NullIf
 
 from django.conf import settings
 from django.http import FileResponse
+from django.http.request import RawPostDataException
 import logging
 
 logger = logging.getLogger(__name__)
 
-from main.models import (ApiKey, User, Event, EmailTemplate, EmailAttachment, EventInvitation, Attendee, RegistrationCategory, attendees_for_email, has_paid_for,
+from main.models import (ApiKey, User, Event, EmailTemplate, EmailAttachment, EventInvitation, Attendee, RegistrationCategory, has_paid_for, registrations_by_email, lookup_registrations, with_payment_state, REGISTERED_Q, UNPAID_Q,
+    attendee_addresses, contact_address,
     CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings)
 from main.schema import *
 from main.utils import validate_abstract_file, sanitize_filename, rate_limit, sanitize_email_header, validate_email_format, validate_editor_file, generate_onsite_code, generate_order_id, render_email_template
@@ -40,12 +44,135 @@ from main import nicepay
 from django.template import TemplateSyntaxError
 
 from main import email_body
+from main.middleware import holds_unstorable
 from main import invitations
 from main import backup as db_backup
 
 from .tasks import send_mail, send_mail_with_attachment
 
-api = NinjaAPI(csrf=True, auth=django_auth)
+class AtomicWritesAPI(NinjaAPI):
+    """Every write endpoint is all or nothing.
+
+    A POST view runs inside a transaction, so a request refused part-way -
+    a missing field, input the database cannot hold, any error - leaves no
+    half-made change behind: Ninja turns the exception into its response
+    only after it has left the transaction and rolled it back. The emails
+    such a view queues go out on commit (delay_on_commit), never for a
+    change that was undone.
+    """
+
+    def post(self, path, atomic=True, **kwargs):
+        register = super().post(path, **kwargs)
+
+        def decorator(view_func):
+            register(transaction.atomic(view_func) if atomic else view_func)
+            return view_func
+        return decorator
+
+
+api = AtomicWritesAPI(csrf=True, auth=django_auth)
+
+
+class MalformedJSON(ValueError):
+    """Request input that does not parse as JSON."""
+
+
+class MissingField(KeyError):
+    """A view asked the request for a field it did not send."""
+
+
+class RequestDict(dict):
+    """A JSON object from the request: a missing field is the caller's
+    omission (MissingField, a 400 naming it), not a server error. .get()
+    and `in` behave as on any dict."""
+
+    def __missing__(self, key):
+        raise MissingField(key)
+
+
+class UnstorableInput(ValueError):
+    """Request input holding text PostgreSQL cannot store (see RejectNulMiddleware)."""
+
+
+def _not_json(token):
+    """NaN and Infinity, which Python's parser accepts but JSON has not."""
+    raise ValueError(f'{token} is not JSON')
+
+
+def _finite_float(text):
+    """A JSON number too large for a float (1e400) would read as infinity."""
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f'{text} is out of range')
+    return value
+
+
+def whole_number(value):
+    """`value` as an id if it is a whole number - an int, or digits as text -
+    else None. Not 1.5 or true read as 1, the way int() would."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().isdecimal() and len(value.strip()) <= 19:
+        return int(value)
+    return None
+
+
+def read_json(text):
+    """JSON the caller sent - a request body, or a field holding JSON text.
+
+    Every way such input can fail to parse - bad syntax, bytes that are not
+    UTF-8, nesting too deep for the parser, a number past Python's digit
+    limit - is the caller's mistake, raised as MalformedJSON and answered
+    with a 400. Kept to request input on purpose: a payment gateway's reply
+    that will not parse is a server error, and stays one.
+    """
+    try:
+        data = json.loads(text, object_hook=RequestDict, parse_constant=_not_json, parse_float=_finite_float)
+    except (ValueError, RecursionError) as exc:
+        raise MalformedJSON(str(exc)) from exc
+    # The middleware checks a body as sent; JSON decoded out of one of its
+    # fields is checked here, as the view reads it.
+    if holds_unstorable(data):
+        raise UnstorableInput('NUL or an unpaired surrogate in the input')
+    return data
+
+
+def read_body(request):
+    """The request body as the JSON object every view here expects.
+
+    Valid JSON of another shape - a list, a number - is as unusable to a view
+    reading fields from it, so it is refused the same way.
+    """
+    data = read_json(request.body)
+    if not isinstance(data, dict):
+        raise MalformedJSON('expected a JSON object')
+    return data
+
+
+@api.exception_handler(MalformedJSON)
+def malformed_json(request, exc):
+    return api.create_response(
+        request, {"code": "invalid_json", "message": "The request body is not valid JSON."}, status=400)
+
+
+@api.exception_handler(RawPostDataException)
+def body_already_read(request, exc):
+    """A JSON view sent a multipart upload too big to buffer: the body was
+    streamed to the upload handlers and cannot be read as JSON."""
+    return api.create_response(
+        request, {"code": "invalid_json", "message": "The request body is not valid JSON."}, status=400)
+
+
+@api.exception_handler(MissingField)
+def missing_field(request, exc):
+    return api.create_response(
+        request, {"code": "missing_field", "message": f"Missing field: {exc.args[0]}"}, status=400)
+
+
+@api.exception_handler(UnstorableInput)
+def unstorable_input(request, exc):
+    return api.create_response(
+        request, {"code": "invalid_input", "message": "Invalid characters in the request."}, status=400)
 
 def ensure_staff(func):
     @wraps(func)
@@ -85,14 +212,69 @@ def ensure_event_staff(func):
         request = args[0]
         event_id = kwargs["event_id"]
         user = request.user
-        if not (user.is_staff or user in Event.objects.get(id=event_id).admins.all()):
+        if not (user.is_staff or Event.objects.filter(id=event_id, admins=user).exists()):
             return api.create_response(
                 request,
                 {"code": "permission_denied", "message": "Permission denied"},
                 status=403,
             )
+        # Staff pass for every event - including one that does not exist,
+        # which every view here would then fail to load.
+        if user.is_staff and not Event.objects.filter(id=event_id).exists():
+            return api.create_response(
+                request, {"code": "not_found", "message": "Event not found."}, status=404)
         return func(*args, **kwargs)
     return wrapper
+
+MAX_PAGE_SIZE = 200
+# Past any real list, and inside PostgreSQL's bigint OFFSET.
+MAX_OFFSET = 2 ** 62
+
+
+def page_bounds(offset, limit):
+    """`offset` and `limit` as a page asks for them, held to what is sane."""
+    return min(max(0, offset), MAX_OFFSET), max(1, min(limit, MAX_PAGE_SIZE))
+
+
+def page_of(queryset, offset, limit, total=None, **extra):
+    """One page of a list, with the total its pager needs.
+
+    Every list endpoint answers in this shape - {items, total, offset, limit}
+    and whatever else the caller adds (per-filter counts, say) - so the admin
+    tables ask for the rows they show rather than for every row there is.
+    A caller that already knows the total passes it, saving the count.
+    """
+    offset, limit = page_bounds(offset, limit)
+    if total is None:
+        total = queryset.count()
+    return {'items': list(queryset[offset:offset + limit]), 'total': total,
+            'offset': offset, 'limit': limit, **extra}
+
+
+def full_name(first, middle, last):
+    """'First Last' and 'First M Last' - a name as typed either way, the
+    second as the tables show it when there is a middle initial."""
+    with_initial = Concat(first, Case(When(**{middle: ''}, then=Value('')),
+                                      default=Concat(Value(' '), middle)), Value(' '), last)
+    return Concat(first, Value(' '), last), with_initial
+
+
+def search_q(term, field, fields):
+    """Rows whose `field` group contains `term`, case-insensitively.
+
+    `fields` maps each searchable field the table offers to the columns it
+    covers; 'all' (or a name the table does not offer) searches every one,
+    as the client-side search it replaces did.
+    """
+    term = (term or '').strip()
+    if not term:
+        return Q()
+    columns = fields.get(field) or [c for group in fields.values() for c in group]
+    q = Q()
+    for column in columns:
+        q |= Q(**{f'{column}__icontains': term})
+    return q
+
 
 @api.get("/me", response=UserSchema)
 def get_user(request):
@@ -104,7 +286,7 @@ def get_user(request):
 
 @api.post("/me", response=UserSchema)
 def update_user(request):
-    data = json.loads(request.body)
+    data = read_body(request)
     # check if mandatory fields are filled (English name required for all)
     if not data["first_name"] or not data["last_name"] or not data["nationality"] or not data["institute"]:
         return api.create_response(
@@ -159,7 +341,7 @@ def update_user(request):
 
 @api.post("/me/delete")
 def delete_user(request):
-    data = json.loads(request.body)
+    data = read_body(request)
     password = data.get("password", "")
 
     user = request.user
@@ -263,7 +445,11 @@ def get_registration_history(request):
     Get the registration history for the current user.
     """
     user = request.user
-    attendees = Attendee.objects.filter(user=user).select_related('event')
+    attendees = list(Attendee.objects.filter(user=user)
+                     .select_related('event', 'user', 'category')
+                     .prefetch_related('event__organizer_set', Prefetch('payments', to_attr='payment_list')))
+    # The fee reads each event's speaker list; fetch them all at once.
+    Event.prime_exempt_speaker_emails([a.event for a in attendees])
 
     registration_history = []
     for attendee in attendees:
@@ -286,7 +472,7 @@ def get_registration_history(request):
             payment_status = 'free'
         else:
             # Check if there's a completed payment for this attendee
-            if PaymentHistory.objects.filter(attendee=attendee, status='completed').exists():
+            if any(p.status == 'completed' for p in attendee.payment_list):
                 payment_status = 'completed'
             else:
                 payment_status = 'pending'
@@ -355,23 +541,12 @@ def create_institution(request, data: InstitutionCreateSchema):
     )
     return institution
 
-@api.get("/admin/institutions", response=List[InstitutionSchema])
+@api.get("/admin/institutions", response=InstitutionPageSchema)
 @ensure_staff
-def get_admin_institutions(request, offset: int = 0, limit: int = 100, search: str = ""):
-    from django.db.models import Q
-
-    institutions = Institution.objects.all()
-
-    if search:
-        institutions = institutions.filter(
-            Q(name_en__icontains=search) | Q(name_ko__icontains=search)
-        )
-
-    institutions = institutions.order_by('name_en')
-    total = institutions.count()
-    institutions = institutions[offset:offset + limit]
-
-    return list(institutions)
+def get_admin_institutions(request, offset: int = 0, limit: int = 50, search: str = "", field: str = "all"):
+    institutions = (Institution.objects.order_by('name_en', 'id')
+                    .filter(search_q(search, field, {'name_en': ['name_en'], 'name_ko': ['name_ko']})))
+    return page_of(institutions, offset, limit)
 
 @api.get("/admin/institution/{institution_id}", response=InstitutionSchema)
 @ensure_staff
@@ -425,11 +600,46 @@ def delete_institution(request, institution_id: int):
             status=404,
         )
 
-@api.get("/admin/events", response=List[EventAdminSchema])
+EMAIL_TEMPLATE_FIELDS = ('email_template_registration', 'email_template_abstract_submission',
+                         'email_template_certificate', 'email_template_invitation')
+
+
+def with_active_categories(events):
+    """Load each event's offered categories with the events, into the cache
+    Event.active_categories reads, instead of one query per event."""
+    return events.prefetch_related(Prefetch(
+        'registration_categories',
+        queryset=RegistrationCategory.objects.filter(is_active=True),
+        to_attr='_active_categories'))
+
+
+def admin_event_rows(events):
+    """Events with everything EventAdminSchema reads, loaded up front."""
+    return (with_active_categories(events)
+            .select_related(*EMAIL_TEMPLATE_FIELDS)
+            .prefetch_related('organizer_set',
+                              *(f'{field}__attachments' for field in EMAIL_TEMPLATE_FIELDS)))
+
+
+EVENT_SEARCH_FIELDS = {
+    'name': ['name'],
+    'venue': ['venue', 'venue_ko'],
+    'id': ['id_text'],
+}
+
+
+@api.get("/admin/events", response=EventAdminPageSchema)
 @ensure_staff
-def get_admin_events(request):
-    events = Event.objects.all()
-    return events
+def get_admin_events(request, offset: int = 0, limit: int = 20, search: str = "", field: str = "all",
+                     archived: bool = False):
+    """Every event, a page at a time, newest first. Archived ones only when
+    asked for (`archived`), as the table's toggle shows them."""
+    events = (Event.objects.annotate(id_text=Cast('id', CharField()))
+              .filter(search_q(search, field, EVENT_SEARCH_FIELDS))
+              .order_by('-start_date', '-id'))
+    if not archived:
+        events = events.filter(is_archived=False)
+    return page_of(admin_event_rows(events), offset, limit)
 
 @api.get("/events", response=PaginatedEventsSchema, auth=None)
 def get_events(request, offset: int = 0, limit: int = 20, year: str = None, search: str = None, showOnlyOpen: bool = False):
@@ -473,8 +683,9 @@ def get_events(request, offset: int = 0, limit: int = 20, year: str = None, sear
     events = events.order_by('-start_date').distinct()
     total = events.count()
 
-    # Apply pagination and prefetch organizers to prevent N+1 queries
-    events = events[offset:offset + limit].prefetch_related('organizer_set')
+    # Apply pagination and prefetch what each row shows to prevent N+1 queries
+    offset, limit = page_bounds(offset, limit)
+    events = with_active_categories(events[offset:offset + limit].prefetch_related('organizer_set'))
 
     return {
         "events": list(events),
@@ -491,7 +702,7 @@ def _as_bool(v):
 @api.post("/admin/event/add", response=MessageSchema)
 @ensure_staff
 def add_event(request):
-    data = json.loads(request.body)
+    data = read_body(request)
 
     # Presence, not truthiness: capacity 0 means "no attendance limit" (the
     # registration check below only enforces capacity > 0), so `not capacity`
@@ -515,8 +726,8 @@ def add_event(request):
     organizers_data = data.get("organizers", []) or []
     if isinstance(organizers_data, str):
         try:
-            organizers_data = json.loads(organizers_data) if organizers_data.strip() else []
-        except json.JSONDecodeError:
+            organizers_data = read_json(organizers_data) if organizers_data.strip() else []
+        except MalformedJSON:
             return api.create_response(
                 request,
                 {"code": "invalid_organizers",
@@ -533,10 +744,28 @@ def add_event(request):
             status=400,
         )
 
+    # Categories likewise, before anything is written: a bad list used to be
+    # found only after the event existed, and was then silently ignored.
+    categories_data = data.get("registration_categories")
+    try:
+        if isinstance(categories_data, str):
+            # Blank text is not sent at all, like an absent field.
+            categories_data = read_json(categories_data) if categories_data.strip() else None
+        categories_valid = categories_data is None or (
+            isinstance(categories_data, list) and all(isinstance(c, dict) for c in categories_data))
+    except MalformedJSON:
+        categories_valid = False
+    if not categories_valid:
+        return api.create_response(
+            request,
+            {"code": "invalid_categories", "message": "registration_categories must be a list of categories."},
+            status=400,
+        )
+
     # Parse and validate main_languages
     main_languages_value = data.get("main_languages", [])
     if isinstance(main_languages_value, str):
-        main_languages = json.loads(main_languages_value) if main_languages_value else []
+        main_languages = read_json(main_languages_value) if main_languages_value else []
     else:
         main_languages = main_languages_value
 
@@ -626,8 +855,15 @@ def add_event(request):
     # Every event starts from the standard three categories; the form may send
     # its own set, which replaces them.
     event.seed_default_categories()
-    if data.get("registration_categories"):
-        replace_registration_categories(event, data["registration_categories"])
+    # Sent at all - an empty list included, as JSON or as text, which makes
+    # the event free - rather than non-empty once decoded.
+    if categories_data is not None:
+        error_message = replace_registration_categories(event, categories_data)
+        if error_message:
+            # Everything above is undone with the request's transaction.
+            transaction.set_rollback(True)
+            return api.create_response(
+                request, {"code": "invalid_categories", "message": error_message}, status=400)
 
     # Add organizers (already validated above)
     for org in organizers_data:
@@ -681,8 +917,8 @@ def replace_registration_categories(event, payload):
     """
     if isinstance(payload, str):
         try:
-            payload = json.loads(payload)
-        except json.JSONDecodeError:
+            payload = read_json(payload)
+        except MalformedJSON:
             return "registration_categories must be a list of categories."
     if not isinstance(payload, list) or any(not isinstance(c, dict) for c in payload):
         return "registration_categories must be a list of categories."
@@ -761,7 +997,7 @@ def event_hidden_from(user, event):
 @ensure_event_staff
 def get_admin_event(request, event_id: int):
     try:
-        event = Event.objects.get(id=event_id)
+        event = admin_event_rows(Event.objects.filter(id=event_id)).get()
     except Event.DoesNotExist:
         return api.create_response(
             request,
@@ -781,7 +1017,7 @@ def update_event(request, event_id: int):
     values the caller never mentioned. Clients that send the whole object are
     unaffected; clients that send a subset now behave as expected.
     """
-    data = json.loads(request.body)
+    data = read_body(request)
     event = Event.objects.get(id=event_id)
 
     as_bool = _as_bool
@@ -803,7 +1039,7 @@ def update_event(request, event_id: int):
     if "main_languages" in data:
         value = data["main_languages"]
         if isinstance(value, str):
-            value = json.loads(value) if value else []
+            value = read_json(value) if value else []
         event.main_languages = value if value else ['en']
 
     if "registration_deadline" in data:
@@ -820,8 +1056,17 @@ def update_event(request, event_id: int):
         event.capacity = data["capacity"]
     # Prices live on the event's registration categories, which the form sends
     # as a whole list so adds, edits, reorders and removals arrive together.
-    if "registration_categories" in data:
-        error_message = replace_registration_categories(event, data["registration_categories"])
+    # As add_event reads them: blank text, or JSON null, is not sent at all.
+    categories_sent = data.get("registration_categories")
+    if isinstance(categories_sent, str):
+        try:
+            categories_sent = read_json(categories_sent) if categories_sent.strip() else None
+        except MalformedJSON:
+            return api.create_response(
+                request, {"code": "invalid_categories",
+                          "message": "registration_categories must be a list of categories."}, status=400)
+    if categories_sent is not None:
+        error_message = replace_registration_categories(event, categories_sent)
         if error_message:
             return api.create_response(
                 request, {"code": "invalid_categories", "message": error_message}, status=400)
@@ -872,7 +1117,7 @@ def archive_event(request, event_id: int):
 @ensure_event_staff
 def update_nametag_settings(request, event_id: int):
     """Update nametag paper size and orientation settings for an event"""
-    data = json.loads(request.body)
+    data = read_body(request)
     try:
         event = Event.objects.get(id=event_id)
     except Event.DoesNotExist:
@@ -992,7 +1237,7 @@ def sync_template_attachments(template, raw):
 @api.post("/event/{event_id}/emailtemplates", response=MessageSchema)
 @ensure_event_staff
 def update_event_emailtemplates(request, event_id: int):
-    data = json.loads(request.body)
+    data = read_body(request)
     event = Event.objects.get(id=event_id)
     event.email_template_registration.subject = data["email_template_registration_subject"]
     event.email_template_registration.body = data["email_template_registration_body"]
@@ -1033,10 +1278,12 @@ def update_event_emailtemplates(request, event_id: int):
 def check_registration_status(request, event_id: int):
     user = request.user
     event = Event.objects.get(id=event_id)
-    attendee = event.attendees.filter(user__id=user.id).first()
+    attendee = event.attendees.filter(user__id=user.id).select_related('user', 'category').first()
 
     if not attendee:
         return {"registered": False, "payment_status": None}
+    attendee.event = event
+    abstract_submitted = attendee.abstracts.filter(event=event).exists()
 
     # Check payment status if event has a fee
     # A registration is considered paid if there's at least one completed payment
@@ -1049,7 +1296,8 @@ def check_registration_status(request, event_id: int):
             # No completed payments - show as pending (even if there are cancelled payments)
             payment_status = 'pending'
 
-    return {"registered": True, "payment_status": payment_status}
+    return {"registered": True, "payment_status": payment_status,
+            "abstract_submitted": abstract_submitted}
 
 @api.get("/event/{event_id}/questions", response=List[QuestionSchema])
 def get_event_questions(request, event_id: int):
@@ -1071,7 +1319,7 @@ def get_event_questions(request, event_id: int):
 @ensure_event_staff
 def update_event_questions(request, event_id: int):
     event = Event.objects.get(id=event_id)
-    data = json.loads(request.body)
+    data = read_body(request)
     for q in event.custom_questions.all():
         if not any(q.id == q2.get("id") for q2 in data["questions"]):
             q.delete()
@@ -1088,9 +1336,7 @@ def update_event_questions(request, event_id: int):
             cq.question = q["question"]
             cq.order = idx
             cq.save()
-            for ca in CustomAnswer.objects.filter(reference=cq):
-                ca.question = q["question"]["question"]
-                ca.save()
+            CustomAnswer.objects.filter(reference=cq).update(question=q["question"]["question"])
     return {"code": "success", "message": "Questions updated."}
 
 @api.get("/event/{event_id}/stats", response=StatsSchema)
@@ -1102,6 +1348,26 @@ def get_event_stats(request, event_id: int):
         "abstracts": event.abstracts.count(),
     }
 
+def user_prefetches(prefix=''):
+    """What UserSchema reads besides the row: linked accounts and addresses.
+
+    Attached as plain lists (to_attr) rather than as prefetched managers:
+    with ten thousand accounts, building a related manager and queryset per
+    row cost more than the queries themselves. The schema reads the lists.
+    """
+    return [Prefetch(f'{prefix}socialaccount_set', to_attr='social_accounts'),
+            Prefetch(f'{prefix}emailaddress_set', to_attr='email_addresses')]
+
+
+def attendee_prefetches(prefix=''):
+    """What AttendeeSchema reads besides the row, as plain lists (see above):
+    payments, custom answers with their questions, and the account's."""
+    return [Prefetch(f'{prefix}payments', to_attr='payment_list'),
+            Prefetch(f'{prefix}custom_answers', to_attr='answer_list',
+                     queryset=CustomAnswer.objects.select_related('reference')),
+            *user_prefetches(f'{prefix}user__')]
+
+
 def admin_attendee_rows(queryset):
     """Attendees with everything AttendeeSchema reads, loaded up front.
 
@@ -1112,8 +1378,7 @@ def admin_attendee_rows(queryset):
     """
     return (queryset
             .select_related('category', 'user__institute')
-            .prefetch_related('payments', 'user__socialaccount_set', 'user__emailaddress_set',
-                              'custom_answers__reference'))
+            .prefetch_related(*attendee_prefetches()))
 
 
 @api.get("/event/{event_id}/admin/user-lookup")
@@ -1155,7 +1420,7 @@ def register_user_for_event(request, event_id: int):
     the room does not get bigger.
     """
     event = Event.objects.get(id=event_id)
-    data = json.loads(request.body)
+    data = read_body(request)
 
     def reject(code, message, status=400):
         return api.create_response(request, {"code": code, "message": message}, status=status)
@@ -1170,8 +1435,8 @@ def register_user_for_event(request, event_id: int):
     # Any of this event's categories, retired ones included, as when an admin
     # changes someone's category; another event's would price this one.
     try:
-        category = event.registration_categories.get(id=int(data.get("category")))
-    except (TypeError, ValueError, RegistrationCategory.DoesNotExist):
+        category = event.registration_categories.get(id=whole_number(data.get("category")))
+    except RegistrationCategory.DoesNotExist:
         return reject("invalid_category", "Choose a registration category of this event.")
 
     attendee = invitations.attendee_from_profile(event, user, category)
@@ -1183,32 +1448,140 @@ def register_user_for_event(request, event_id: int):
     return {"code": "success", "message": "Registered."}
 
 
-@api.get("/event/{event_id}/attendees", response=List[AttendeeSchema])
-@ensure_event_staff
-def get_event_attendees(request, event_id: int, all: bool = False):
-    event = Event.objects.get(id=event_id)
-    # prefetch feeds AttendeeSchema.resolve_payment_status without a query per
-    # attendee; handing each one the event we already loaded does the same for
-    # the fee exemption, which is read from that event's speaker list.
-    attendees = list(admin_attendee_rows(event.attendees))
+ATTENDEE_SEARCH_FIELDS = {
+    'name': ['full_name', 'full_name_mi', 'korean_name'],
+    'email': ['user__email', 'user_email'],
+    'institute': ['institute', 'institute_ko', 'department'],
+    'category': ['category__name', 'category__name_ko'],
+    'job_title': ['job_title'],
+    'id': ['nametag_text'],
+}
+
+
+def parse_ids(raw):
+    """A comma-separated id list from the query string; junk is dropped."""
+    # Longer than any bigint id cannot match - and int() refuses past 4300 digits.
+    return [int(part) for part in (raw or '').split(',')
+            if part.strip().isdecimal() and len(part.strip()) <= 19]
+
+
+def filtered_attendees(event, status='all', search='', field='all', ids='', has_user=None,
+                       has_abstract=None, has_completed_payment=None, not_speaker=False,
+                       not_admin=False, attended=None, email=''):
+    """The event's registrations narrowed the way the admin tables and pickers ask.
+
+    `status` is the tab: 'registered' is the roster (free or paid), 'unpaid'
+    those still owing money, 'all' both. The rest are the pickers' exclusions -
+    registrants without an abstract yet, not already a speaker, and so on.
+    """
+    name, name_with_initial = full_name('first_name', 'middle_initial', 'last_name')
+    attendees = with_payment_state(event.attendees.all(), event).annotate(
+        full_name=name, full_name_mi=name_with_initial,
+        nametag_text=Cast('attendee_nametag_id', CharField()),
+    ).filter(search_q(search, field, ATTENDEE_SEARCH_FIELDS))
+    if status == 'registered':
+        attendees = attendees.filter(REGISTERED_Q)
+    elif status == 'unpaid':
+        attendees = attendees.filter(UNPAID_Q)
+    if ids:
+        attendees = attendees.filter(id__in=parse_ids(ids))
+    if email.strip():
+        # Exactly this address, read as Attendee.email reads it - the
+        # speaker form's "has this person already paid?" check.
+        wanted = email.strip().lower()
+        attendees = attendees.filter(id__in=[pk for pk, account, kept in attendee_addresses(event)
+                                             if contact_address(account, kept) == wanted])
+    if has_user is not None:
+        attendees = attendees.filter(user__isnull=not has_user)
+    if has_abstract is not None:
+        with_abstract = Abstract.objects.filter(attendee=OuterRef('pk'), event=event)
+        attendees = attendees.filter(Exists(with_abstract) if has_abstract else ~Exists(with_abstract))
+    if has_completed_payment is not None:
+        attendees = attendees.filter(has_paid=has_completed_payment)
+    if not_speaker:
+        # Someone to list as a speaker: has an address, and it is not listed
+        # yet - compared as Attendee.email and the speaker list read them.
+        listed = {email.strip().lower() for email in event.speakers.values_list('email', flat=True)}
+        attendees = attendees.exclude(id__in=[
+            pk for pk, account, kept in attendee_addresses(event)
+            if not contact_address(account, kept) or contact_address(account, kept) in listed])
+    if not_admin:
+        attendees = attendees.exclude(user__in=event.admins.all())
+    if attended is not None:
+        attendees = attendees.filter(is_attended=attended)
+    # The unpaid tab lists the longest-waiting first; everything else by id.
+    # Registrations from before the date was recorded have none, and have
+    # waited longest of all, so they lead.
+    if status == 'unpaid':
+        return attendees.order_by(F('created_at').asc(nulls_first=True), 'id')
+    return attendees.order_by('id')
+
+
+def attendee_rows_for(event, attendees):
+    """Hand each row the event already loaded, for its fee exemption."""
     for attendee in attendees:
         attendee.event = event
-
-    # Hide registrations that are not paid for, unless all=True (admin views that
-    # need the incomplete ones too). Whether money is owed is per attendee, not
-    # per event: someone in a free category owes nothing and belongs on the list
-    # even when other categories are charged.
-    if not all:
-        return [a for a in attendees if not a.has_outstanding_payment]
-
     return attendees
+
+
+@api.get("/event/{event_id}/attendees", response=AttendeePageSchema)
+@ensure_event_staff
+def get_event_attendees(request, event_id: int, status: str = 'registered', search: str = '',
+                        field: str = 'all', offset: int = 0, limit: int = 10, ids: str = '',
+                        has_user: bool = None, has_abstract: bool = None,
+                        has_completed_payment: bool = None, not_speaker: bool = False,
+                        not_admin: bool = False, email: str = ''):
+    """A page of the event's registrations, for the admin tables and pickers.
+
+    `counts` sizes each tab whatever the search: the roster and the unpaid.
+    Whether money is owed is per attendee, not per event: someone in a free
+    category owes nothing and belongs on the roster even when other
+    categories are charged.
+    """
+    event = Event.objects.get(id=event_id)
+    attendees = filtered_attendees(
+        event, status, search, field, ids, has_user=has_user, has_abstract=has_abstract,
+        has_completed_payment=has_completed_payment, not_speaker=not_speaker, not_admin=not_admin,
+        email=email)
+    counts = with_payment_state(event.attendees.all(), event).aggregate(
+        registered=Count('id', filter=REGISTERED_Q), unpaid=Count('id', filter=UNPAID_Q))
+    total = None
+    # Just a tab - no search, ids or exclusions (has_* False excludes too) -
+    # so its total is one of the counts already taken.
+    if (not search.strip() and not ids and not email.strip() and not not_speaker and not not_admin
+            and has_user is None and has_abstract is None and has_completed_payment is None):
+        total = {'registered': counts['registered'], 'unpaid': counts['unpaid'],
+                 'all': counts['registered'] + counts['unpaid']}.get(status)
+    page = page_of(admin_attendee_rows(attendees), offset, limit, total=total, counts=counts)
+    attendee_rows_for(event, page['items'])
+    return page
+
+
+
+@api.get("/event/{event_id}/attendees/export", response=List[AttendeeSchema])
+@ensure_event_staff
+def export_event_attendees(request, event_id: int, status: str = None, search: str = '',
+                           field: str = 'all', ids: str = '', attended: bool = None):
+    """Every registration matching the same filters, unpaged - for what works
+    on the whole list: the CSV export, email to all, certificates and name
+    tags for a selection spanning pages.
+
+    A selection (`ids`) is fetched whatever tab it was made on, so without a
+    `status` it means every state; otherwise the roster, as the page does.
+    """
+    event = Event.objects.get(id=event_id)
+    if status is None:
+        status = 'all' if ids else 'registered'
+    attendees = filtered_attendees(event, status, search, field, ids, attended=attended)
+    return attendee_rows_for(event, list(admin_attendee_rows(attendees)))
 
 @api.get("/event/{event_id}/registration", response=AttendeeSchema)
 def get_my_registration(request, event_id: int):
     user = request.user
     event = Event.objects.get(id=event_id)
     try:
-        attendee = event.attendees.get(user__id=user.id)
+        attendee = admin_attendee_rows(event.attendees).get(user__id=user.id)
+        attendee.event = event
         return attendee
     except:
         return api.create_response(
@@ -1275,7 +1648,7 @@ def get_my_registration_payment(request, event_id: int):
 @api.post("/event/{event_id}/attendee/{attendee_id}/update", response=AttendeeUpdateSchema)
 @ensure_event_staff
 def update_attendee(request, event_id: int, attendee_id: int):
-    data = json.loads(request.body)
+    data = read_body(request)
     event = Event.objects.get(id=event_id)
     attendee = Attendee.objects.get(id=attendee_id, event=event)
 
@@ -1294,8 +1667,8 @@ def update_attendee(request, event_id: int, attendee_id: int):
             attendee.category = None
         else:
             try:
-                attendee.category = event.registration_categories.get(id=int(raw))
-            except (ValueError, TypeError, RegistrationCategory.DoesNotExist):
+                attendee.category = event.registration_categories.get(id=whole_number(raw))
+            except RegistrationCategory.DoesNotExist:
                 return api.create_response(
                     request,
                     {"code": "invalid_category", "message": "Invalid registration category"},
@@ -1340,7 +1713,7 @@ def update_attendee(request, event_id: int, attendee_id: int):
 @api.post("/event/{event_id}/attendee/{attendee_id}/answers", response=MessageSchema)
 @ensure_event_staff
 def update_event_answers(request, event_id: int, attendee_id: int):
-    data = json.loads(request.body)
+    data = read_body(request)
     answers = data.get("answers", [])
     references = [a["reference_id"] for a in answers if a["reference_id"] is not None]
     if len(references) != len(set(references)):
@@ -1377,7 +1750,7 @@ def verify_invitation_code(request, event_id: int):
         )
     if not event.invitation_code:
         return {"code": "success", "message": "No invitation code required."}
-    data = json.loads(request.body)
+    data = read_body(request)
     submitted_code = data.get("invitation_code", "").strip().upper()
     if submitted_code != event.invitation_code:
         return api.create_response(
@@ -1412,7 +1785,7 @@ def register_event(request, event_id: int):
             status=400,
         )
 
-    data = json.loads(request.body)
+    data = read_body(request)
 
     # Validate invitation code if event is invitation-only
     if event.invitation_code:
@@ -1423,7 +1796,8 @@ def register_event(request, event_id: int):
                 {"code": "invalid_invitation_code", "message": "Invalid invitation code. Please check and try again."},
                 status=400,
             )
-    for q in event.custom_questions.all():
+    questions = list(event.custom_questions.all())
+    for q in questions:
         if q.question["type"] == "select":
             for oidx, option in enumerate(q.question["options"]):
                 if not data.get(f"{q.id}"):
@@ -1476,22 +1850,26 @@ def register_event(request, event_id: int):
         dietary=data.get("dietary", "")
     )
 
-    for q in event.custom_questions.all():
+    answers = []
+    for q in questions:
         if q.question["type"] == "checkbox":
             answer = '\n'.join([f"- {option}: {data.get(f"{q.id}_{oidx}")}" for oidx, option in enumerate(q.question["options"])])
         else:
             answer = data.get(f"{q.id}")
-        CustomAnswer.objects.create(
+        answers.append(CustomAnswer(
             reference=q,
             attendee=attendee,
             question=q.question["question"],
-            answer=answer
-        )
+            # A question left unanswered is stored blank; required ones were
+            # checked above.
+            answer=answer if answer is not None else ''
+        ))
+    CustomAnswer.objects.bulk_create(answers)
 
     event.attendees.add(attendee)
 
     reply_to = event.main_admin.email if event.main_admin else None
-    send_mail.delay(
+    send_mail.delay_on_commit(
         render_email_template(event.email_template_registration.subject, {"event": event, "attendee": attendee}),
         render_email_template(event.email_template_registration.body, {"event": event, "attendee": attendee}),
         user.email,
@@ -1524,7 +1902,7 @@ def request_change(request, event_id: int):
             status=400,
         )
 
-    data = json.loads(request.body)
+    data = read_body(request)
     message = data.get("message", "").strip()
 
     if not message:
@@ -1564,9 +1942,17 @@ Please review and respond to this request.
 """
 
     for admin_email in admin_emails:
-        send_mail.delay(subject, body, admin_email)
+        send_mail.delay_on_commit(subject, body, admin_email)
 
     return {"code": "success", "message": "Your request has been submitted."}
+
+def clean_abstract_title(raw):
+    """The title as stored, or None when it cannot be: missing, blank, or
+    longer than the column holds. Checked before the file is stored, since a
+    transaction cannot take back a file."""
+    title = raw.strip() if isinstance(raw, str) else ''
+    return title if title and len(title) <= Abstract._meta.get_field('title').max_length else None
+
 
 def store_abstract_file(file_name, raw):
     """Decode, validate and save an uploaded abstract file.
@@ -1604,7 +1990,7 @@ def send_abstract_confirmation(event, attendee, abstract):
     if not to or template is None:
         return
     reply_to = event.main_admin.email if event.main_admin else None
-    send_mail.delay(
+    send_mail.delay_on_commit(
         render_email_template(template.subject, {"event": event, "abstract": abstract}),
         render_email_template(template.body, {"attendee": attendee, "event": event, "abstract": abstract}),
         to,
@@ -1647,7 +2033,7 @@ def submit_abstract(request, event_id: int):
     if attendee.has_outstanding_payment:
         return reject("payment_required", "Please complete your registration payment before submitting an abstract.")
 
-    data = json.loads(request.body)
+    data = read_body(request)
     # A listed speaker who has not submitted yet is still let in after the
     # deadline: their talk is already on the programme and the abstract is
     # owed, not competing for a slot. Chairs give no talk, so the deadline
@@ -1663,8 +2049,12 @@ def submit_abstract(request, event_id: int):
     if (event.capacity_abstract or 0) > 0 and event.capacity_abstract <= event.abstracts.count():
         return reject("event_full", "Sorry, abstract submission limit reached.")
 
-    # create the abstract with the post json data
-    data = json.loads(request.body)
+    # create the abstract with the post json data. The required fields are
+    # read before the file is stored: a transaction cannot take back a file.
+    data = read_body(request)
+    title = clean_abstract_title(data.get("title"))
+    if title is None:
+        return reject("missing_title", "Enter the abstract title (at most 1000 characters).")
     file_path, code, message = store_abstract_file(data["file_name"], data.get("file_content"))
     if file_path is None:
         return reject(code, message)
@@ -1678,7 +2068,7 @@ def submit_abstract(request, event_id: int):
     abstract = Abstract.objects.create(
         attendee=attendee,
         event=event,
-        title=data["title"],
+        title=title,
         presentation_type=presentation_type,
         file_path=file_path,
     )
@@ -1700,7 +2090,7 @@ def add_abstract_for_attendee(request, event_id: int):
     unless the admin asks for one.
     """
     event = Event.objects.get(id=event_id)
-    data = json.loads(request.body)
+    data = read_body(request)
 
     def reject(code, message):
         return api.create_response(request, {"code": code, "message": message}, status=400)
@@ -1714,9 +2104,9 @@ def add_abstract_for_attendee(request, event_id: int):
     if attendee.abstracts.filter(event=event).exists():
         return reject("already_submitted", "This registrant already has an abstract.")
 
-    title = (data.get("title") or "").strip()
-    if not title:
-        return reject("missing_title", "Enter the abstract title.")
+    title = clean_abstract_title(data.get("title"))
+    if title is None:
+        return reject("missing_title", "Enter the abstract title (at most 1000 characters).")
 
     presentation_type = data.get("presentation_type", "poster")
     if presentation_type not in dict(Abstract.PRESENTATION_TYPE_CHOICES):
@@ -1753,12 +2143,21 @@ def get_speakers(request, event_id: int):
 @ensure_event_staff
 def get_speakers_for_admin(request, event_id: int):
     event = Event.objects.get(id=event_id)
-    return event.speakers.all()
+    speakers = list(event.speakers.all())
+    registrations = registrations_by_email(event, [s.email for s in speakers])
+    for speaker in speakers:
+        attendees = lookup_registrations(registrations, speaker.email)
+        speaker.is_registered = bool(attendees)
+        speaker.has_paid = any(p.status == 'completed' for a in attendees for p in a.payment_list)
+        abstracts = sorted((ab for a in attendees for ab in a.abstract_list if ab.event_id == event.id),
+                           key=lambda ab: ab.id)
+        speaker.abstract_title = abstracts[0].title if abstracts else ''
+    return speakers
 
 @api.post("/event/{event_id}/speaker/add", response=MessageSchema)
 @ensure_event_staff
 def add_speaker(request, event_id: int):
-    data = json.loads(request.body)
+    data = read_body(request)
     event = Event.objects.get(id=event_id)
 
     if not data.get("name") or not data.get("email") or not data.get("affiliation") or data.get("is_domestic") is None or not data.get("type"):
@@ -1809,7 +2208,7 @@ def add_speaker(request, event_id: int):
 def update_speaker(request, event_id: int, speaker_id: int):
     event = Event.objects.get(id=event_id)
     speaker = event.speakers.get(id=speaker_id)
-    data = json.loads(request.body)
+    data = read_body(request)
 
     if event.speakers.filter(email__iexact=data["email"].strip()).exclude(id=speaker.id).exists():
         return api.create_response(
@@ -1857,7 +2256,7 @@ def delete_speaker(request, event_id: int, speaker_id: int):
 @ensure_event_staff
 def send_emails(request, event_id: int):
     event = Event.objects.get(id=event_id)
-    data = json.loads(request.body)
+    data = read_body(request)
 
     # Sanitize subject to prevent email header injection
     subject = sanitize_email_header(data.get('subject', ''))
@@ -1916,16 +2315,18 @@ def send_emails(request, event_id: int):
         )
 
     reply_to = event.main_admin.email if event.main_admin else None
+    registrations = registrations_by_email(event, valid_recipients)
     for recipient in valid_recipients:
         # An address with no registration (a CC'd colleague, say) still gets the
         # email; the attendee variables just render empty.
-        matches = attendees_for_email(event, recipient)
+        matches = lookup_registrations(registrations, recipient)
         attendee = matches[0] if matches else None
         # Their abstract too, so one email to every presenter can branch on
         # {% if abstract.presentation_type == "..." %} and name the title.
-        abstract = attendee.abstracts.filter(event=event).first() if attendee else None
+        abstract = min((ab for ab in attendee.abstract_list if ab.event_id == event.id),
+                       key=lambda ab: ab.id, default=None) if attendee else None
         context = {"event": event, "attendee": attendee, "abstract": abstract}
-        send_mail.delay(
+        send_mail.delay_on_commit(
             render_email_template(subject, context),
             render_email_template(body, context),
             recipient, reply_to=reply_to,
@@ -1944,7 +2345,7 @@ def send_invitations(request, event_id: int):
     templates, rendered per recipient so each gets their own link.
     """
     event = Event.objects.get(id=event_id)
-    data = json.loads(request.body)
+    data = read_body(request)
 
     subject = sanitize_email_header(data.get('subject', ''))
     body = data.get('body', '')
@@ -2017,7 +2418,7 @@ def accept_invitation(request, token: str):
 @ensure_event_staff
 def send_certificate(request, event_id: int):
     """Send a certificate PDF to an email address."""
-    data = json.loads(request.body)
+    data = read_body(request)
     email = data.get("email")
     pdf_base64 = data.get("pdf_base64")
     attendee_id = data.get("attendee_id")
@@ -2058,7 +2459,7 @@ def send_certificate(request, event_id: int):
     body = render_email_template(event.email_template_certificate.body, email_context)
 
     reply_to = event.main_admin.email if event.main_admin else None
-    send_mail_with_attachment.delay(
+    send_mail_with_attachment.delay_on_commit(
         subject,
         body,
         email,
@@ -2082,11 +2483,11 @@ def get_reviewers(request, event_id: int):
 @api.post("/event/{event_id}/reviewer/add", response=MessageSchema)
 @ensure_event_staff
 def add_reviewer(request, event_id: int):
-    data = json.loads(request.body)
+    data = read_body(request)
     event = Event.objects.get(id=event_id)
     attendee = Attendee.objects.get(event=event, id=data["id"])
     # check if the user is already a reviewer
-    if attendee in event.reviewers.all():
+    if event.reviewers.filter(id=attendee.id).exists():
         return api.create_response(
             request,
             {"code": "already_reviewer", "message": "User is already a reviewer."},
@@ -2105,22 +2506,86 @@ def delete_reviewer(request, event_id: int, reviewer_id: int):
     AbstractVote.objects.get(reviewer=attendee).delete()
     return {"code": "success", "message": "Reviewer deleted."}
 
-@api.get("/event/{event_id}/abstracts", response=List[AbstractShortSchema])
-@ensure_event_staff
-def get_abstracts(request, event_id: int):
-    # The admin table: every submission with its author's full registration.
-    # Reviewers use /review/abstracts, which shows them far less.
-    event = Event.objects.get(id=event_id)
+def abstract_type_search(term):
+    """Presentation types whose name contains `term`, for searching by type."""
+    term = (term or '').strip().lower()
+    return [code for code, label in Abstract.PRESENTATION_TYPE_CHOICES
+            if term in label.lower() or term in code]
+
+
+def filtered_abstracts(event, type='', search='', field='all', ids='', types=''):
+    """The event's abstracts narrowed as the admin table asks: by presentation
+    type (the chips), a search over title, presenter and institute, or ids.
+
+    Searching by type matches the English labels here; `types` carries the
+    codes whose label in the admin's own language matched, which only the
+    browser knows, so a Korean search finds them too.
+    """
+    matched_types = abstract_type_search(search) + [t for t in types.split(',') if t]
+    fields = {
+        'title': ['title'],
+        'presenter': ['presenter_name', 'presenter_name_mi', 'attendee__korean_name'],
+        'institute': ['attendee__institute', 'attendee__institute_ko'],
+    }
+    abstracts = event.abstracts.annotate(
+        presenter_name=full_name('attendee__first_name', 'attendee__middle_initial', 'attendee__last_name')[0],
+        presenter_name_mi=full_name('attendee__first_name', 'attendee__middle_initial', 'attendee__last_name')[1])
+    if field == 'type':
+        abstracts = abstracts.filter(presentation_type__in=matched_types) if search.strip() else abstracts
+    else:
+        query = search_q(search, field, fields)
+        if search.strip() and field == 'all':
+            query |= Q(presentation_type__in=matched_types)
+        abstracts = abstracts.filter(query)
+    if type:
+        abstracts = abstracts.filter(presentation_type=type)
+    if ids:
+        abstracts = abstracts.filter(id__in=parse_ids(ids))
+    return abstracts.order_by('id')
+
+
+def abstract_rows(event, abstracts):
+    """Abstracts with their author's full registration and vote count loaded.
+
+    The admin table: every submission with its author's full registration.
+    Reviewers use /review/abstracts, which shows them far less.
+    """
     abstracts = list(
-        event.abstracts
+        abstracts
         .select_related('attendee__user__institute', 'attendee__category')
-        .prefetch_related('attendee__payments', 'attendee__user__socialaccount_set',
-                          'attendee__user__emailaddress_set', 'attendee__custom_answers__reference')
+        .prefetch_related(*attendee_prefetches('attendee__'))
         .annotate(vote_count=Count('votes', distinct=True))
     )
     for abstract in abstracts:
-        abstract.attendee.event = event
+        if abstract.attendee is not None:
+            abstract.attendee.event = event
     return abstracts
+
+
+@api.get("/event/{event_id}/abstracts", response=AbstractPageSchema)
+@ensure_event_staff
+def get_abstracts(request, event_id: int, type: str = '', search: str = '', field: str = 'all',
+                  offset: int = 0, limit: int = 10, ids: str = '', types: str = ''):
+    """A page of the event's abstracts. `counts` holds each presentation
+    type's total, and 'all', whatever the search - the chips above the table."""
+    event = Event.objects.get(id=event_id)
+    counts = dict(event.abstracts.values_list('presentation_type').annotate(n=Count('id')).order_by())
+    counts['all'] = sum(counts.values())
+    abstracts = filtered_abstracts(event, type, search, field, ids, types)
+    total = abstracts.count()
+    offset, limit = page_bounds(offset, limit)
+    return {'items': abstract_rows(event, abstracts[offset:offset + limit]), 'total': total,
+            'offset': offset, 'limit': limit, 'counts': counts}
+
+
+@api.get("/event/{event_id}/abstracts/export", response=List[AbstractShortSchema])
+@ensure_event_staff
+def export_abstracts(request, event_id: int, type: str = '', search: str = '', field: str = 'all',
+                     ids: str = '', types: str = ''):
+    """Every abstract matching the same filters, unpaged - to email their
+    presenters."""
+    event = Event.objects.get(id=event_id)
+    return abstract_rows(event, filtered_abstracts(event, type, search, field, ids, types))
 
 def reviewer_attendee(user, event):
     """This user's registration on `event` if they review for it, else None.
@@ -2144,7 +2609,7 @@ def get_abstracts_for_review(request, event_id: int):
     # Reviewers only score the abstracts in competition, so invited and
     # plenary talks are not shown to them at all.
     return event.abstracts.exclude(
-        presentation_type__in=Abstract.NON_REVIEWABLE_PRESENTATION_TYPES)
+        presentation_type__in=Abstract.NON_REVIEWABLE_PRESENTATION_TYPES).select_related('attendee')
 
 ABSTRACT_MEDIA_RE = re.compile(r'abstracts/([0-9a-fA-F-]{36})/')
 
@@ -2174,11 +2639,13 @@ def authorize_abstract_file(request):
     return HttpResponse(status=200 if (is_author or is_admin) else 403)
 
 @api.get("/event/{event_id}/abstract", response=AbstractUserSchema)
-def get_user_abstract(request, event_id: int):
+def get_user_abstract(request, event_id: int, include_body: bool = False):
+    """The user's own abstract. The converted body only with include_body:
+    the preview page shows it, other callers need only the title and type."""
     user = request.user
     event = Event.objects.get(id=event_id)
     try:
-        attendee = Attendee.objects.get(user=user, event=event)
+        attendee = admin_attendee_rows(Attendee.objects.filter(event=event)).get(user=user)
     except Attendee.DoesNotExist:
         return api.create_response(
             request,
@@ -2193,6 +2660,11 @@ def get_user_abstract(request, event_id: int):
             {"code": "not_found", "message": "Abstract not found."},
             status=404,
         )
+    # The schema nests the full registration; hand it the one just loaded.
+    attendee.event = event
+    abstract.attendee = attendee
+    if include_body:
+        abstract.body = AbstractSchema.resolve_body(abstract)
     return abstract
 
 @api.get("/event/{event_id}/abstract/{abstract_id}", response=ReviewAbstractSchema)
@@ -2222,8 +2694,13 @@ def get_abstract(request, event_id: int, abstract_id: int):
 def update_abstract(request, event_id: int, abstract_id: int):
     event = Event.objects.get(id=event_id)
     abstract = event.abstracts.get(id=abstract_id)
-    data = json.loads(request.body)
-    abstract.title = data["title"]
+    data = read_body(request)
+    title = clean_abstract_title(data.get("title"))
+    if title is None:
+        return api.create_response(
+            request, {"code": "missing_title", "message": "Enter the abstract title (at most 1000 characters)."},
+            status=400)
+    abstract.title = title
     presentation_type = data.get("presentation_type", abstract.presentation_type)
     if presentation_type in dict(Abstract.PRESENTATION_TYPE_CHOICES):
         abstract.presentation_type = presentation_type
@@ -2248,7 +2725,7 @@ def is_reviewer(request, event_id: int):
         attendee = Attendee.objects.get(user=user, event_id=event_id)
     except Attendee.DoesNotExist:
         return False # User is not registered to the event
-    return attendee in Event.objects.get(id=event_id).reviewers.all()
+    return event.reviewers.filter(id=attendee.id).exists()
 
 @api.get("/event/{event_id}/reviewer/vote", response=ReviewerVoteSchema)
 def get_reviewer_votes(request, event_id: int):
@@ -2273,6 +2750,8 @@ def get_reviewer_votes(request, event_id: int):
             status=403,
         )
     votes, _ = AbstractVote.objects.get_or_create(reviewer=reviewer)
+    prefetch_related_objects([votes], Prefetch(
+        'voted_abstracts', queryset=Abstract.objects.select_related('attendee')))
     return votes
 
 @api.post("/event/{event_id}/reviewer/vote", response=MessageSchema)
@@ -2297,11 +2776,22 @@ def vote_abstract(request, event_id: int):
             {"code": "permission_denied", "message": "Permission denied"},
             status=403,
         )
-    data = json.loads(request.body)
-    vote, _ = AbstractVote.objects.get_or_create(reviewer=reviewer)
-    for abstract_id in data["voted_abstracts"]:
+    data = read_body(request)
+    # Every vote is checked before any is recorded, so a ballot that is
+    # refused records nothing rather than the votes ahead of the bad one.
+    ballot_ids = data["voted_abstracts"]
+    if not isinstance(ballot_ids, list):
+        return api.create_response(
+            request, {"code": "invalid_ballot", "message": "voted_abstracts must be a list of abstract ids."},
+            status=400)
+    abstracts = []
+    for abstract_id in ballot_ids:
         # Validate abstract belongs to this event to prevent cross-event voting
-        abstract = Abstract.objects.get(id=abstract_id, event=event)
+        abstract_id = whole_number(abstract_id)
+        abstract = Abstract.objects.filter(id=abstract_id, event=event).first() if abstract_id else None
+        if abstract is None:
+            return api.create_response(
+                request, {"code": "not_found", "message": "Abstract not found."}, status=400)
         if not abstract.is_reviewable:
             return api.create_response(
                 request,
@@ -2309,13 +2799,53 @@ def vote_abstract(request, event_id: int):
                  "message": "Invited and plenary talks are not under review."},
                 status=400,
             )
-        vote.voted_abstracts.add(abstract)
+        abstracts.append(abstract)
+    vote, _ = AbstractVote.objects.get_or_create(reviewer=reviewer)
+    # Locked while it is counted, so two ballots sent at once cannot together
+    # pass the limit. The ballot's limit, held here too and not only by the
+    # review page.
+    vote = AbstractVote.objects.select_for_update().get(pk=vote.pk)
+    ballot = set(vote.voted_abstracts.values_list('id', flat=True)) | {a.id for a in abstracts}
+    if event.max_votes and len(ballot) > event.max_votes:
+        return api.create_response(
+            request,
+            {"code": "too_many_votes", "message": f"At most {event.max_votes} votes are allowed."},
+            status=400,
+        )
+    vote.voted_abstracts.add(*abstracts)
     return {"code": "success", "message": "Votes submitted."}
 
-@api.get("/admin/users", response=List[UserSchema])
+USER_SEARCH_FIELDS = {
+    'name': ['full_name', 'full_name_mi', 'korean_name'],
+    'email': ['email'],
+    'institute': ['institute__name_en', 'institute__name_ko'],
+    'job_title': ['job_title'],
+}
+
+
+@api.get("/admin/users", response=UserPageSchema)
 @ensure_staff
-def get_all_users(request):
-    return User.objects.all().order_by('-date_joined')
+def get_all_users(request, offset: int = 0, limit: int = 50, search: str = "", field: str = "all",
+                  not_registered_for: int = None, not_admin_of: int = None):
+    """Accounts, a page at a time, newest first - for the users table and for
+    every account picker, which search here rather than holding them all.
+
+    Staff only: an event admin never browses the site's accounts (see
+    lookup_user_for_registration). The two exclusions drop accounts a picker
+    cannot use - already registered for, or already admin of, that event.
+    """
+    users = (User.objects.select_related('institute')
+             .annotate(full_name=full_name('first_name', 'middle_initial', 'last_name')[0],
+                       full_name_mi=full_name('first_name', 'middle_initial', 'last_name')[1])
+             .filter(search_q(search, field, USER_SEARCH_FIELDS))
+             .order_by('-date_joined', '-id'))
+    if not_registered_for is not None:
+        users = users.exclude(attendee__event_id=not_registered_for)
+    if not_admin_of is not None:
+        users = users.exclude(admins__id=not_admin_of)
+    page = page_of(users, offset, limit)
+    prefetch_related_objects(page['items'], *user_prefetches())
+    return page
 
 @api.post("/admin/user/guest/add", response=UserSchema)
 @ensure_staff
@@ -2501,7 +3031,7 @@ def toggle_user_verified(request, user_id: int):
 def update_user_by_admin(request, user_id: int):
     try:
         user = User.objects.get(id=user_id)
-        data = json.loads(request.body)
+        data = read_body(request)
 
         # Update user fields
         if "first_name" in data:
@@ -2639,24 +3169,19 @@ def resend_verification_email(request, data: ResendVerificationSchema):
             status=404,
         )
 
-@api.get("/users", response=List[UserSchema])
-@ensure_staff
-def get_users(request):
-    return User.objects.select_related('institute').prefetch_related('socialaccount_set', 'emailaddress_set')
-
 @api.get("/event/{event_id}/eventadmins", response=List[UserSchema])
 @ensure_event_staff
 def get_event_admins(request, event_id: int):
     event = Event.objects.get(id=event_id)
-    return event.admins.select_related('institute').prefetch_related('socialaccount_set', 'emailaddress_set')
+    return event.admins.select_related('institute').prefetch_related(*user_prefetches())
 
 @api.post("/event/{event_id}/eventadmin/add", response=MessageSchema)
 @ensure_event_staff
 def add_event_admin(request, event_id: int):
-    data = json.loads(request.body)
+    data = read_body(request)
     event = Event.objects.get(id=event_id)
     user = User.objects.get(id=data["id"])
-    if user in event.admins.all():
+    if event.admins.filter(id=user.id).exists():
         return api.create_response(
             request,
             {"code": "already_admin", "message": "User is already an admin."},
@@ -2693,7 +3218,7 @@ def delete_event_admin(request, event_id: int, admin_id: int):
 def set_main_admin(request, event_id: int, admin_id: int):
     event = Event.objects.get(id=event_id)
     user = User.objects.get(id=admin_id)
-    if user not in event.admins.all():
+    if not event.admins.filter(id=user.id).exists():
         return api.create_response(
             request,
             {"code": "not_admin", "message": "User is not an admin of this event."},
@@ -2728,7 +3253,7 @@ def get_organizers(request, event_id: int):
 @api.post("/event/{event_id}/organizer/add", response=MessageSchema)
 @ensure_event_staff
 def add_organizer(request, event_id: int):
-    data = json.loads(request.body)
+    data = read_body(request)
     event = Event.objects.get(id=event_id)
 
     if not data.get("name"):
@@ -2758,7 +3283,7 @@ def add_organizer(request, event_id: int):
 def update_organizer(request, event_id: int, organizer_id: int):
     event = Event.objects.get(id=event_id)
     organizer = event.organizer_set.get(id=organizer_id)
-    data = json.loads(request.body)
+    data = read_body(request)
     organizer_type, affiliation, affiliation_ko = _organizer_fields(data)
     organizer.organizer_type = organizer_type
     organizer.name = data["name"]
@@ -2780,7 +3305,7 @@ def delete_organizer(request, event_id: int, organizer_id: int):
 @api.post("/event/{event_id}/organizers/reorder", response=MessageSchema)
 @ensure_event_staff
 def reorder_organizers(request, event_id: int):
-    data = json.loads(request.body)
+    data = read_body(request)
     event = Event.objects.get(id=event_id)
     order = data.get("order", [])
     for idx, org_id in enumerate(order):
@@ -2825,7 +3350,7 @@ def register_on_site(request, event_id: int):
             status=400,
         )
 
-    data = json.loads(request.body)
+    data = read_body(request)
 
     # Validate onsite code
     code = data.get("code", "").strip().upper()
@@ -2872,11 +3397,49 @@ def register_on_site(request, event_id: int):
         "fee": fee,
     }
 
-@api.get("/event/{event_id}/onsite", response=List[OnSiteAttendeeSchema])
+ONSITE_SEARCH_FIELDS = {
+    'name': ['name'],
+    'email': ['email'],
+    'institute': ['institute'],
+    'category': ['category__name', 'category__name_ko'],
+    'job_title': ['job_title'],
+    'id': ['nametag_text'],
+}
+
+
+def filtered_onsite(event, search='', field='all', ids='', confirmed=None):
+    onsite = (event.onsite_attendees.select_related('category', 'event')
+              .annotate(nametag_text=Cast('onsiteattendee_nametag_id', CharField()))
+              .filter(search_q(search, field, ONSITE_SEARCH_FIELDS)))
+    if ids:
+        onsite = onsite.filter(id__in=parse_ids(ids))
+    if confirmed is not None:
+        onsite = onsite.filter(is_confirmed=confirmed)
+    return onsite.order_by('id')
+
+
+@api.get("/event/{event_id}/onsite", response=OnSiteAttendeePageSchema)
 @ensure_event_staff
-def get_on_site_attendees(request, event_id: int):
+def get_on_site_attendees(request, event_id: int, search: str = '', field: str = 'all',
+                          offset: int = 0, limit: int = 10, ids: str = ''):
+    """A page of the event's walk-ins. `counts.all` is every walk-in, whatever
+    the search - the headcount above the table."""
     event = Event.objects.get(id=event_id)
-    return event.onsite_attendees.select_related('category', 'event')
+    onsite = filtered_onsite(event, search, field, ids)
+    everyone = event.onsite_attendees.count()
+    # Just the list, unsearched: its total is the headcount already taken.
+    total = everyone if not search.strip() and not ids else None
+    return page_of(onsite, offset, limit, total=total, counts={'all': everyone})
+
+
+@api.get("/event/{event_id}/onsite/export", response=List[OnSiteAttendeeSchema])
+@ensure_event_staff
+def export_on_site_attendees(request, event_id: int, search: str = '', field: str = 'all',
+                             ids: str = '', confirmed: bool = None):
+    """Every walk-in matching the same filters, unpaged - for the export,
+    email to all, certificates and name tags."""
+    event = Event.objects.get(id=event_id)
+    return list(filtered_onsite(event, search, field, ids, confirmed))
 
 @api.post("/event/{event_id}/onsite/{onsite_id}/delete", response=MessageSchema)
 @ensure_event_staff
@@ -2891,7 +3454,7 @@ def delete_on_site_attendee(request, event_id: int, onsite_id: int):
 def update_on_site_attendee(request, event_id: int, onsite_id: int):
     event = Event.objects.get(id=event_id)
     oa = OnSiteAttendee.objects.get(id=onsite_id, event=event)
-    data = json.loads(request.body)
+    data = read_body(request)
 
     if "is_confirmed" in data:
         oa.is_confirmed = data.get("is_confirmed", False)
@@ -3101,66 +3664,121 @@ def ensure_provider_enabled(request, provider):
 
 # ===== Event Payment Management (Event Admin) =====
 
-@api.get("/event/{event_id}/payments", response=List[EventPaymentSchema])
+def payment_row(payment):
+    """One payment as the admin table shows it, manual-entry details included."""
+    # Get manual transaction details if exists
+    manual_payment_type = ''
+    supply_amount = 0
+    vat = 0
+    card_type = ''
+    card_number = ''
+    approval_number = ''
+    installment = ''
+    transaction_datetime = ''
+    transaction_description = ''
+
+    if hasattr(payment, 'manual_transaction') and payment.manual_transaction:
+        mt = payment.manual_transaction
+        manual_payment_type = mt.payment_type
+        supply_amount = mt.supply_amount
+        vat = mt.vat
+        card_type = mt.card_type
+        card_number = mt.card_number
+        approval_number = mt.approval_number
+        installment = mt.installment
+        if mt.transaction_datetime:
+            transaction_datetime = mt.transaction_datetime.strftime('%Y-%m-%d %H:%M:%S')
+        transaction_description = mt.transaction_description
+
+    return {
+        'id': payment.id,
+        'number': payment.toss_order_id or str(payment.id),
+        'checkout_date': payment.created_at.strftime('%Y-%m-%d'),
+        'amount': payment.amount,
+        'status': payment.status,
+        'payment_type': payment.payment_type,
+        'provider': payment.provider,
+        'manual_payment_type': manual_payment_type,
+        'note': payment.note,
+        'attendee_id': payment.attendee_id,
+        'attendee_name': payment.attendee_name,
+        'attendee_name_ko': payment.attendee_korean_name or '',
+        'attendee_email': payment.attendee_email or '',
+        'attendee_institute': payment.attendee_institute or '',
+        'attendee_institute_ko': payment.attendee_institute_ko or '',
+        'supply_amount': supply_amount,
+        'vat': vat,
+        'card_type': card_type,
+        'card_number': card_number,
+        'approval_number': approval_number,
+        'installment': installment,
+        'transaction_datetime': transaction_datetime,
+        'transaction_description': transaction_description,
+    }
+
+
+PAYMENT_SEARCH_FIELDS = {
+    'name': ['payer_name', 'payer_name_mi', 'attendee_korean_name'],
+    'email': ['attendee_email'],
+    'institute': ['attendee_institute', 'attendee_institute_ko'],
+    'number': ['shown_number'],
+}
+
+
+def filtered_payments(event, search='', field='all', status=''):
+    query = search_q(search, field, PAYMENT_SEARCH_FIELDS)
+    # The number as the table shows it is "#" before it; typed with the "#",
+    # it still matches.
+    number = search.strip()
+    if number.startswith('#') and number.lstrip('#') and field in ('all', 'number'):
+        query |= Q(shown_number__icontains=number.lstrip('#'))
+    name, name_with_initial = full_name('attendee_first_name', 'attendee_middle_initial', 'attendee_last_name')
+    # payment_row's `number` - the order id, or the row id without one -
+    # padded to six digits as the table renders it, so a search finds what
+    # is on screen (#000123), and only that.
+    number_text = Coalesce(NullIf('toss_order_id', Value('')), Cast('id', CharField()))
+    payments = (PaymentHistory.objects.filter(event=event).select_related('manual_transaction')
+                .annotate(payer_name=name, payer_name_mi=name_with_initial,
+                          number_text=number_text, number_length=Length(number_text))
+                .annotate(shown_number=Case(
+                    When(number_length__lt=6, then=LPad('number_text', 6, Value('0'))),
+                    default='number_text'))
+                .filter(query))
+    if status:
+        payments = payments.filter(status=status)
+    return payments.order_by('-created_at', '-id')
+
+
+@api.get("/event/{event_id}/payments", response=EventPaymentPageSchema)
 @ensure_event_staff
-def get_event_payments(request, event_id: int):
-    """Get all payments for an event (event admin only)."""
+def get_event_payments(request, event_id: int, search: str = '', field: str = 'all', status: str = '',
+                       offset: int = 0, limit: int = 10):
+    """A page of the event's payments, newest first (event admin only).
+
+    `summary` is the whole event's figures, whatever the search: how many
+    payments there are, and the count and sum of the completed and the
+    cancelled ones - the cards above the table.
+    """
     event = Event.objects.get(id=event_id)
-    payments = PaymentHistory.objects.filter(event=event).select_related('manual_transaction')
+    totals = PaymentHistory.objects.filter(event=event).aggregate(
+        count_all=Count('id'),
+        count_completed=Count('id', filter=Q(status='completed')),
+        total_completed=Sum('amount', filter=Q(status='completed')),
+        count_cancelled=Count('id', filter=Q(status='cancelled')),
+        total_cancelled=Sum('amount', filter=Q(status='cancelled')),
+    )
+    summary = {key: value or 0 for key, value in totals.items()}
+    page = page_of(filtered_payments(event, search, field, status), offset, limit, summary=summary)
+    page['items'] = [payment_row(p) for p in page['items']]
+    return page
 
-    payment_list = []
-    for payment in payments:
-        # Get manual transaction details if exists
-        manual_payment_type = ''
-        supply_amount = 0
-        vat = 0
-        card_type = ''
-        card_number = ''
-        approval_number = ''
-        installment = ''
-        transaction_datetime = ''
-        transaction_description = ''
 
-        if hasattr(payment, 'manual_transaction') and payment.manual_transaction:
-            mt = payment.manual_transaction
-            manual_payment_type = mt.payment_type
-            supply_amount = mt.supply_amount
-            vat = mt.vat
-            card_type = mt.card_type
-            card_number = mt.card_number
-            approval_number = mt.approval_number
-            installment = mt.installment
-            if mt.transaction_datetime:
-                transaction_datetime = mt.transaction_datetime.strftime('%Y-%m-%d %H:%M:%S')
-            transaction_description = mt.transaction_description
-
-        payment_list.append({
-            'id': payment.id,
-            'number': payment.toss_order_id or str(payment.id),
-            'checkout_date': payment.created_at.strftime('%Y-%m-%d'),
-            'amount': payment.amount,
-            'status': payment.status,
-            'payment_type': payment.payment_type,
-            'provider': payment.provider,
-            'manual_payment_type': manual_payment_type,
-            'note': payment.note,
-            'attendee_id': payment.attendee_id,
-            'attendee_name': payment.attendee_name,
-            'attendee_name_ko': payment.attendee_korean_name or '',
-            'attendee_email': payment.attendee_email or '',
-            'attendee_institute': payment.attendee_institute or '',
-            'attendee_institute_ko': payment.attendee_institute_ko or '',
-            'supply_amount': supply_amount,
-            'vat': vat,
-            'card_type': card_type,
-            'card_number': card_number,
-            'approval_number': approval_number,
-            'installment': installment,
-            'transaction_datetime': transaction_datetime,
-            'transaction_description': transaction_description,
-        })
-
-    return payment_list
+@api.get("/event/{event_id}/payments/export", response=List[EventPaymentSchema])
+@ensure_event_staff
+def export_event_payments(request, event_id: int, search: str = '', field: str = 'all', status: str = ''):
+    """Every payment matching the same filters, unpaged - for the CSV export."""
+    event = Event.objects.get(id=event_id)
+    return [payment_row(p) for p in filtered_payments(event, search, field, status)]
 
 
 @api.post("/event/{event_id}/payment/add", response=MessageSchema)
@@ -3597,7 +4215,9 @@ def get_paypal_access_token():
     return None
 
 
-@api.post("/payment/paypal/create-order")
+# Not in a transaction: it writes nothing but the exchange-rate cache, and
+# would otherwise hold that row locked across three calls to outside services.
+@api.post("/payment/paypal/create-order", atomic=False)
 def create_paypal_order(request, data: PayPalCreateOrderSchema):
     """
     Create a PayPal order for event registration payment.
@@ -4176,7 +4796,7 @@ def upload_editor_file(request):
     Accepts images and attachments via base64 encoding.
     Returns the URL of the uploaded file.
     """
-    data = json.loads(request.body)
+    data = read_body(request)
     file_name = data.get("file_name", "")
     file_content_b64 = data.get("file_content", "")
     file_type = data.get("file_type", "image")  # 'image' or 'attachment'
@@ -4242,7 +4862,7 @@ def list_api_keys(request):
 @api.post("/admin/apikey/add", response=MessageSchema)
 @ensure_superuser
 def add_api_key(request):
-    data = json.loads(request.body)
+    data = read_body(request)
     name = (data.get("name") or "").strip()
     user_id = data.get("user_id")
     if not name or not user_id:
@@ -4273,7 +4893,7 @@ def rotate_api_key(request, key_id: int):
 @api.post("/admin/apikey/{key_id}/revoke", response=MessageSchema)
 @ensure_superuser
 def revoke_api_key(request, key_id: int):
-    data = json.loads(request.body) if request.body else {}
+    data = read_body(request) if request.body else {}
     revoked = data.get("revoked", True)
     try:
         key = ApiKey.objects.get(id=key_id)
@@ -4312,7 +4932,9 @@ def download_backup(request):
                         content_type="application/gzip")
 
 
-@api.post("/admin/restore", response=MessageSchema)
+# Not in a transaction: the restore replaces the whole database from a psql
+# session that terminates every other connection, ours included.
+@api.post("/admin/restore", response=MessageSchema, atomic=False)
 @ensure_superuser
 def restore_backup(request, file: UploadedFile = File(...)):
     """Replace the whole database and media from an uploaded backup (superuser)."""

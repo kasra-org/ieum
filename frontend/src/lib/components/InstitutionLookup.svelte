@@ -56,6 +56,10 @@
   // Reset modal state when closed (preserves value and displayValue)
   $effect(() => {
     if (!modal_open) {
+      // A search still on its way answers a dialog that is gone: drop it, so
+      // the next open starts empty.
+      searchSequence++;
+      clearTimeout(searchTimeout);
       modal_step = 'search';
       search_query = '';
       filtered_suggestions = [];
@@ -65,7 +69,11 @@
     }
   });
 
+  // Only the latest search fills the list; an older, slower answer is dropped.
+  let searchSequence = 0;
+
   async function filterInstitutions() {
+    const mine = ++searchSequence;
     if (!search_query || search_query.length < 2) {
       filtered_suggestions = [];
       return;
@@ -82,17 +90,18 @@
 
       if (response.ok) {
         const result = deserialize(await response.text());
+        if (mine !== searchSequence) return;
         if (result.type === 'success' && result.data?.success) {
           filtered_suggestions = result.data.institutions;
         } else {
           filtered_suggestions = [];
         }
-      } else {
+      } else if (mine === searchSequence) {
         filtered_suggestions = [];
       }
     } catch (error) {
       console.error('Failed to search institutions:', error);
-      filtered_suggestions = [];
+      if (mine === searchSequence) filtered_suggestions = [];
     }
   }
 
@@ -174,6 +183,18 @@
     }
   }
 
+  // Escape closes this dialog only. The lookup often sits inside another
+  // modal (a guest account, an attendee edit) that closes on Escape from a
+  // window listener too; taking the key in the capture phase, before any
+  // listener below, holds wherever focus is - even on the backdrop. Not
+  // while an input method is composing (Korean), where Escape cancels that.
+  function closeOnEscape(e) {
+    if (modal_open && e.key === 'Escape' && !e.isComposing) {
+      e.stopPropagation();
+      closeModal();
+    }
+  }
+
   function closeModal() {
     // Setting modal_open to false triggers the effect that resets modal state
     // while preserving the selected institute value and displayValue
@@ -181,7 +202,7 @@
   }
 </script>
 
-<Label for="institute" class="block mb-2">
+<Label for="institute_display" class="block mb-2">
   {m.form_institute()} {#if required}<span class="text-red-500">*</span>{/if}
 </Label>
 <input type="hidden" name="institute" bind:this={hiddenInput} value={value} />
@@ -207,6 +228,8 @@
   </Alert>
 {/if}
 
+<svelte:window onkeydowncapture={closeOnEscape} />
+
 <Modal title={modal_step === 'search' ? m.form_findInstitution() : m.form_createInstitution()} bind:open={modal_open} size="md" dismissable={false}>
   <div class="space-y-4">
     {#if modal_step === 'search'}
@@ -218,6 +241,11 @@
           type="text"
           bind:value={search_query}
           oninput={handleSearchInput}
+          onkeydown={(e) => {
+            // Enter searches; inside a form (the guest-account one, say) it
+            // would otherwise submit that form, half filled in.
+            if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchTimeout); filterInstitutions(); }
+          }}
           placeholder={m.form_institutePlaceholder()}
           autofocus
         />
@@ -259,7 +287,10 @@
       {/if}
     {:else}
       <!-- Create Step -->
-      <form id="create_institution_form" method="post" action="?/create_institution" use:enhance={handleCreateInstitution}>
+      <!-- Its submit stops here: this form may sit inside another one (the
+           guest-account form), whose own submit handler would take it. -->
+      <form id="create_institution_form" method="post" action="?/create_institution" use:enhance={handleCreateInstitution}
+            onsubmit={(e) => e.stopPropagation()}>
         <div class="space-y-4">
           {#if languageTag() === 'ko'}
             <!-- Korean name first when UI is Korean -->

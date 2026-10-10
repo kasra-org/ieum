@@ -1,6 +1,6 @@
 <script>
     import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Button, Dropdown, DropdownItem } from '$lib/components/ui';
-    import { Modal, Heading, Textarea, Select, Label, Card, Input } from '$lib/components/ui';
+    import { Modal, Heading, Textarea, Select, Label, Card, Input, Spinner } from '$lib/components/ui';
     import { Alert } from '$lib/components/ui';
     import { ChevronDown } from '@lucide/svelte';
     import { enhance } from '$app/forms';
@@ -10,7 +10,8 @@
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
-    import { getCategoryLabel, toTsv, matchesSearch } from '$lib/utils.js';
+    import { getCategoryLabel, toTsv } from '$lib/utils.js';
+    import { PagedList } from '$lib/pagedList.svelte.js';
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
@@ -26,9 +27,43 @@
         loadKoreanFonts();
     });
 
-    function sortAttendeesById(a, b) {
-        return a.id - b.id;
+    // Registrations awaiting payment live on their own tab, so this list is
+    // the confirmed roster: 'registered' is the server's name for free or paid.
+    const list = new PagedList(() => `/api/event/${data.event.id}/attendees`, { filters: { status: 'registered' } });
+    list.track(() => data);
+
+    // The whole roster (or part of it) for the actions that work beyond the
+    // page on screen. Deliberately not list.exportAll(): those actions always
+    // covered every registrant, whatever was typed in the search box.
+    async function fetchRoster(extra = {}) {
+        const params = new URLSearchParams({ status: 'registered', ...extra });
+        const response = await fetch(`${list.url}/export?${params}`, { headers: { Accept: 'application/json' } });
+        if (!response.ok) throw new Error(`${response.status}`);
+        return response.json();
     }
+
+    // The selected rows, in the order they were picked, wherever they are
+    // paged - and only those still on the roster: someone who has since come
+    // to owe money is on the unpaid tab, not emailed or badged from here.
+    async function fetchSelectedRows() {
+        const asked = [...selectedAttendees];
+        const rows = await list.fetchByIds(asked, { status: 'registered' });
+        // Whoever is gone (deregistered, or moved to the unpaid tab) leaves
+        // the selection too; with nobody left the "selected" buttons disable.
+        // Only those asked about: a row ticked meanwhile stays ticked.
+        const found = new Set(rows.map(a => a.id));
+        selectedAttendees = selectedAttendees.filter(id => !asked.includes(id) || found.has(id));
+        return asked
+            .map(id => rows.find(a => a.id === id))
+            .filter(Boolean)
+            .map(item => attendeeRow(item, []));
+    }
+
+    // Shown when fetching rows for a whole-list or selection action fails.
+    let fetch_error = $state(false);
+    // Shown when an action finds nobody to act on - everyone it would reach
+    // has left since the tab loaded - rather than doing nothing visible.
+    let nobody_left = $state(false);
 
     function getDisplayName(item) {
         // Display name based on UI language
@@ -50,9 +85,9 @@
         return item.institute;
     }
 
+    // The server hands rows over ordered by id already.
     function transformToTableFormat(attendees) {
         // Extract all unique questions object
-        attendees.sort(sortAttendeesById);
         let unique_questions = new Set();
         data.questions.forEach(item => {
             unique_questions.add(item.question.question);
@@ -117,7 +152,29 @@
             return row;
     }
 
-    const exportAttendeesAsCSV = () => {
+    // The page on screen. Its answer columns are the event's questions plus
+    // any older ones this page's registrants answered; the CSV export works
+    // its own columns out from every row it exports.
+    let page_table = $derived(transformToTableFormat(list.items));
+    let custom_headers_attendees = $derived(page_table.custom_headers);
+    let table_data_attendees = $derived(page_table.table_data);
+
+    let csv_exporting = $state(false);
+    const exportAttendeesAsCSV = async () => {
+        if (csv_exporting) return;
+        csv_exporting = true;
+        fetch_error = false;
+        nobody_left = false;
+        let custom_headers, table_data;
+        try {
+            ({ custom_headers, table_data } = transformToTableFormat(await fetchRoster()));
+        } catch (e) {
+            fetch_error = true;
+            return;
+        } finally {
+            csv_exporting = false;
+        }
+
         const currentLang = languageTag();
         const isKorean = currentLang === 'ko';
 
@@ -132,11 +189,11 @@
             m.attendees_jobTitle(),
             m.attendees_disability(),
             m.attendees_dietary(),
-            ...custom_headers_attendees.map(q => q.replace(/\n/, ' ').replace(/\s+/g, ' '))
+            ...custom_headers.map(q => q.replace(/\n/, ' ').replace(/\s+/g, ' '))
         ];
 
         // Build data rows based on UI language
-        const dataRows = table_data_attendees.map(row => [
+        const dataRows = table_data.map(row => [
             row.id,
             ...(isKorean ? [row.korean_name || row.name] : [row.first_name, row.middle_initial, row.last_name]),
             row.email,
@@ -173,40 +230,22 @@
         URL.revokeObjectURL(url);
     };
 
-    let searchTermAttendee = $state('');
+    // Selection is by id, so it survives paging and searching.
     let selectedAttendees = $state([]);
-    let currentPage = $state(1);
-    const itemsPerPage = 10;
 
-    let searchField = $state('all');
+    // The values double as the server's search fields.
     const searchFields = [
-        { value: 'name', name: m.search_name(), get: r => [r.name, r.korean_name, `${r.first_name} ${r.last_name}`] },
-        { value: 'email', name: m.search_email(), get: r => r.email },
-        { value: 'institute', name: m.search_institute(), get: r => [r.institute_en, r.institute_ko, r.department] },
-        { value: 'category', name: m.search_category(), get: r => [r.category_name, r.category_name_ko] },
-        { value: 'job_title', name: m.search_jobTitle(), get: r => r.job_title },
-        { value: 'id', name: m.search_id(), get: r => r.attendee_nametag_id },
+        { value: 'name', name: m.search_name() },
+        { value: 'email', name: m.search_email() },
+        { value: 'institute', name: m.search_institute() },
+        { value: 'category', name: m.search_category() },
+        { value: 'job_title', name: m.search_jobTitle() },
+        { value: 'id', name: m.search_id() },
     ];
 
-    let filteredAttendees = $derived(
-        table_data_attendees.filter((item) => matchesSearch(item, searchTermAttendee, searchField, searchFields))
-    );
-
-    // Reset to page 1 when search changes
-    $effect(() => {
-        searchTermAttendee;
-        searchField;
-        currentPage = 1;
-    });
-
-    let totalPages = $derived(Math.ceil(filteredAttendees.length / itemsPerPage));
-    let paginatedAttendees = $derived(
-        filteredAttendees.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-    );
-
-    function handlePageChange(page) {
-        currentPage = page;
-    }
+    // The header checkbox works on the page on screen; picks on other pages stay.
+    let pageIds = $derived(table_data_attendees.map(a => a.id));
+    let pageAllSelected = $derived(pageIds.length > 0 && pageIds.every(id => selectedAttendees.includes(id)));
 
     let attendee_modal = $state(false);
     let remove_attendee_modal = $state(false);
@@ -224,9 +263,19 @@
         return items;
     }
 
-    let selected_idx = $state(null);
+    // The row the edit/remove modals work on, followed by id so a reload of
+    // the page shows its fresh copy. Should a reload drop it from the page
+    // while a modal is open, the copy taken on opening keeps the modal intact.
+    let selected_id = $state(null);
+    let selected_snapshot = $state(null);
+    let selected_row = $derived(table_data_attendees.find(a => a.id === selected_id) ?? selected_snapshot);
+    const selectRow = (id) => {
+        selected_id = id;
+        selected_snapshot = table_data_attendees.find(a => a.id === id) ?? null;
+    };
+
     const showAttenteeModal = (id) => {
-        selected_idx = table_data_attendees.findIndex(item => item.id === id);
+        selectRow(id);
         resetCustomAnswerChanges();
         message_custom_answer_changes = {};
         message_default_answer_changes = {};
@@ -234,7 +283,7 @@
     };
 
     const showRemoveAttenteeModal = (id) => {
-        selected_idx = table_data_attendees.findIndex(item => item.id === id);
+        selectRow(id);
         remove_attendee_modal = true;
     };
 
@@ -255,10 +304,10 @@
     };
 
     const resetCustomAnswerChanges = () => {
-        if (selected_idx === null) {
+        if (!selected_row) {
             return;
         }
-        custom_answers = table_data_attendees[selected_idx].custom_answers.map(a => {
+        custom_answers = selected_row.custom_answers.map(a => {
             return a?{
                 id: a.id,
                 reference: a.reference,
@@ -316,17 +365,16 @@
                 // their own tab, so they leave this list then.
                 const saved = result.data?.attendee;
                 if (saved?.payment_status === 'pending') {
-                    // Close first: the modal shows the row at selected_idx,
-                    // which would otherwise be someone else's once this one goes.
                     attendee_modal = false;
-                    table_data_attendees = table_data_attendees.filter(a => a.id !== saved.id);
+                    list.items = list.items.filter(a => a.id !== saved.id);
+                    selectedAttendees = selectedAttendees.filter(id => id !== saved.id);
                 } else if (saved) {
-                    table_data_attendees = table_data_attendees.map(a =>
-                        a.id === saved.id ? attendeeRow(saved, custom_headers_attendees) : a);
+                    list.items = list.items.map(a => a.id === saved.id ? saved : a);
                 }
                 message_default_answer_changes = { type: 'success', message: m.attendees_successUpdate() };
                 // The other tabs still read the change through the page data,
-                // so that refreshes too - just without anyone waiting on it.
+                // so that refreshes too - just without anyone waiting on it -
+                // and with it this page and the roster count.
                 invalidateAll();
             } else {
                 message_default_answer_changes = { type: 'error', message: m.attendees_errorUpdate() };
@@ -337,6 +385,7 @@
     const afterSuccessfulDeregistration = () => {
         return async ({ result, action, update }) => {
             if (result.type === 'success') {
+                selectedAttendees = selectedAttendees.filter(id => id !== selected_row?.id);
                 await update({ reset: false });
             }
             remove_attendee_modal = false;
@@ -352,9 +401,12 @@
             body: formData
         });
         if (response.ok) {
-            table_data_attendees = table_data_attendees.map(a =>
-                a.id === id ? { ...a, is_attended: !currentValue } : a
-            );
+            // A raw fetch re-runs no loader; patch the row where it sits, then
+            // reload the page so a load already in flight cannot put the old
+            // value back.
+            const item = list.items.find(a => a.id === id);
+            if (item) item.is_attended = !currentValue;
+            list.load();
         }
     };
 
@@ -364,9 +416,9 @@
         show_korean_name: true,
     };
 
-    let edit_institution_resolved = $derived(selected_idx !== null ? {
-        name_en: table_data_attendees[selected_idx].institute_en,
-        name_ko: table_data_attendees[selected_idx].institute_ko,
+    let edit_institution_resolved = $derived(selected_row ? {
+        name_en: selected_row.institute_en,
+        name_ko: selected_row.institute_ko,
     } : null);
 
     const stringify_nationality = (value) => {
@@ -380,24 +432,36 @@
 
     let invite_modal = $state(false);
     let send_email_modal = $state(false);
-    let send_email_to_all = $state(false);
-    const showSendEmailModal = () => {
-        send_email_to_all = false;
-        send_email_modal = true;
+    let emailRecipients = $state('');
+    let email_preparing = $state(false);
+    // The addresses are fetched when the modal is asked for: "all" is the
+    // whole roster whatever the search, "selected" may span pages.
+    const openSendEmailModal = async (loadRows) => {
+        if (email_preparing) return;
+        email_preparing = true;
+        fetch_error = false;
+        nobody_left = false;
+        try {
+            const rows = await loadRows();
+            if (rows.length === 0) {
+                nobody_left = true;
+                return;
+            }
+            emailRecipients = rows.map(a => a.email).filter(Boolean).join("; ");
+            send_email_modal = true;
+        } catch (e) {
+            fetch_error = true;
+        } finally {
+            email_preparing = false;
+        }
     };
-    const showSendEmailToAllModal = () => {
-        send_email_to_all = true;
-        send_email_modal = true;
-    };
-    let emailRecipients = $derived(
-        send_email_to_all
-            ? table_data_attendees.map(a => a.email).filter(Boolean).join("; ")
-            : selectedAttendees.map(id => table_data_attendees.find(a => a.id === id)?.email).filter(Boolean).join("; ")
-    );
+    const showSendEmailModal = () => openSendEmailModal(fetchSelectedRows);
+    const showSendEmailToAllModal = () =>
+        openSendEmailModal(async () => (await fetchRoster()).map(item => attendeeRow(item, [])));
 
     let nametag_modal = $state(false);
     let selected_nametag = $state('');
-    let selected_nametag_id = $state(null);
+    let selected_nametag_row = $state(null);
     let selected_role = $state('Participant');
 
     // Nametag paper settings from event
@@ -424,8 +488,8 @@
     };
 
     const regenerateNametag = async () => {
-        if (selected_nametag_id !== null) {
-            await generateNametag(selected_nametag_id, selected_role);
+        if (selected_nametag_row !== null) {
+            await generateNametag(selected_nametag_row, selected_role);
         }
     };
 
@@ -440,8 +504,7 @@
         await regenerateNametag();
     };
 
-    const generateNametag = async (id, role) => {
-        const p = table_data_attendees.find(a => a.id === id);
+    const generateNametag = async (p, role) => {
         selected_nametag = await generateNametagPDF({
             name: p.name,
             institute: p.institute,
@@ -453,15 +516,17 @@
         });
     };
 
+    // The row is kept, not looked up again: saving the paper settings reloads
+    // the page data, and with it the table.
     const showNametagModal = async (id) => {
-        selected_nametag_id = id;
+        selected_nametag_row = table_data_attendees.find(a => a.id === id);
         selected_role = 'Participant';
-        await generateNametag(id, selected_role);
+        await generateNametag(selected_nametag_row, selected_role);
         nametag_modal = true;
     };
 
     const onRoleChange = async (e) => {
-        await generateNametag(selected_nametag_id, e.target.value);
+        await generateNametag(selected_nametag_row, e.target.value);
     };
 
     // Batch nametag printing
@@ -469,14 +534,13 @@
     let batch_nametag_pdf = $state('');
     let batch_nametag_role = $state('Participant');
     let batch_nametag_generating = $state(false);
+    // Fetched once when the modal opens; changing the role or paper only redraws.
+    let batch_nametag_rows = $state([]);
 
     const generateBatchNametags = async () => {
-        if (selectedAttendees.length === 0) return;
+        if (batch_nametag_rows.length === 0) return;
         batch_nametag_generating = true;
-        const attendees = selectedAttendees.map(id => {
-            const a = table_data_attendees.find(att => att.id === id);
-            return { name: a.name, institute: a.institute, id: a.attendee_nametag_id };
-        });
+        const attendees = batch_nametag_rows.map(a => ({ name: a.name, institute: a.institute, id: a.attendee_nametag_id }));
         batch_nametag_pdf = await generateBatchNametagPDF({
             attendees,
             role: batch_nametag_role,
@@ -488,7 +552,25 @@
     };
 
     const showBatchNametagModal = async () => {
+        if (selectedAttendees.length === 0) return;
         batch_nametag_role = 'Participant';
+        // Never show the previous batch while this one is drawn.
+        batch_nametag_pdf = '';
+        batch_nametag_generating = true;
+        fetch_error = false;
+        nobody_left = false;
+        try {
+            batch_nametag_rows = await fetchSelectedRows();
+        } catch (e) {
+            batch_nametag_generating = false;
+            fetch_error = true;
+            return;
+        }
+        if (batch_nametag_rows.length === 0) {
+            batch_nametag_generating = false;
+            nobody_left = true;
+            return;
+        }
         batch_nametag_modal = true;
         await generateBatchNametags();
     };
@@ -503,44 +585,76 @@
     let cert_email = $state('');
     let cert_sending = $state(false);
     let cert_message = $state({});
-    let selected_cert_attendee_id = $state(null);
+    let selected_cert_row = $state(null);
 
     // Bulk certificate sending
     let bulk_cert_sending = $state(false);
+    let bulk_cert_preparing = $state(false);
     let bulk_cert_message = $state({});
     let bulk_cert_confirm_modal = $state(false);
-    let cert_send_all = $state(false);
 
-    let certTargetIds = $derived(cert_send_all ? table_data_attendees.map(a => a.id) : selectedAttendees);
-    let certEligibleCount = $derived(
-        certTargetIds.filter(id => {
-            const p = table_data_attendees.find(a => a.id === id);
-            return p && p.email && p.is_attended;
-        }).length
-    );
-    let certSkippedCount = $derived(certTargetIds.length - certEligibleCount);
+    // Fetched when the confirm opens, so its numbers are those the send uses:
+    // a certificate goes to whoever attended and has an address; the rest of
+    // the chosen people are counted as skipped.
+    let cert_targets = $state([]);
+    let certEligibleCount = $derived(cert_targets.length);
+    let certSkippedCount = $state(0);
+
+    const openCertificatesConfirm = async (loadRows) => {
+        if (bulk_cert_preparing || bulk_cert_sending) return;
+        bulk_cert_preparing = true;
+        fetch_error = false;
+        nobody_left = false;
+        try {
+            const { rows, total } = await loadRows();
+            if (total === 0) {
+                nobody_left = true;
+                return;
+            }
+            cert_targets = rows.filter(p => p.email && p.is_attended);
+            certSkippedCount = Math.max(0, total - cert_targets.length);
+            bulk_cert_confirm_modal = true;
+        } catch (e) {
+            fetch_error = true;
+        } finally {
+            bulk_cert_preparing = false;
+        }
+    };
 
     const showSendCertificatesConfirm = () => {
         if (selectedAttendees.length === 0) return;
-        cert_send_all = false;
-        bulk_cert_confirm_modal = true;
+        openCertificatesConfirm(async () => {
+            // Counted from the rows fetched: a row ticked while they were
+            // fetched is not part of this send.
+            const rows = await fetchSelectedRows();
+            return { rows, total: rows.length };
+        });
     };
 
-    const showSendCertificatesToAllConfirm = () => {
-        cert_send_all = true;
-        bulk_cert_confirm_modal = true;
-    };
+    // Only the attended are fetched; the roster size comes from the counts
+    // the table already has, which ignore the search as this action does.
+    const showSendCertificatesToAllConfirm = () =>
+        openCertificatesConfirm(async () => {
+            const rows = (await fetchRoster({ attended: 'true' })).map(item => attendeeRow(item, []));
+            // The roster size, for the skipped count: the table's, or asked
+            // for here when its page never loaded.
+            let registered = list.counts.registered;
+            if (registered === undefined) {
+                const response = await fetch(`${list.url}?status=registered&limit=1`, { headers: { Accept: 'application/json' } });
+                if (!response.ok) throw new Error(`${response.status}`);
+                registered = (await response.json()).total ?? 0;
+            }
+            return { rows, total: Math.max(registered, rows.length) };
+        });
 
     const sendCertificatesToSelected = async () => {
         bulk_cert_confirm_modal = false;
-        const targetIds = cert_send_all ? table_data_attendees.map(a => a.id) : selectedAttendees;
-        if (targetIds.length === 0 || bulk_cert_sending) return;
+        const targets = cert_targets;
+        if (targets.length === 0 || bulk_cert_sending) return;
         bulk_cert_sending = true;
         bulk_cert_message = {};
         try {
-            for (const id of targetIds) {
-                const p = table_data_attendees.find(a => a.id === id);
-                if (!p.email || !p.is_attended) continue;
+            for (const p of targets) {
                 const pdfDataUri = await generateCertificatePDF({
                     attendee: { name: p.name, institute: p.institute },
                     event: data.event,
@@ -561,7 +675,7 @@
                 const formData = new FormData();
                 formData.append('email', p.email);
                 formData.append('pdf_base64', base64Pdf);
-                formData.append('attendee_id', id);
+                formData.append('attendee_id', p.id);
                 formData.append('attendee_type', 'attendee');
                 await fetch('?/send_certificate', {
                     method: 'POST',
@@ -578,7 +692,7 @@
 
     const showCertificateModal = async (id) => {
         const p = table_data_attendees.find(a => a.id === id);
-        selected_cert_attendee_id = id;
+        selected_cert_row = p;
         cert_email = p.email;
         cert_message = {};
         selected_cert = await generateCertificatePDF({
@@ -604,7 +718,7 @@
         cert_sending = true;
         cert_message = {};
         try {
-            const p = table_data_attendees.find(a => a.id === selected_cert_attendee_id);
+            const p = selected_cert_row;
             const pdfDataUri = await generateCertificatePDF({
                 attendee: { name: p.name, institute: p.institute },
                 event: data.event,
@@ -626,7 +740,7 @@
             const formData = new FormData();
             formData.append('email', cert_email);
             formData.append('pdf_base64', base64Pdf);
-            formData.append('attendee_id', selected_cert_attendee_id);
+            formData.append('attendee_id', p.id);
             formData.append('attendee_type', 'attendee');
             const response = await fetch('?/send_certificate', {
                 method: 'POST',
@@ -643,19 +757,6 @@
             cert_sending = false;
         }
     };
-
-    let custom_headers_attendees = $state([]);
-    let table_data_attendees = $state([]);
-    $effect.pre(() => {
-        // Registrations awaiting payment live on their own tab, so this list is
-        // the confirmed roster: paid attendees, plus everyone when the event is
-        // free. Reading payment_status keeps it correct even if the payment list
-        // is not loaded.
-        const filteredAttendees = data.attendees.filter(a => a.payment_status !== 'pending');
-        let df = transformToTableFormat(filteredAttendees);
-        custom_headers_attendees = df.custom_headers;
-        table_data_attendees = df.table_data;
-    });
 </script>
 
 {#snippet process_spaces(text)}
@@ -670,42 +771,49 @@
 <div class="flex justify-end items-center gap-2 flex-wrap">
     <Button color="primary" size="sm">{m.attendees_emailActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
     <Dropdown class="w-auto list-none p-1">
-        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendEmailToAllModal}>{m.attendees_sendEmailToAll()}</DropdownItem>
-        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendEmailModal} disabled={selectedAttendees.length === 0}>{m.attendees_sendEmailToSelected()}</DropdownItem>
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendEmailToAllModal} disabled={email_preparing || list.counts.registered === 0}>{m.attendees_sendEmailToAll()}</DropdownItem>
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendEmailModal} disabled={selectedAttendees.length === 0 || email_preparing}>{m.attendees_sendEmailToSelected()}</DropdownItem>
     </Dropdown>
     <Button color="primary" size="sm" onclick={() => invite_modal = true}>{m.attendees_inviteByEmail()}</Button>
 
-    <Button color="primary" size="sm" disabled={bulk_cert_sending}>{bulk_cert_sending ? m.attendees_sendingCertificates() : m.attendees_certificateActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
+    <Button color="primary" size="sm" disabled={bulk_cert_sending || bulk_cert_preparing}>{bulk_cert_sending ? m.attendees_sendingCertificates() : m.attendees_certificateActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
     <Dropdown class="w-auto list-none p-1">
-        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendCertificatesToAllConfirm} disabled={bulk_cert_sending}>{m.attendees_sendCertificatesToAll()}</DropdownItem>
-        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendCertificatesConfirm} disabled={selectedAttendees.length === 0 || bulk_cert_sending}>{m.attendees_sendCertificatesToSelected()}</DropdownItem>
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendCertificatesToAllConfirm} disabled={bulk_cert_sending || bulk_cert_preparing || list.counts.registered === 0}>{m.attendees_sendCertificatesToAll()}</DropdownItem>
+        <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendCertificatesConfirm} disabled={selectedAttendees.length === 0 || bulk_cert_sending || bulk_cert_preparing}>{m.attendees_sendCertificatesToSelected()}</DropdownItem>
     </Dropdown>
 
     <Button color="primary" size="sm" onclick={showBatchNametagModal} disabled={selectedAttendees.length === 0 || batch_nametag_generating}>
         {batch_nametag_generating ? '...' : m.attendees_printNametagsForSelected()}
     </Button>
     <Button color="primary" size="sm" onclick={() => expand_attendees = !expand_attendees}>{expand_attendees ? m.attendees_collapseHeaders() : m.attendees_expandHeaders()}</Button>
-    <Button color="primary" size="sm" onclick={exportAttendeesAsCSV}>{m.attendees_exportCSV()}</Button>
+    <Button color="primary" size="sm" onclick={exportAttendeesAsCSV} disabled={csv_exporting}>{csv_exporting ? '...' : m.attendees_exportCSV()}</Button>
 </div>
+{#if fetch_error || (list.error && list.items.length > 0)}
+    <Alert type="error" color="red" class="mt-3">{m.common_error()}</Alert>
+{/if}
+{#if nobody_left}
+    <Alert color="blue" class="mt-3">{m.attendees_noRecords()}</Alert>
+{/if}
 {#if bulk_cert_message.type === 'success'}
     <Alert type="success" color="green" class="mt-3">{bulk_cert_message.message}</Alert>
 {:else if bulk_cert_message.type === 'error'}
     <Alert type="error" color="red" class="mt-3">{bulk_cert_message.message}</Alert>
 {/if}
-<p class="mt-5 mb-3 text-sm text-right">{table_data_attendees.length} {m.attendees_peopleRegistered()}</p>
-<TableSearch placeholder={m.attendees_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermAttendee} bind:field={searchField} fields={searchFields}>
+<!-- The whole roster, whatever the search; blank until the first page arrives. -->
+<p class="mt-5 mb-3 text-sm text-right">
+    {#if list.counts.registered !== undefined}{list.counts.registered}{:else if list.error && !list.loading}–{:else}<Spinner size="4" />{/if} {m.attendees_peopleRegistered()}
+</p>
+<TableSearch placeholder={m.attendees_searchPlaceholder()} hoverable={true} bind:inputValue={list.search} bind:field={list.field} fields={searchFields}>
     <TableHead>
         <TableHeadCell class="w-1">
             <Checkbox
-                checked={selectedAttendees.length > 0 && selectedAttendees.length === data.attendees.length}
-                intermediate={
-                    selectedAttendees.length > 0 && (selectedAttendees.length < data.attendees.length)
-                }
+                checked={pageAllSelected}
+                intermediate={selectedAttendees.length > 0 && !pageAllSelected}
                 onclick={(e) => {
                     if (e.target.checked) {
-                        selectedAttendees = filteredAttendees.map(a => a.id);
+                        selectedAttendees = [...selectedAttendees, ...pageIds.filter(id => !selectedAttendees.includes(id))];
                     } else {
-                        selectedAttendees = [];
+                        selectedAttendees = selectedAttendees.filter(id => !pageIds.includes(id));
                     }
                 }}
             />
@@ -730,7 +838,7 @@
         <TableHeadCell class="w-1">{m.attendees_actions()}</TableHeadCell>
     </TableHead>
     <TableBody tableBodyClass="divide-y">
-        {#each paginatedAttendees as row}
+        {#each table_data_attendees as row}
             <TableBodyRow>
                 <TableBodyCell><Checkbox checked={selectedAttendees.includes(row.id)} onclick={(e) => {
                     if (e.target.checked) {
@@ -786,27 +894,27 @@
                 </TableBodyCell>
             </TableBodyRow>
         {/each}
-        {#if filteredAttendees.length === 0}
+        {#if table_data_attendees.length === 0}
             <TableBodyRow>
                 <TableBodyCell colspan={
-                    expand_attendees ? custom_headers_attendees.length + 12 : 7
-                } class="text-center">{m.attendees_noRecords()}</TableBodyCell>
+                    expand_attendees ? custom_headers_attendees.length + 14 : 9
+                } class="text-center">{#if list.loading}<Spinner size="6" />{:else if list.error}{m.common_error()}{:else}{m.attendees_noRecords()}{/if}</TableBodyCell>
             </TableBodyRow>
         {/if}
     </TableBody>
 </TableSearch>
 
-<TablePagination {currentPage} {totalPages} onPageChange={handlePageChange} />
+<TablePagination currentPage={list.page} totalPages={list.totalPages} onPageChange={p => list.goto(p)} />
 
 <Modal id="attendee_modal" size="xl" title={m.attendees_detailsTitle()} bind:open={attendee_modal} outsideclose>
     <form method="post" action="?/update_attendee" use:enhance={afterSuccessfulSubmitDefaultAnswerChanges}>
-        <input type="hidden" name="id" value={table_data_attendees[selected_idx].id} />
+        <input type="hidden" name="id" value={selected_row.id} />
         <Heading tag="h2" class="text-lg font-bold pt-3 mb-6">{m.attendees_basicInformation()}</Heading>
         <div class="mb-6">
             <Label for="attendee_category" class="block mb-2">{m.attendees_tier()}</Label>
-            <Select id="attendee_category" name="category" value={table_data_attendees[selected_idx].category ?? ''} items={categoryOptions(table_data_attendees[selected_idx])} />
+            <Select id="attendee_category" name="category" value={selected_row.category ?? ''} items={categoryOptions(selected_row)} />
         </div>
-        <RegistrationForm data={table_data_attendees[selected_idx]} config={form_config} institution_resolved={edit_institution_resolved} />
+        <RegistrationForm data={selected_row} config={form_config} institution_resolved={edit_institution_resolved} />
         {#if message_default_answer_changes.type === 'success'}
             <Alert type="success" color="green">{message_default_answer_changes.message}</Alert>
         {:else if message_default_answer_changes.type === 'error'}
@@ -822,7 +930,7 @@
             <Button color="primary" onclick={resetCustomAnswerChanges}>{m.attendees_resetChanges()}</Button>
             <Button type="submit" color="primary">{m.attendees_applyChanges()}</Button>
         </div>
-        <input type="hidden" name="attendee_id" value={table_data_attendees[selected_idx].id} />
+        <input type="hidden" name="attendee_id" value={selected_row.id} />
         {#if custom_answers.length > 0}
             {#each custom_answers as answer, idx}
                 <Card size="xl" class="mb-6 p-6">
@@ -907,7 +1015,7 @@
 
 <Modal id="remove_attendee_modal" size="sm" title={m.attendees_removeTitle()} bind:open={remove_attendee_modal} outsideclose>
     <form method="post" action="?/deregister_attendee" use:enhance={afterSuccessfulDeregistration}>
-        <input type="hidden" name="id" value={table_data_attendees[selected_idx].id} />
+        <input type="hidden" name="id" value={selected_row.id} />
         <p class="font-light mb-6">{m.attendees_removeConfirm()}</p>
         <div class="flex justify-center gap-2">
             <Button color="red" type="submit">{m.attendees_deregister()}</Button>

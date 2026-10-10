@@ -1,84 +1,69 @@
 <script>
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
-    import { Button, Modal, Alert, Checkbox, Dropdown, DropdownItem, Label, Select, Input } from '$lib/components/ui';
+    import { Button, Modal, Alert, Checkbox, Dropdown, DropdownItem, Label, Select, Input, Spinner } from '$lib/components/ui';
     import { ChevronDown, UserMinus, UserPen } from '@lucide/svelte';
     import { enhance, deserialize } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
-    import { getDisplayInstitute, getDisplayName, getCategoryLabel, matchesSearch } from '$lib/utils.js';
+    import { getDisplayInstitute, getDisplayName, getCategoryLabel } from '$lib/utils.js';
+    import { PagedList } from '$lib/pagedList.svelte.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
-    import SearchableUserList from '$lib/components/SearchableUserList.svelte';
+    import RemoteSearchList from '$lib/components/RemoteSearchList.svelte';
 
     let { data } = $props();
 
     // Registrations still awaiting payment. Waiving one settles it at 0 KRW, so
     // it leaves this tab for the roster at once; undoing a waiver is just
     // removing that registration from there. Free events never produce these,
-    // so the tab has nothing to show for them.
-    let unpaid = $derived(
-        (data.attendees ?? [])
-            .filter(a => a.payment_status === 'pending')
-            .map(a => ({
-                id: a.id,
-                nametag_id: a.attendee_nametag_id,
-                name: getDisplayName(a),
-                email: a.user?.email || a.user_email || '',
-                institute: getDisplayInstitute(a),
-                registered_at: a.registered_at,
-                category: a.category,
-                registration_fee: a.registration_fee,
-                fee_waived: a.fee_waived,
-                category_name: a.category_name,
-                category_name_ko: a.category_name_ko,
-                // Fields the edit form binds to
-                first_name: a.first_name,
-                middle_initial: a.middle_initial,
-                last_name: a.last_name,
-                korean_name: a.korean_name,
-                nationality: a.nationality?.toString() ?? '1',
-                institute_en: a.institute,
-                institute_ko: a.institute_ko,
-                department: a.department,
-                job_title: a.job_title,
-                disability: a.disability,
-                dietary: a.dietary,
-            }))
-            .sort((x, y) => (x.registered_at || '').localeCompare(y.registered_at || ''))
-    );
+    // so the tab has nothing to show for them. The server pages, searches and
+    // orders them (oldest registration first); `track` reloads the page after
+    // every save, since each one re-runs the page load.
+    const list = new PagedList(() => `/api/event/${data.event.id}/attendees`, { filters: { status: 'unpaid' } });
+    list.track(() => data);
 
-    let searchTerm = $state('');
-    let currentPage = $state(1);
-    const itemsPerPage = 10;
+    const toRow = (a) => ({
+        id: a.id,
+        nametag_id: a.attendee_nametag_id,
+        name: getDisplayName(a),
+        email: a.user?.email || a.user_email || '',
+        institute: getDisplayInstitute(a),
+        registered_at: a.registered_at,
+        category: a.category,
+        registration_fee: a.registration_fee,
+        fee_waived: a.fee_waived,
+        category_name: a.category_name,
+        category_name_ko: a.category_name_ko,
+        // Fields the edit form binds to
+        first_name: a.first_name,
+        middle_initial: a.middle_initial,
+        last_name: a.last_name,
+        korean_name: a.korean_name,
+        nationality: a.nationality?.toString() ?? '1',
+        institute_en: a.institute,
+        institute_ko: a.institute_ko,
+        department: a.department,
+        job_title: a.job_title,
+        disability: a.disability,
+        dietary: a.dietary,
+    });
+    let paginated = $derived(list.items.map(toRow));
 
-    let searchField = $state('all');
     const searchFields = [
-        { value: 'name', name: m.search_name(), get: r => [r.name, r.korean_name] },
-        { value: 'email', name: m.search_email(), get: r => r.email },
-        { value: 'institute', name: m.search_institute(), get: r => [r.institute_en, r.institute_ko] },
-        { value: 'category', name: m.search_category(), get: r => [r.category_name, r.category_name_ko] },
-        { value: 'id', name: m.search_id(), get: r => r.nametag_id },
+        { value: 'name', name: m.search_name() },
+        { value: 'email', name: m.search_email() },
+        { value: 'institute', name: m.search_institute() },
+        { value: 'category', name: m.search_category() },
+        { value: 'id', name: m.search_id() },
     ];
 
-    let filtered = $derived(unpaid.filter(a => matchesSearch(a, searchTerm, searchField, searchFields)));
-
-    $effect(() => {
-        searchTerm;
-        searchField;
-        currentPage = 1;
-    });
-
-    let totalPages = $derived(Math.ceil(filtered.length / itemsPerPage));
-    let paginated = $derived(filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage));
-
+    // Ids, so a selection survives paging and searching. Rows that stop owing
+    // money meanwhile (paid online, waived, deregistered) are dropped when the
+    // selection is fetched, by asking only for unpaid ones.
     let selected = $state([]);
-    // Ignore selections that are no longer unpaid rather than pruning `selected`
-    // in an effect: writing to the same state the effect reads re-triggers it,
-    // which overflowed the update depth.
-    let activeSelection = $derived(selected.filter(id => unpaid.some(a => a.id === id)));
 
     const allOnPageSelected = $derived(
         paginated.length > 0 && paginated.every(a => selected.includes(a.id))
@@ -89,6 +74,18 @@
         selected = allOnPageSelected
             ? selected.filter(id => !ids.includes(id))
             : [...new Set([...selected, ...ids])];
+    }
+
+    // The unpaid rows whatever the search box says: "email all" always meant
+    // everyone still owing, and a selection is by id. Asked of /export
+    // directly because list.exportAll would carry the search along. A
+    // selection goes through list.fetchByIds, which batches long id lists.
+    async function fetchUnpaid(extra = {}) {
+        const response = await fetch(`${list.url}/export?${new URLSearchParams({ status: 'unpaid', ...extra })}`, {
+            headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) throw new Error(`${response.status}`);
+        return (await response.json()).map(toRow);
     }
 
     function formatDate(iso) {
@@ -110,16 +107,44 @@
         return languageTag() === 'ko' ? `${amount} 원` : `KRW ${amount}`;
     }
 
+    // Recipients are gathered when the modal opens: the rows may be on other
+    // pages, so they are fetched rather than read off the table.
     let send_email_modal = $state(false);
-    let send_email_to_all = $state(false);
-    const showEmailModal = (toAll) => {
-        send_email_to_all = toAll;
-        send_email_modal = true;
+    let emailRecipients = $state('');
+    let email_error = $state('');
+    // Busy while the recipients are fetched: a second click would only fetch
+    // them again.
+    let email_preparing = $state(false);
+    const showEmailModal = async (toAll) => {
+        if (email_preparing) return;
+        email_preparing = true;
+        email_error = '';
+        try {
+            const asked = [...selected];
+            const rows = toAll
+                ? await fetchUnpaid()
+                : (await list.fetchByIds(asked, { status: 'unpaid' })).map(toRow);
+            if (!toAll) {
+                // Whoever paid since being ticked has left this tab; drop them
+                // from the selection (only those asked about - a row ticked
+                // meanwhile stays).
+                const still = new Set(rows.map(a => a.id));
+                selected = selected.filter(id => !asked.includes(id) || still.has(id));
+            }
+            // Nobody left to write to - everyone paid or left since the tab
+            // loaded: say so rather than open an empty email.
+            if (rows.length === 0) {
+                email_error = m.unpaidAttendees_noRecords();
+                return;
+            }
+            emailRecipients = rows.map(a => a.email).filter(Boolean).join('; ');
+            send_email_modal = true;
+        } catch {
+            email_error = m.common_error();
+        } finally {
+            email_preparing = false;
+        }
     };
-    let emailRecipients = $derived(
-        (send_email_to_all ? unpaid : unpaid.filter(a => activeSelection.includes(a.id)))
-            .map(a => a.email).filter(Boolean).join('; ')
-    );
 
     // Posting the row unchanged except for the waiver, the way the speaker list
     // toggles its exemption.
@@ -170,16 +195,13 @@
     // Registering an existing account by hand - someone who signed up on the
     // site but registered by phone or email; they then pay online.
     //
-    // Staff pick from every account, as in the other people pickers here,
-    // which likewise get the site's account list only for staff. A non-staff
-    // event admin never sees that list anywhere on this page, so for them the
-    // account is found by its exact address instead.
-    const canBrowseAccounts = $derived(Array.isArray(data.users));
-    const registeredUserIds = $derived(new Set((data.attendees ?? []).map(a => a.user?.id).filter(Boolean)));
-    const registerableAccounts = $derived(
-        canBrowseAccounts ? data.users.filter(u => !registeredUserIds.has(u.id)) : []
-    );
+    // Staff pick from every account not yet registered here, searched on the
+    // server, as in the other people pickers. The account list is staff-only
+    // (the relay answers 403 to anyone else), so a non-staff event admin
+    // finds the account by its exact address instead.
+    const canBrowseAccounts = $derived(!!data.user?.is_staff);
     let register_user_id = $state(null);    // picked from the list (staff)
+    let register_user = $state(null);       // ...and its row, for the address
     let register_modal = $state(false);
     let register_email = $state('');
     let register_found = $state(null);      // the account the address belongs to (non-staff)
@@ -191,6 +213,7 @@
     const chosenCategory = $derived(registerCategories.find(c => String(c.id) === String(register_category)));
     const showRegisterModal = () => {
         register_user_id = null;
+        register_user = null;
         register_email = '';
         register_found = null;
         register_category = String(registerCategories.find(c => (c.fee || 0) > 0)?.id ?? registerCategories[0]?.id ?? '');
@@ -227,7 +250,7 @@
     });
     // Whichever way the account was found, the server registers it by address.
     const registerTarget = $derived(canBrowseAccounts
-        ? registerableAccounts.find(u => u.id === register_user_id) ?? null
+        ? (register_user_id !== null ? register_user : null)
         : (register_found && !register_found.already_registered ? register_found : null));
     const canRegister = $derived(!!registerTarget && !!register_category && !register_busy);
     const afterRegister = () => {
@@ -258,6 +281,7 @@
     const afterDeregister = () => {
         return async ({ result, update }) => {
             if (result.type === 'success') {
+                selected = selected.filter(id => id !== deregister_target?.id);
                 await update({ reset: false });
                 deregister_modal = false;
                 deregister_error = '';
@@ -278,16 +302,22 @@
         <Button color="primary" size="sm" onclick={showRegisterModal}>{m.unpaidAttendees_register()}</Button>
         <Button color="primary" size="sm">{m.unpaidAttendees_emailActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
         <Dropdown class="w-auto list-none p-1">
-            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showEmailModal(true)} disabled={unpaid.length === 0}>
+            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showEmailModal(true)} disabled={!list.counts.unpaid || email_preparing}>
                 {m.unpaidAttendees_emailAll()}
             </DropdownItem>
-            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showEmailModal(false)} disabled={activeSelection.length === 0}>
+            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showEmailModal(false)} disabled={selected.length === 0 || email_preparing}>
                 {m.unpaidAttendees_emailSelected()}
             </DropdownItem>
         </Dropdown>
     </div>
+    {#if email_error}
+        <Alert color="red" class="mb-4">{email_error}</Alert>
+    {/if}
 
-    <TableSearch placeholder={m.unpaidAttendees_searchPlaceholder()} hoverable={true} bind:inputValue={searchTerm} bind:field={searchField} fields={searchFields}>
+    {#if list.error && list.items.length > 0}
+        <Alert color="red" class="mb-3">{m.common_error()}</Alert>
+    {/if}
+    <TableSearch placeholder={m.unpaidAttendees_searchPlaceholder()} hoverable={true} bind:inputValue={list.search} bind:field={list.field} fields={searchFields}>
         <TableHead>
             <TableHeadCell class="w-1">
                 <input type="checkbox" checked={allOnPageSelected} onchange={toggleAllOnPage}
@@ -345,16 +375,18 @@
                     </TableBodyCell>
                 </TableBodyRow>
             {/each}
-            {#if filtered.length === 0}
+            {#if paginated.length === 0}
                 <TableBodyRow>
-                    <TableBodyCell colspan="10" class="text-center">{m.unpaidAttendees_noRecords()}</TableBodyCell>
+                    <TableBodyCell colspan="10" class="text-center">
+                        {#if list.loading}<Spinner size="6" />{:else if list.error}{m.common_error()}{:else}{m.unpaidAttendees_noRecords()}{/if}
+                    </TableBodyCell>
                 </TableBodyRow>
             {/if}
         </TableBody>
     </TableSearch>
 
-    <TablePagination {currentPage} {totalPages} onPageChange={(p) => currentPage = p} />
-    <p class="mt-5 mb-3 text-sm text-right">{m.unpaidAttendees_count({ count: unpaid.length })}</p>
+    <TablePagination currentPage={list.page} totalPages={list.totalPages} onPageChange={(p) => list.goto(p)} />
+    {#if list.loaded}<p class="mt-5 mb-3 text-sm text-right">{m.unpaidAttendees_count({ count: list.counts.unpaid ?? 0 })}</p>{/if}
 {/if}
 
 <Modal id="register_attendee_modal" size="md" title={m.unpaidAttendees_register()} bind:open={register_modal}>
@@ -363,9 +395,11 @@
         <input type="hidden" name="email" value={registerTarget?.email ?? ''} />
         {#if canBrowseAccounts}
             <div class="mb-6">
-                <SearchableUserList
-                    items={registerableAccounts}
+                <RemoteSearchList
+                    url="/api/admin/users"
+                    params={{ not_registered_for: data.event.id }}
                     bind:selectedId={register_user_id}
+                    bind:selectedItem={register_user}
                     maxHeight="max-h-72"
                     showChangeButton={true}
                 />
@@ -416,7 +450,11 @@
 <!-- The exemption tick posts through here rather than opening the edit modal. -->
 <form method="POST" action="?/toggle_fee_exemption" bind:this={exemption_form} class="hidden"
     use:enhance={() => async ({ result, update }) => {
-        if (result.type === 'success') await update({ reset: false });
+        if (result.type === 'success') {
+            // A waived registration leaves this tab, so it leaves the selection too.
+            if (toggling_attendee?.fee_waived) selected = selected.filter(id => id !== toggling_attendee.id);
+            await update({ reset: false });
+        }
         toggling_attendee = null;
     }}>
     <input type="hidden" name="id" value={toggling_attendee?.id ?? ''} />

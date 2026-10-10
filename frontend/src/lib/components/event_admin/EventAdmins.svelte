@@ -13,9 +13,16 @@
 
     let { data } = $props();
 
-    // Staff users get full user list, event admins get attendees only
-    // Filter out attendees whose user has been deleted (they can't be admins without an account)
-    const userList = $derived(data.users ? data.users.map(u => ({ id: u.id, ...u })) : data.attendees.filter(a => a.user).map(a => ({ ...a, id: a.user.id })));
+    // Staff search every account; an event admin who is not staff may only
+    // pick among this event's registrants (the account search answers 403).
+    // Registrants without an account, or whose account was deleted, cannot be
+    // admins, and the posted id is the account's, not the registration's.
+    const isStaff = $derived(Boolean(data.user?.is_staff));
+    const pickerUrl = $derived(isStaff ? '/api/admin/users' : `/api/event/${data.event.id}/attendees`);
+    const pickerParams = $derived(isStaff
+        ? { not_admin_of: data.event.id }
+        : { status: 'all', has_user: true, not_admin: true });
+    const pickerItemId = $derived(isStaff ? (u) => u.id : (a) => a.user.id);
 
     let searchTermEventAdmin = $state('');
     let currentPage = $state(1);
@@ -156,7 +163,9 @@
 <UserSelectionModal
     bind:open={eventadmin_modal}
     title={m.eventAdmins_addAdminTitle()}
-    userList={userList}
+    url={pickerUrl}
+    params={pickerParams}
+    getItemId={pickerItemId}
     action="?/add_eventadmin"
     submitLabel={m.eventAdmins_add()}
     bind:error={add_eventadmin_error}

@@ -238,6 +238,10 @@
                  pinned the editor toolbar to a box that never scrolls - the
                  page does - so it never stayed in view. -->
             <div class="p-6 sm:p-8 min-w-0 w-full">
+                <!-- Keyed by event: the tabs' paged lists fix their event's URL
+                     when created, so moving to another event's admin page must
+                     build them again rather than keep fetching the old one. -->
+                {#key data.event.id}
                 {#if sidebar_selected === 'event_information'}
                 <EventInformation data={data} />
                 {/if}
@@ -281,6 +285,7 @@
                 {#if sidebar_selected === 'transactions'}
                 <Transactions data={data} />
                 {/if}
+                {/key}
             </div>
         </div>
     </Card>

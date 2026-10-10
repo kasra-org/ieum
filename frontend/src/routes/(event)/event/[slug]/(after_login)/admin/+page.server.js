@@ -32,30 +32,23 @@ export async function load({ parent, params, cookies, request }) {
         return get_data_or_404(`event/${params.slug}/${item}`);
     }
 
-    // Every tab's data, fetched together: none depends on another, and this
-    // whole load reruns after each save in the admin page, so fetching them
-    // one after another made every save wait for the sum of them all.
-    const [event, users, attendees, questions, speakers, reviewers, abstracts,
-           organizers, eventadmins, email_templates, onsite_attendees, payments] = await Promise.all([
+    // The small lists every tab may need, fetched together: none depends on
+    // another, and this whole load reruns after each save in the admin page.
+    //
+    // The big ones - registrations, payments, abstracts, walk-ins, and the
+    // site's accounts - are not loaded here at all. Each tab asks for the page
+    // it shows through the relay routes under /api (see $lib/pagedList), and
+    // reloads it when this load reruns.
+    const [event, questions, speakers, reviewers, organizers, eventadmins, email_templates] = await Promise.all([
         get_data_or_404(`admin/event/${params.slug}`),
-        // Superusers (staff) get access to full user list, event admins use attendees
-        rtn.user?.is_staff ? get_data_or_404('users') : Promise.resolve(undefined),
-        get_data_or_404_event('attendees?all=true'),
         get_data_or_404_event('questions'),
         get_data_or_404_event('admin/speakers'),
         get_data_or_404_event('reviewers'),
-        get_data_or_404_event('abstracts'),
         get_data_or_404_event('organizers'),
         get_data_or_404_event('eventadmins'),
         get_data_or_404_event('email_templates'),
-        get_data_or_404_event('onsite'),
-        get_data_or_404_event('payments'),
     ]);
-    Object.assign(rtn, {
-        event, attendees, questions, speakers, reviewers, abstracts,
-        organizers, eventadmins, email_templates, onsite_attendees, payments,
-    });
-    if (users !== undefined) rtn.users = users;
+    Object.assign(rtn, { event, questions, speakers, reviewers, organizers, eventadmins, email_templates });
 
     return rtn;
 }

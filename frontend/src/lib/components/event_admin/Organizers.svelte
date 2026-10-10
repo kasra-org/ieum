@@ -8,7 +8,7 @@
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
-    import SearchableUserList from '$lib/components/SearchableUserList.svelte';
+    import RemoteSearchList from '$lib/components/RemoteSearchList.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
 
@@ -62,7 +62,7 @@
 
     const isOrganization = $derived(organizerType === 'organization');
 
-    // Custom getters for SearchableUserList
+    // Custom getters for RemoteSearchList
     function getAttendeeEmail(attendee) {
         return attendee.user?.email || attendee.user_email || '';
     }
@@ -270,8 +270,9 @@
         {#if !selected_organizer && !isOrganization}
             <div class="mb-6">
                 <Label class="block mb-2">{m.organizers_selectAttendee()}</Label>
-                <SearchableUserList
-                    items={data.attendees}
+                <RemoteSearchList
+                    url={`/api/event/${data.event.id}/attendees`}
+                    params={{ status: 'all' }}
                     maxHeight="max-h-60"
                     showChangeButton={false}
                     getItemSecondaryName={getAttendeeSecondaryName}

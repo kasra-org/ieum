@@ -1,12 +1,14 @@
 <script>
     import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Toggle } from '$lib/components/ui';
-    import { Modal, Button, Alert } from '$lib/components/ui';
+    import { Modal, Button, Alert, Spinner } from '$lib/components/ui';
     import { Archive, CircleCheck, Settings } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
-    import { getDisplayVenue, getDisplayVenueAddress, matchesSearch } from '$lib/utils.js';
+    import { getDisplayVenue, getDisplayVenueAddress } from '$lib/utils.js';
+    import { PagedList } from '$lib/pagedList.svelte.js';
 
+    import TablePagination from '$lib/components/TablePagination.svelte';
     import EventAdminForm from '$lib/components/event_admin/EventAdminForm.svelte';
     import MultiUserSelector from '$lib/components/MultiUserSelector.svelte';
 
@@ -16,21 +18,22 @@
     let archive_error = $state('');
     let archive_modal = $state(false);
 
-    let search_term = $state('');
-    let search_field = $state('all');
+    // Searched and paged on the server; the field names are the backend's
+    // (EVENT_SEARCH_FIELDS).
     const search_fields = [
-        { value: 'name', name: m.search_name(), get: r => r.name },
-        { value: 'venue', name: m.search_venue(), get: r => [r.venue, r.venue_ko] },
-        { value: 'id', name: m.search_id(), get: r => r.id },
+        { value: 'name', name: m.search_name() },
+        { value: 'venue', name: m.search_venue() },
+        { value: 'id', name: m.search_id() },
     ];
     let show_archived = $state(false);
 
-    let filtered_events = $derived(
-        data.admin.events.filter((item) => {
-            const matchesArchiveFilter = show_archived || !item.is_archived;
-            return matchesSearch(item, search_term, search_field, search_fields) && matchesArchiveFilter;
-        })
-    );
+    const list = new PagedList('/api/admin/events', { pageSize: 10 });
+    // Reloads after archive/create, whose update() re-runs the page load.
+    list.track(() => data);
+
+    // Archived events are left out by the server unless asked for. Read the
+    // box itself: the change handler may run before bind:checked updates.
+    const toggleArchived = (e) => list.setFilter('archived', e.currentTarget.checked ? true : '');
 
     const afterArchive = () => {
         return async ({ result, action, update }) => {
@@ -75,6 +78,10 @@
 
     // Organizers selection
     let selectedOrganizerIds = $state([]);
+    // The picked accounts themselves, kept here rather than in the picker:
+    // the modal unmounts it on close, and a selection kept for reopening
+    // must still show who is in it.
+    let pickedOrganizers = $state({});
 
     const afterCreate = () => {
         return async ({ result, action, update }) => {
@@ -134,11 +141,14 @@
 <p class="text-gray-600 mb-6">{m.admin_manageEvents_description()}</p>
 
 <div class="flex justify-between items-center mb-6">
-    <Toggle bind:checked={show_archived}>{m.admin_showArchived()}</Toggle>
+    <Toggle bind:checked={show_archived} onchange={toggleArchived}>{m.admin_showArchived()}</Toggle>
     <Button color="primary" onclick={() => create_modal = true}>{m.admin_createEvent()}</Button>
 </div>
 
-<TableSearch placeholder={m.admin_searchEvents()} bind:inputValue={search_term} bind:field={search_field} fields={search_fields} hoverable={true}>
+{#if list.error && list.items.length > 0}
+    <Alert color="red" class="mb-3">{m.common_error()}</Alert>
+{/if}
+<TableSearch placeholder={m.admin_searchEvents()} bind:inputValue={list.search} bind:field={list.field} fields={search_fields} hoverable={true}>
     <TableHead>
         <TableHeadCell>{m.admin_tableId()}</TableHeadCell>
         <TableHeadCell>{m.admin_tableName()}</TableHeadCell>
@@ -147,7 +157,7 @@
         <TableHeadCell class="w-1">{m.admin_tableActions()}</TableHeadCell>
     </TableHead>
     <TableBody>
-        {#each filtered_events as event}
+        {#each list.items as event (event.id)}
             <TableBodyRow class={event.is_archived ? 'bg-gray-100' : ''}>
                 <TableBodyCell>{event.id}</TableBodyCell>
                 <TableBodyCell>
@@ -178,13 +188,17 @@
                 </TableBodyCell>
             </TableBodyRow>
         {/each}
-        {#if filtered_events.length === 0}
+        {#if list.items.length === 0}
             <TableBodyRow>
-                <TableBodyCell colspan="5" class="text-center">{m.admin_noEventsFound()}</TableBodyCell>
+                <TableBodyCell colspan="5" class="text-center">
+                    {#if list.loading}<Spinner size="6" />{:else if list.error}{m.common_error()}{:else}{m.admin_noEventsFound()}{/if}
+                </TableBodyCell>
             </TableBodyRow>
         {/if}
     </TableBody>
 </TableSearch>
+
+<TablePagination currentPage={list.page} totalPages={list.totalPages} onPageChange={(p) => list.goto(p)} />
 
 <Modal id="archive_modal" size="sm" title={selected_event?.is_archived ? m.admin_unarchiveEventTitle() : m.admin_archiveEventTitle()} bind:open={archive_modal} outsideclose>
     <form method="post" action="?/archive_event" use:enhance={afterArchive}>
@@ -208,8 +222,9 @@
 
         <!-- Organizers Selection -->
         <MultiUserSelector
-            users={data.admin.users || []}
+            url="/api/admin/users"
             bind:selectedIds={selectedOrganizerIds}
+            bind:pickedUsers={pickedOrganizers}
             label={m.organizers_title()}
             description={m.organizers_description()}
             required={true}

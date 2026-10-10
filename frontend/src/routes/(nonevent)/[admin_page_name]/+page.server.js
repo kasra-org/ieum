@@ -11,20 +11,17 @@ export async function load({ parent, params, cookies }) {
         throw error(404, 'Not Found');
     }
     
-    const get_data_or_404 = async (item) => {
-        const response = await get(`api/admin/${item}`, cookies);
-        if (response.ok && response.status === 200) {
-            return response.data;
-        } else {
-            throw error(404, "Not Found");
-        }
-    };
+    // Loading the event list used to double as the staff check (it 404'd for
+    // anyone else). The tables now fetch their own pages through the relay
+    // routes, so check the role directly; the layout read it from api/me on
+    // this very request.
+    if (!data.user?.is_staff) {
+        throw error(404, "Not Found");
+    }
 
-    data.admin = {
-        events: await get_data_or_404('events'),
-        users: await get_data_or_404('users'),
-        institutions: await get_data_or_404('institutions')
-    };
+    // Events, users and institutions are not loaded here: each table asks
+    // /api/admin/{events,users,institutions} for the page it shows.
+    data.admin = {};
 
     // API keys are superuser-only; a non-superuser admin simply sees no panel.
     const apiKeysResponse = await get('api/admin/apikeys', cookies);

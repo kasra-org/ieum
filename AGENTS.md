@@ -256,16 +256,19 @@ Customizable email templates:
 
 All endpoints use base URL `/api/` with CSRF protection enabled.
 
+**Pagination**: the admin lists that can grow large answer a page at a time as `{items, total, offset, limit}` (plus `counts`/`summary` computed over the whole list, before search), taking `offset`, `limit` (max 200), `search` and `field` (which column group to search; `all` searches every one). Each event list also has an unpaged `.../export` twin with the same filters for whole-list actions (CSV, email to all, certificates, a selection spanning pages; `ids=` fetches a selection). Django is not reachable from the browser - Caddy sends `/api/*` to SvelteKit - so the admin tables fetch these through per-endpoint relay routes under `frontend/src/routes/api/` (no catch-all), via `$lib/pagedList.svelte.js`; pickers search through `RemoteSearchList.svelte`.
+
 ### Authentication & User Management
 - `GET /api/me` - Get authenticated user profile
 - `POST /api/me` - Update user profile
 - `GET /api/csrftoken` - Get CSRF token (public)
-- `GET /api/users` - List all users (staff only)
 
 ### Event Management
 - `GET /api/events` - List all events (public)
 - `GET /api/event/{event_id}` - Get event details (public)
-- `GET /api/admin/events` - List all events (staff only)
+- `GET /api/admin/events` - Events, paginated; `search`/`field` (name, venue, id), `archived=true` to include archived (staff only)
+- `GET /api/admin/users` - Accounts, paginated and searchable; `not_registered_for`/`not_admin_of=<event id>` for pickers (staff only - event admins only get exact-email lookup)
+- `GET /api/admin/institutions` - Institutions, paginated (staff only)
 - `POST /api/admin/event/add` - Create event (staff only)
 - `POST /api/admin/event/{event_id}/delete` - Delete event (staff only)
 - `GET /api/admin/event/{event_id}` - Get admin event details
@@ -276,7 +279,9 @@ All endpoints use base URL `/api/` with CSRF protection enabled.
 - `POST /api/event/{event_id}/register` - Register for event
 - `GET /api/event/{event_id}/registered` - Check registration status
 - `POST /api/event/{event_id}/attendee/{attendee_id}/deregister` - Deregister
-- `GET /api/event/{event_id}/attendees` - List attendees (event admin)
+- `GET /api/event/{event_id}/attendees` - Registrations, paginated; `status` = registered (roster, default) / unpaid / all, picker exclusions `has_user`, `has_abstract`, `has_completed_payment`, `not_speaker`, `not_admin`; `counts` = {registered, unpaid} (event admin)
+- `GET /api/event/{event_id}/attendees/export` - Same filters, unpaged (event admin)
+- `GET /api/event/{event_id}/payments` - Payments, paginated, newest first; `summary` = event-wide counts and sums by status (event admin); `.../payments/export` unpaged
 - `POST /api/event/{event_id}/attendee/{attendee_id}/update` - Update attendee
 - `POST /api/event/{event_id}/attendee/{attendee_id}/answers` - Update custom answers
 
@@ -286,7 +291,7 @@ All endpoints use base URL `/api/` with CSRF protection enabled.
 
 ### Abstract Management
 - `POST /api/event/{event_id}/abstract` - Submit abstract
-- `GET /api/event/{event_id}/abstracts` - List abstracts with full author registration (event admin)
+- `GET /api/event/{event_id}/abstracts` - Abstracts with full author registration, paginated; `type` filter, `counts` per presentation type (event admin); `.../abstracts/export` unpaged
 - `GET /api/event/{event_id}/review/abstracts` - List reviewable abstracts, author name/affiliation only (reviewer)
 - `GET /api/event/{event_id}/abstract` - Get user's abstract
 - `GET /api/event/{event_id}/abstract/{abstract_id}` - Get abstract body for review (reviewer/event admin; no file link)
@@ -311,7 +316,7 @@ All endpoints use base URL `/api/` with CSRF protection enabled.
 
 ### On-Site Registration
 - `POST /api/event/{event_id}/onsite` - Register on-site (public)
-- `GET /api/event/{event_id}/onsite` - List on-site attendees (event admin)
+- `GET /api/event/{event_id}/onsite` - On-site attendees, paginated (event admin); `.../onsite/export` unpaged
 - `POST /api/event/{event_id}/onsite/{onsite_id}/update` - Update on-site attendee
 - `POST /api/event/{event_id}/onsite/{onsite_id}/delete` - Delete on-site attendee
 

@@ -1,27 +1,32 @@
 <script>
     import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
-    import { Modal, Button, Alert } from '$lib/components/ui';
+    import { Modal, Button, Alert, Spinner } from '$lib/components/ui';
     import { KeyRound, UserPen } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
-    import { getDisplayInstitute, getDisplayName, matchesSearch } from '$lib/utils.js';
+    import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
+    import { PagedList } from '$lib/pagedList.svelte.js';
 
+    import TablePagination from '$lib/components/TablePagination.svelte';
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
+    import InstitutionLookup from '$lib/components/InstitutionLookup.svelte';
 
     let { data } = $props();
 
-    let user_search_term = $state('');
-    let user_search_field = $state('all');
+    // Searched and paged on the server; the field names are the backend's
+    // (USER_SEARCH_FIELDS). Rows are full UserSchema objects, which the edit
+    // modal fills its form from.
     const user_search_fields = [
-        { value: 'name', name: m.search_name(), get: r => [r.name, r.korean_name] },
-        { value: 'email', name: m.search_email(), get: r => r.email },
-        { value: 'institute', name: m.search_institute(), get: r => [r.institute_en, r.institute_ko] },
-        { value: 'job_title', name: m.search_jobTitle(), get: r => r.job_title },
+        { value: 'name', name: m.search_name() },
+        { value: 'email', name: m.search_email() },
+        { value: 'institute', name: m.search_institute() },
+        { value: 'job_title', name: m.search_jobTitle() },
     ];
-    let filtered_users = $derived(
-        data.admin.users.filter((user) => matchesSearch(user, user_search_term, user_search_field, user_search_fields))
-    );
+    const list = new PagedList('/api/admin/users', { pageSize: 20 });
+    // The toggle/edit/guest forms re-run the page load; reload this page of
+    // the table with it (the page number is kept).
+    list.track(() => data);
 
     let selected_user = $state(null);
     let user_edit_modal = $state(false);
@@ -44,6 +49,14 @@
         guest_created = null;
         guest_modal = true;
     };
+
+    // The old <select> had a "none" option; the lookup has no way back to
+    // empty, so offer one beside it.
+    let guest_institute_key = $state(0);
+    function clearGuestInstitute() {
+        guest.institute = '';
+        guest_institute_key += 1;
+    }
 
     function suggestGuest() {
         // Distinctive, obviously-disposable defaults so test accounts are easy
@@ -124,7 +137,10 @@
     <Button color="primary" size="sm" onclick={openGuestModal}>{m.admin_guestUser_add()}</Button>
 </div>
 
-<TableSearch placeholder={m.admin_searchUsers()} bind:inputValue={user_search_term} bind:field={user_search_field} fields={user_search_fields} hoverable={true}>
+{#if list.error && list.items.length > 0}
+    <Alert color="red" class="mb-3">{m.common_error()}</Alert>
+{/if}
+<TableSearch placeholder={m.admin_searchUsers()} bind:inputValue={list.search} bind:field={list.field} fields={user_search_fields} hoverable={true}>
     <TableHead>
         <TableHeadCell>{m.admin_tableId()}</TableHeadCell>
         <TableHeadCell>{m.admin_tableUserName()}</TableHeadCell>
@@ -136,7 +152,7 @@
         <TableHeadCell class="w-1">{m.admin_tableActions()}</TableHeadCell>
     </TableHead>
     <TableBody>
-        {#each filtered_users as user}
+        {#each list.items as user (user.id)}
             <TableBodyRow>
                 <TableBodyCell>{user.id}</TableBodyCell>
                 <TableBodyCell>
@@ -178,13 +194,17 @@
                 </TableBodyCell>
             </TableBodyRow>
         {/each}
-        {#if filtered_users.length === 0}
+        {#if list.items.length === 0}
             <TableBodyRow>
-                <TableBodyCell colspan="8" class="text-center">{m.admin_noUsersFound()}</TableBodyCell>
+                <TableBodyCell colspan="8" class="text-center">
+                    {#if list.loading}<Spinner size="6" />{:else if list.error}{m.common_error()}{:else}{m.admin_noUsersFound()}{/if}
+                </TableBodyCell>
             </TableBodyRow>
         {/if}
     </TableBody>
 </TableSearch>
+
+<TablePagination currentPage={list.page} totalPages={list.totalPages} onPageChange={(p) => list.goto(p)} />
 
 <Modal id="guest_password_modal" size="sm" title={m.admin_guestUser_setPassword()} bind:open={pw_modal} outsideclose>
     {#if pw_done}
@@ -274,21 +294,27 @@
                 <input id="guest_password" name="password" type="text" required bind:value={guest.password}
                     class="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 font-mono text-sm" />
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div>
-                    <label for="guest_job_title" class="mb-2 block text-sm font-medium">{m.form_jobTitle()}</label>
-                    <input id="guest_job_title" name="job_title" type="text" bind:value={guest.job_title}
-                        class="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm" />
-                </div>
-                <div>
-                    <label for="guest_institute" class="mb-2 block text-sm font-medium">{m.form_institute()}</label>
-                    <select id="guest_institute" name="institute" bind:value={guest.institute}
-                        class="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm">
-                        <option value="">{m.admin_guestUser_noInstitute()}</option>
-                        {#each (data.admin.institutions ?? []) as inst}
-                            <option value={inst.id}>{inst.name_en}{inst.name_ko ? ` (${inst.name_ko})` : ''}</option>
-                        {/each}
-                    </select>
+            <div class="mb-4">
+                <label for="guest_job_title" class="mb-2 block text-sm font-medium">{m.form_jobTitle()}</label>
+                <input id="guest_job_title" name="job_title" type="text" bind:value={guest.job_title}
+                    class="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm" />
+            </div>
+            <!-- Searched on the server (the search_institutions action) rather
+                 than a <select> of the first 100, so any institution can be
+                 picked. It posts `institute` as the id, empty for none. -->
+            <div class="mb-4">
+                <!-- Keyed so "clear" also empties the lookup's shown name,
+                     which it keeps to itself. -->
+                {#key guest_institute_key}
+                    <InstitutionLookup bind:value={guest.institute} />
+                {/key}
+                <div class="mt-1 flex items-center justify-between gap-2 text-sm text-gray-500">
+                    {#if guest.institute}
+                        <span></span>
+                        <Button color="alternative" size="xs" type="button" onclick={clearGuestInstitute}>{m.common_clear()}</Button>
+                    {:else}
+                        <span>{m.admin_guestUser_noInstitute()}</span>
+                    {/if}
                 </div>
             </div>
             {#if guest_error}

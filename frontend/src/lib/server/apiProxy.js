@@ -1,4 +1,5 @@
 import { json, text } from '@sveltejs/kit';
+import { get } from '$lib/fetch';
 
 /**
  * Helpers for the routes that expose Django endpoints to machine clients.
@@ -30,4 +31,26 @@ export function relay(response) {
 		return text(response.data, { status });
 	}
 	return json(response.data, { status });
+}
+
+/**
+ * Relay one of the admin list endpoints - a page, or an export - for the
+ * browser, which cannot reach Django itself. Only GET, only the named path:
+ * each list gets its own route here rather than a catch-all, so what is
+ * exposed stays a deliberate list. The session cookie goes along, so Django
+ * still decides who may read it.
+ *
+ * `eventId`, when given, must be a plain number; the query string is rebuilt
+ * from its parameters (simple names only) rather than passed through raw.
+ */
+export async function relayList({ path, url, cookies, eventId }) {
+	if (eventId !== undefined && !/^\d+$/.test(String(eventId))) {
+		return json({ code: 'not_found', message: 'Not Found' }, { status: 404 });
+	}
+	const query = new URLSearchParams();
+	for (const [key, value] of url.searchParams) {
+		if (/^[a-z_]{1,40}$/.test(key)) query.append(key, value);
+	}
+	const qs = query.toString();
+	return relay(await get(qs ? `${path}?${qs}` : path, cookies));
 }

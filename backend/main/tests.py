@@ -776,6 +776,19 @@ class RegistrationCategoryTests(TestCase):
         self.assertEqual(payment.amount, 100000)
 
 
+    @patch('main.apis.requests.post')
+    def test_a_gateway_answering_garbage_is_a_server_error_not_the_payers(self, mock_post):
+        import requests as requests_lib
+        mock_post.return_value.ok = True
+        mock_post.return_value.json.side_effect = requests_lib.exceptions.JSONDecodeError('Expecting value', '<html>', 0)
+        self.register(category=self.grad.id)
+        with self.assertRaises(requests_lib.exceptions.JSONDecodeError):
+            self.client.post(
+                '/api/payment/confirm',
+                data={'paymentKey': 'k', 'orderId': 'o', 'amount': 100000, 'eventId': self.event.id},
+                content_type='application/json',
+            )
+
 class RegistrationCategoryEditingTests(TestCase):
     """Organisers add, rename, reprice, reorder and remove categories."""
 
@@ -984,7 +997,7 @@ class InvitedTalkReviewExemptionTests(TestCase):
     def test_admin_still_sees_every_abstract(self):
         self.client.force_login(self.admin_user)
         response = self.client.get(f'/api/event/{self.event.id}/abstracts')
-        titles = [a['title'] for a in response.json()]
+        titles = [a['title'] for a in response.json()['items']]
         self.assertIn('Competing', titles)
         self.assertIn('Invited', titles)
 
@@ -996,6 +1009,41 @@ class InvitedTalkReviewExemptionTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['code'], 'not_reviewable')
         self.assertEqual(AbstractVote.objects.get(reviewer=self.reviewer).voted_abstracts.count(), 0)
+
+    def test_an_unknown_ballot_entry_is_refused_not_a_crash(self):
+        self.client.force_login(self.reviewer_user)
+        for bad in (999999, 'x', None, True):
+            response = self.client.post(
+                f'/api/event/{self.event.id}/reviewer/vote',
+                data={'voted_abstracts': [self.competing.id, bad]}, content_type='application/json')
+            self.assertEqual(response.status_code, 400, bad)
+        self.assertFalse(AbstractVote.objects.filter(reviewer=self.reviewer, voted_abstracts__isnull=False).exists())
+
+    def test_a_ballot_that_is_not_a_list_is_refused(self):
+        self.client.force_login(self.reviewer_user)
+        for ballot in (None, 5, '12', {'a': 1}):
+            response = self.client.post(f'/api/event/{self.event.id}/reviewer/vote',
+                                        data=json.dumps({'voted_abstracts': ballot}), content_type='application/json')
+            self.assertEqual((response.status_code, response.json()['code']), (400, 'invalid_ballot'), ballot)
+
+    def test_a_ballot_past_the_limit_is_refused(self):
+        self.event.max_votes = 1
+        self.event.save()
+        second = Abstract.objects.create(attendee=self.competing.attendee, event=self.event, title='Second',
+                                         file_path='a/s.docx')
+        self.client.force_login(self.reviewer_user)
+        response = self.client.post(f'/api/event/{self.event.id}/reviewer/vote',
+                                    data={'voted_abstracts': [self.competing.id, second.id]},
+                                    content_type='application/json')
+        self.assertEqual((response.status_code, response.json()['code']), (400, 'too_many_votes'))
+
+    def test_a_refused_ballot_records_none_of_its_votes(self):
+        self.client.force_login(self.reviewer_user)
+        response = self.client.post(
+            f'/api/event/{self.event.id}/reviewer/vote',
+            data={'voted_abstracts': [self.competing.id, self.invited.id]}, content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(AbstractVote.objects.filter(reviewer=self.reviewer, voted_abstracts__isnull=False).exists())
 
     def test_voting_for_a_competing_abstract_still_works(self):
         self.client.force_login(self.reviewer_user)
@@ -1261,7 +1309,7 @@ class CategorySerializationTests(TestCase):
         self.user.save()
         response = self.client.get(f'/api/event/{self.event.id}/onsite')
         self.assertEqual(response.status_code, 200)
-        row = response.json()[0]
+        row = response.json()['items'][0]
         self.assertEqual(row['category'], self.category.id)
         self.assertEqual(row['category_name_ko'], '학생')
         self.assertEqual(row['registration_fee'], 60000)
@@ -1410,7 +1458,7 @@ class SpeakerPaymentExemptionTests(TestCase):
         # The exemption list is read once from the shared event, not per row.
         # (The endpoint issues plenty of other queries; only this one matters.)
         with CaptureQueriesContext(connection) as queries:
-            response = self.client.get(f'/api/event/{self.event.id}/attendees?all=true')
+            response = self.client.get(f'/api/event/{self.event.id}/attendees?status=all&limit=200')
         self.assertEqual(response.status_code, 200)
         speaker_queries = [q for q in queries.captured_queries if 'main_speaker' in q['sql']]
         self.assertEqual(len(speaker_queries), 1, speaker_queries)
@@ -1490,7 +1538,7 @@ class AdminFeeWaiverTests(TestCase):
         self.waive(True)
         response = self.client.get(f'/api/event/{self.event.id}/attendees')
         self.assertEqual(response.status_code, 200)
-        row = next(a for a in response.json() if a['id'] == self.attendee.id)
+        row = next(a for a in response.json()['items'] if a['id'] == self.attendee.id)
         self.assertTrue(row['fee_waived'])
         self.assertTrue(row['is_fee_exempt'])
         self.assertEqual(row['registration_fee'], 0)
@@ -1841,18 +1889,18 @@ class InvitationTests(TestCase):
         self.assertTrue(all(inv.fee_waived for inv in rows.values()))
 
         # The body was rendered per recipient with that recipient's link.
-        sent = {call.args[2]: call.args[1] for call in mock_send.delay.call_args_list}
+        sent = {call.args[2]: call.args[1] for call in mock_send.delay_on_commit.call_args_list}
         self.assertIn(f"/invite/{rows['a@example.com'].token}", sent['a@example.com'])
         self.assertIn(f"/invite/{rows['b@example.com'].token}", sent['b@example.com'])
         self.assertNotIn(rows['b@example.com'].token, sent['a@example.com'])
-        self.assertEqual(mock_send.delay.call_args.kwargs['rich'], True)
+        self.assertEqual(mock_send.delay_on_commit.call_args.kwargs['rich'], True)
 
     @patch('main.invitations.send_mail')
     def test_a_body_without_the_link_is_refused(self, mock_send):
         response = self.invite(['a@example.com'], body='No link here')
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['code'], 'missing_link')
-        mock_send.delay.assert_not_called()
+        mock_send.delay_on_commit.assert_not_called()
 
     @patch('main.invitations.send_mail')
     def test_bad_and_duplicate_addresses_are_dropped(self, mock_send):
@@ -1911,7 +1959,7 @@ class InvitationTests(TestCase):
         self.assertEqual(invitation.attendee, attendee)
 
         # The ordinary registration confirmation went out too.
-        subjects = [call.args[0] for call in mock_send.delay.call_args_list]
+        subjects = [call.args[0] for call in mock_send.delay_on_commit.call_args_list]
         self.assertIn('Registered for Invited Symposium', subjects)
 
     @patch('main.invitations.send_mail')
@@ -2008,7 +2056,7 @@ class InvitationTests(TestCase):
         self.assertTrue(existing.fee_waived)
         self.assertEqual(existing.payment_status, 'free')
         # Not a new registration, so no second confirmation email.
-        subjects = [call.args[0] for call in mock_send.delay.call_args_list]
+        subjects = [call.args[0] for call in mock_send.delay_on_commit.call_args_list]
         self.assertNotIn('Registered for Invited Symposium', subjects)
 
     @patch('main.invitations.send_mail')
@@ -2247,7 +2295,7 @@ class ManualEmailTests(TestCase):
             'Dear {{ attendee.first_name }}, see you at {{ event.venue }}.')
         self.assertEqual(response.status_code, 200)
 
-        sent = {call.args[2]: call.args[:2] for call in mock_send.delay.call_args_list}
+        sent = {call.args[2]: call.args[:2] for call in mock_send.delay_on_commit.call_args_list}
         self.assertEqual(sent['ann@example.com'][1], 'Dear Ann, see you at Songdo Convensia.')
         self.assertEqual(sent['bob@example.com'][1], 'Dear Bob, see you at Songdo Convensia.')
         self.assertEqual(sent['ann@example.com'][0], 'About Songdo Meeting')
@@ -2257,7 +2305,7 @@ class ManualEmailTests(TestCase):
         # Matched case-insensitively; a stranger renders the attendee blank.
         response = self.send('ANN@example.com; nobody@example.com', 'Hi {{ attendee.first_name }}!')
         self.assertEqual(response.status_code, 200)
-        sent = {call.args[2]: call.args[1] for call in mock_send.delay.call_args_list}
+        sent = {call.args[2]: call.args[1] for call in mock_send.delay_on_commit.call_args_list}
         self.assertEqual(sent['ANN@example.com'], 'Hi Ann!')
         self.assertEqual(sent['nobody@example.com'], 'Hi !')
 
@@ -2269,7 +2317,7 @@ class ManualEmailTests(TestCase):
         response = self.send('ann@example.com', body,
                              subject='{{ [event.name](http://event.name) }}')
         self.assertEqual(response.status_code, 200, response.content)
-        call = mock_send.delay.call_args
+        call = mock_send.delay_on_commit.call_args
         self.assertEqual(call.args[0], 'Songdo Meeting')
         self.assertEqual(call.args[1], 'Welcome to Songdo Meeting at SONGDO CONVENSIA.')
 
@@ -2291,7 +2339,7 @@ class ManualEmailTests(TestCase):
                 '{% elif abstract.presentation_type == "flash_talk_poster" %}FLASH {{ abstract.title }}{% endif %}')
         response = self.send('ann@example.com; bob@example.com; nobody@example.com', body)
         self.assertEqual(response.status_code, 200, response.content)
-        sent = {call.args[2]: call.args[1] for call in mock_send.delay.call_args_list}
+        sent = {call.args[2]: call.args[1] for call in mock_send.delay_on_commit.call_args_list}
         self.assertEqual(sent['ann@example.com'], 'SHORT Ann talk')
         self.assertEqual(sent['bob@example.com'], 'FLASH Bob flash')
         # No abstract: no branch, and no error.
@@ -2302,13 +2350,13 @@ class ManualEmailTests(TestCase):
         response = self.send('ann@example.com', 'Hello {% if attendee %}unclosed')
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['code'], 'invalid_template')
-        mock_send.delay.assert_not_called()
+        mock_send.delay_on_commit.assert_not_called()
 
     @patch('main.apis.send_mail')
     def test_markdown_and_media_pass_through_to_the_rich_sender(self, mock_send):
         body = '**Hotels**: ![map](/media/editor/images/x/map.jpg)'
         self.send('ann@example.com', body)
-        call = mock_send.delay.call_args
+        call = mock_send.delay_on_commit.call_args
         self.assertEqual(call.args[1], body)
         self.assertTrue(call.kwargs['rich'])
 
@@ -2602,7 +2650,7 @@ class AdminAddAbstractTests(TestCase):
         self.assertEqual(abstract.presentation_type, 'short_talk')
         self.assertTrue(default_storage.exists(abstract.file_path))
         # No confirmation unless asked for.
-        mock_send.delay.assert_not_called()
+        mock_send.delay_on_commit.assert_not_called()
 
     @patch('main.apis.send_mail')
     def test_the_limit_does_not_stop_an_admin(self, mock_send):
@@ -2614,7 +2662,7 @@ class AdminAddAbstractTests(TestCase):
     @patch('main.apis.send_mail')
     def test_a_confirmation_goes_out_when_asked(self, mock_send):
         self.assertEqual(self.add(send_confirmation=True).status_code, 200)
-        self.assertEqual(mock_send.delay.call_args.args[2], 'author@example.com')
+        self.assertEqual(mock_send.delay_on_commit.call_args.args[2], 'author@example.com')
 
     @patch('main.apis.send_mail')
     def test_one_abstract_per_registrant_still_holds(self, mock_send):
@@ -2693,8 +2741,10 @@ class AdminListQueryCountTests(TestCase):
 
     def test_admin_lists_do_not_query_per_row(self):
         urls = [f'/api/event/{self.event.id}/{p}' for p in
-                ('attendees?all=true', 'abstracts', 'onsite', 'reviewers', 'admin/speakers', 'eventadmins')]
-        urls.append('/api/users')
+                ('attendees?status=all&limit=200', 'attendees/export?status=all', 'abstracts?limit=200',
+                 'abstracts/export', 'onsite?limit=200', 'onsite/export', 'payments?limit=200',
+                 'payments/export', 'reviewers', 'admin/speakers', 'eventadmins')]
+        urls.append('/api/admin/users?limit=200')
         self.grow(3)
         small = {u: self.count(u) for u in urls}
         self.grow(6)
@@ -2703,12 +2753,690 @@ class AdminListQueryCountTests(TestCase):
 
     def test_linked_accounts_still_resolve(self):
         self.grow(1)
-        rows = self.client.get(f'/api/event/{self.event.id}/attendees?all=true').json()
+        rows = self.client.get(f'/api/event/{self.event.id}/attendees?status=all').json()['items']
         self.assertEqual(rows[0]['user']['orcid'], '0000-1')
         self.assertEqual(rows[0]['user']['institute_ko'], '부산대')
         self.assertEqual(rows[0]['custom_answers'][0]['answer'], 'A')
-        abstracts = self.client.get(f'/api/event/{self.event.id}/abstracts').json()
+        abstracts = self.client.get(f'/api/event/{self.event.id}/abstracts').json()['items']
         self.assertEqual(abstracts[0]['votes'], 0)
+
+
+class ListQueryScalingTests(TestCase):
+    """Every list the site serves costs the same number of queries however many
+    rows it returns: the speaker table, the site admin's event and user lists,
+    the public event list, a user's registration history, the reviewer pages,
+    and a bulk email to the whole attendee list."""
+
+    def setUp(self):
+        from allauth.socialaccount.models import SocialAccount
+        self.SocialAccount = SocialAccount
+        self.event = Event.objects.create(
+            name='Big', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, accepts_abstract=True, published=True)
+        self.category, = add_categories(self.event, ('Regular', 1000))
+        self.institution = Institution.objects.create(name_en='PNU', name_ko='부산대')
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA', is_staff=True)
+        self.event.admins.add(self.admin_user)
+        # Registered for every event below and reviewing this one, so the
+        # personal pages have as many rows as the admin ones.
+        self.member = User.objects.create_user(
+            username='me@example.com', email='me@example.com', password='pw12345!aA')
+        mine = Attendee.objects.create(user=self.member, event=self.event, first_name='Me',
+                                       last_name='X', nationality=1, institute='PNU',
+                                       category=self.category)
+        self.event.attendees.add(mine)
+        self.event.reviewers.add(mine)
+        self.vote = AbstractVote.objects.create(reviewer=mine)
+        self.n = 0
+
+    def grow(self, count):
+        for _ in range(count):
+            self.n += 1
+            email = f'p{self.n}@example.com'
+            user = User.objects.create_user(username=email, email=email, password='pw12345!aA',
+                                            institute=self.institution)
+            self.SocialAccount.objects.create(user=user, provider='orcid', uid=f'0000-{self.n}')
+            attendee = Attendee.objects.create(user=user, event=self.event, first_name='P',
+                                               last_name=str(self.n), nationality=1,
+                                               institute='PNU', category=self.category)
+            self.event.attendees.add(attendee)
+            abstract = Abstract.objects.create(attendee=attendee, event=self.event,
+                                               title=f'T{self.n}', file_path='a/b.docx')
+            self.vote.voted_abstracts.add(abstract)
+            PaymentHistory.objects.create(attendee=attendee, event=self.event, amount=1000,
+                                          status='completed')
+            # Registered, paid and submitted: every column the table derives.
+            self.event.speakers.create(name=f'S{self.n}', email=email.upper(), affiliation='PNU',
+                                       is_domestic=True, type='invited')
+
+            other = Event.objects.create(
+                name=f'E{self.n}', start_date=date(2026, 2, 1), end_date=date(2026, 2, 2),
+                venue='Busan', capacity=10, published=True)
+            other.organizer_set.create(name='Org', affiliation='PNU')
+            category, = add_categories(other, ('Regular', 500))
+            for field in ('email_template_registration', 'email_template_abstract_submission',
+                          'email_template_certificate', 'email_template_invitation'):
+                template = EmailTemplate.objects.create(subject='S', body='B')
+                EmailAttachment.objects.create(template=template, file_path='editor/x.pdf',
+                                               filename='x.pdf')
+                setattr(other, field, template)
+            other.save()
+            other.speakers.create(name='Guest', email='guest@example.com', affiliation='PNU',
+                                  is_domestic=True, type='invited')
+            registration = Attendee.objects.create(user=self.member, event=other, first_name='Me',
+                                                   last_name='X', nationality=1, institute='PNU',
+                                                   category=category)
+            other.attendees.add(registration)
+
+    def count(self, method, url, user, **kwargs):
+        self.client.force_login(user)
+        with CaptureQueriesContext(connection) as q:
+            response = getattr(self.client, method)(url, **kwargs)
+        self.assertEqual(response.status_code, 200, (url, response.content[:300]))
+        return len(q.captured_queries)
+
+    def measure(self):
+        event = self.event.id
+        to = '; '.join(f'p{i}@example.com' for i in range(1, self.n + 1))
+        body = json.dumps({'to': to, 'subject': 'About {{ event.name }}',
+                           'body': 'Dear {{ attendee.first_name }}, {{ abstract.title }} '
+                                   '{{ attendee.registration_fee }} {{ event.organizers_en }}'})
+        with patch('main.apis.send_mail'):
+            return {
+                'admin speakers': self.count('get', f'/api/event/{event}/admin/speakers', self.admin_user),
+                'admin users': self.count('get', '/api/admin/users?limit=200', self.admin_user),
+                'admin events': self.count('get', '/api/admin/events?limit=200', self.admin_user),
+                'public events': self.count('get', '/api/events?limit=100', self.member),
+                'registration history': self.count('get', '/api/me/registration-history', self.member),
+                'review abstracts': self.count('get', f'/api/event/{event}/review/abstracts', self.member),
+                'reviewer votes': self.count('get', f'/api/event/{event}/reviewer/vote', self.member),
+                'bulk email': self.count('post', f'/api/event/{event}/send_emails', self.admin_user,
+                                         data=body, content_type='application/json'),
+            }
+
+    def test_lists_do_not_query_per_row(self):
+        self.grow(3)
+        small = self.measure()
+        self.grow(6)
+        large = self.measure()
+        grew = {name: (small[name], large[name]) for name in small if large[name] != small[name]}
+        self.assertEqual(grew, {}, 'these grew their query count with their row count')
+
+    def test_rows_still_carry_what_they_derive(self):
+        self.grow(2)
+        self.client.force_login(self.admin_user)
+        speaker = self.client.get(f'/api/event/{self.event.id}/admin/speakers').json()[0]
+        self.assertTrue(speaker['is_registered'])
+        self.assertTrue(speaker['has_paid'])
+        self.assertEqual(speaker['abstract_title'], 'T1')
+        events = {e['name']: e for e in self.client.get('/api/admin/events?limit=200').json()['items']}
+        self.assertEqual(events['E1']['organizers_en'], 'Org (PNU)')
+        self.assertEqual(events['E1']['email_template_certificate']['attachments'][0]['filename'], 'x.pdf')
+        self.assertEqual(events['E1']['registration_categories'][0]['fee'], 500)
+        users = {u['email']: u for u in self.client.get('/api/admin/users?limit=200').json()['items']}
+        self.assertEqual(users['p1@example.com']['orcid'], '0000-1')
+        self.assertEqual(users['p1@example.com']['institute_ko'], '부산대')
+
+        self.client.force_login(self.member)
+        history = {h['event_name']: h for h in self.client.get('/api/me/registration-history').json()}
+        self.assertEqual(history['E1']['registration_fee'], 500)
+        self.assertEqual(history['E1']['payment_status'], 'pending')
+        self.assertEqual(history['E1']['organizers_en'], 'Org (PNU)')
+        review = self.client.get(f'/api/event/{self.event.id}/review/abstracts').json()
+        self.assertEqual({r['attendee']['last_name'] for r in review}, {'1', '2'})
+        votes = self.client.get(f'/api/event/{self.event.id}/reviewer/vote').json()
+        self.assertEqual({v['title'] for v in votes['voted_abstracts']}, {'T1', 'T2'})
+
+    @patch('main.apis.send_mail')
+    def test_bulk_email_still_fills_each_recipient(self, mock_send):
+        self.grow(2)
+        self.client.force_login(self.admin_user)
+        body = 'Dear {{ attendee.first_name }} {{ attendee.last_name }}: {{ abstract.title }}'
+        response = self.client.post(
+            f'/api/event/{self.event.id}/send_emails',
+            data=json.dumps({'to': 'P1@example.com; p2@example.com; stranger@example.com',
+                             'subject': 'S', 'body': body}),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        sent = {call.args[2]: call.args[1] for call in mock_send.delay_on_commit.call_args_list}
+        self.assertEqual(sent['P1@example.com'], 'Dear P 1: T1')
+        self.assertEqual(sent['p2@example.com'], 'Dear P 2: T2')
+        self.assertEqual(sent['stranger@example.com'], 'Dear  : ')
+
+
+class PaginatedListTests(TestCase):
+    """The admin lists answer a page at a time, filtered and counted on the
+    server the way the tables used to do it in the browser."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Paged', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, accepts_abstract=True)
+        self.paid_cat, self.free_cat = add_categories(self.event, ('Regular', 1000), ('Student', 0))
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.client.force_login(self.admin_user)
+
+    def register(self, first, last, category, email=None, **fields):
+        email = email or f'{first.lower()}@example.com'
+        user = User.objects.create_user(username=email, email=email, password='pw12345!aA',
+                                        first_name=first, last_name=last)
+        attendee = Attendee.objects.create(user=user, event=self.event, first_name=first, last_name=last,
+                                           nationality=1, institute='PNU', category=category, **fields)
+        self.event.attendees.add(attendee)
+        return attendee
+
+    def pay(self, attendee, status='completed', amount=1000):
+        return PaymentHistory.objects.create(attendee=attendee, event=self.event, amount=amount,
+                                             status=status, attendee_first_name=attendee.first_name,
+                                             attendee_last_name=attendee.last_name,
+                                             attendee_email=attendee.email)
+
+    def get(self, path, **params):
+        response = self.client.get(f'/api/event/{self.event.id}/{path}', params)
+        self.assertEqual(response.status_code, 200, response.content[:300])
+        return response.json()
+
+    def test_sql_payment_state_agrees_with_the_property(self):
+        from main.models import with_payment_state
+        cases = {
+            'paid': self.register('Paid', 'A', self.paid_cat),
+            'pending': self.register('Pending', 'B', self.paid_cat),
+            'cancelled only': self.register('Cancelled', 'C', self.paid_cat),
+            'free category': self.register('Free', 'D', self.free_cat),
+            'no category': self.register('Nocat', 'E', None),
+            'waived': self.register('Waived', 'F', self.paid_cat, fee_waived=True),
+            'speaker': self.register('Speaker', 'G', self.paid_cat),
+            'deleted account speaker': self.register('Gone', 'H', self.paid_cat),
+        }
+        self.pay(cases['paid'])
+        self.pay(cases['cancelled only'], status='cancelled')
+        self.event.speakers.create(name='S', email='  SPEAKER@example.com ', affiliation='PNU',
+                                   is_domestic=True, type='invited')
+        gone = cases['deleted account speaker']
+        gone.user_email = gone.user.email
+        gone.user.delete()
+        gone.refresh_from_db()
+        self.event.speakers.create(name='H', email='gone@example.com', affiliation='PNU',
+                                   is_domestic=True, type='invited')
+
+        event = Event.objects.get(id=self.event.id)
+        rows = {a.id: a for a in with_payment_state(event.attendees.all(), event)}
+        for label, attendee in cases.items():
+            fresh = Attendee.objects.get(id=attendee.id)
+            row = rows[attendee.id]
+            sql = 'free' if row.is_free else ('paid' if row.has_paid else 'pending')
+            self.assertEqual(sql, fresh.payment_status, label)
+
+    def test_roster_and_unpaid_tabs_split_and_count(self):
+        paid = self.register('Ann', 'Lee', self.paid_cat)
+        self.pay(paid)
+        self.register('Bob', 'Kim', self.paid_cat)
+        self.register('Cho', 'Park', self.free_cat)
+        roster = self.get('attendees', status='registered')
+        self.assertEqual({r['first_name'] for r in roster['items']}, {'Ann', 'Cho'})
+        self.assertEqual(roster['counts'], {'registered': 2, 'unpaid': 1})
+        unpaid = self.get('attendees', status='unpaid')
+        self.assertEqual([r['first_name'] for r in unpaid['items']], ['Bob'])
+        self.assertEqual(unpaid['total'], 1)
+
+    def test_pages_carry_the_total_and_stay_in_order(self):
+        for i in range(25):
+            self.register(f'P{i:02d}', 'X', self.free_cat)
+        first = self.get('attendees', limit=10)
+        last = self.get('attendees', limit=10, offset=20)
+        self.assertEqual((first['total'], len(first['items']), len(last['items'])), (25, 10, 5))
+        self.assertEqual(first['items'][0]['first_name'], 'P00')
+        self.assertEqual(last['items'][-1]['first_name'], 'P24')
+        # The page size is capped, so no one asks for the whole list this way.
+        self.assertEqual(self.get('attendees', limit=100000)['limit'], 200)
+
+    def test_search_reaches_the_same_fields_the_table_did(self):
+        ann = self.register('Ann', 'Lee', self.free_cat, korean_name='이안', job_title='Prof')
+        self.register('Bob', 'Kim', self.free_cat)
+        def found(**params):
+            return [r['id'] for r in self.get('attendees', **params)['items']]
+        self.assertEqual(found(search='ann lee'), [ann.id])          # full name
+        self.assertEqual(found(search='이안', field='name'), [ann.id])
+        self.assertEqual(found(search='ANN@EXAMPLE', field='email'), [ann.id])
+        self.assertEqual(found(search='prof', field='job_title'), [ann.id])
+        self.assertEqual(found(search=str(ann.attendee_nametag_id), field='id'), [ann.id])
+        self.assertEqual(found(search='lee', field='email'), [])     # only the chosen field
+
+    def test_picker_exclusions(self):
+        with_abstract = self.register('Ann', 'Lee', self.free_cat)
+        speaker = self.register('Bob', 'Kim', self.paid_cat)
+        paid = self.register('Cho', 'Park', self.paid_cat)
+        admin_reg = self.register('Dan', 'Yoo', self.free_cat, email='ea2@example.com')
+        Abstract.objects.create(attendee=with_abstract, event=self.event, title='T', file_path='a/b.docx')
+        self.event.speakers.create(name='B', email='BOB@example.com', affiliation='PNU',
+                                   is_domestic=True, type='invited')
+        self.pay(paid)
+        self.event.admins.add(admin_reg.user)
+        def ids(**params):
+            return {r['id'] for r in self.get('attendees', status='all', **params)['items']}
+        everyone = {with_abstract.id, speaker.id, paid.id, admin_reg.id}
+        self.assertEqual(ids(has_abstract='false'), everyone - {with_abstract.id})
+        self.assertEqual(ids(not_speaker='true'), everyone - {speaker.id})
+        self.assertEqual(ids(has_completed_payment='false'), everyone - {paid.id})
+        self.assertEqual(ids(not_admin='true', has_user='true'), everyone - {admin_reg.id})
+        # Without any address there is nothing to list them under.
+        nameless = self.register('Eve', 'No', self.free_cat)
+        nameless.user.email = ''
+        nameless.user.save()
+        self.assertNotIn(nameless.id, ids(not_speaker='true'))
+
+    def test_export_takes_the_same_filters_unpaged(self):
+        for i in range(3):
+            self.register(f'P{i}', 'X', self.free_cat)
+        chosen = Attendee.objects.filter(event=self.event).order_by('id')[:2]
+        ids = ','.join(str(a.id) for a in chosen)
+        rows = self.client.get(f'/api/event/{self.event.id}/attendees/export', {'ids': ids}).json()
+        self.assertEqual([r['id'] for r in rows], [a.id for a in chosen])
+        # A selection made on the unpaid tab is found too: ids alone mean any state.
+        owing = self.register('Owes', 'Y', self.paid_cat)
+        rows = self.client.get(f'/api/event/{self.event.id}/attendees/export', {'ids': str(owing.id)}).json()
+        self.assertEqual([r['id'] for r in rows], [owing.id])
+        self.assertEqual(len(self.client.get(f'/api/event/{self.event.id}/attendees/export').json()), 3)
+
+    def test_payments_page_with_event_wide_summary(self):
+        ann = self.register('Ann', 'Lee', self.paid_cat)
+        bob = self.register('Bob', 'Kim', self.paid_cat)
+        self.pay(ann, amount=1000)
+        self.pay(bob, amount=3000)
+        self.pay(bob, status='cancelled', amount=500)
+        page = self.get('payments', search='bob kim', field='name')
+        self.assertEqual(page['total'], 2)
+        self.assertEqual(page['summary'], {'count_all': 3, 'count_completed': 2, 'total_completed': 4000,
+                                           'count_cancelled': 1, 'total_cancelled': 500})
+        self.assertEqual(len(self.client.get(f'/api/event/{self.event.id}/payments/export').json()), 3)
+
+    def test_exact_address_lookup(self):
+        exact = self.register('Ann', 'Lee', self.paid_cat, email='a@x.com')
+        for i in range(25):
+            self.register(f'B{i}', 'X', self.free_cat, email=f'b{i}a@x.com')
+        self.pay(exact)
+        rows = self.get('attendees', status='all', email=' A@X.COM ')['items']
+        self.assertEqual([(r['id'], r['payment_status']) for r in rows], [(exact.id, 'paid')])
+
+    def test_picker_totals_count_what_the_picker_lists(self):
+        with_abstract = self.register('Ann', 'Lee', self.free_cat)
+        self.register('Bob', 'Kim', self.free_cat)
+        Abstract.objects.create(attendee=with_abstract, event=self.event, title='T', file_path='a/b.docx')
+        page = self.get('attendees', status='all', has_abstract='false')
+        self.assertEqual((page['total'], len(page['items'])), (1, 1))
+
+    def test_names_are_found_with_their_middle_initial(self):
+        ann = self.register('Ann', 'Lee', self.free_cat, middle_initial='Q')
+        ann.user.middle_initial = 'Q'
+        ann.user.save()
+        self.pay(ann)
+        PaymentHistory.objects.filter(attendee=ann).update(attendee_middle_initial='Q')
+        Abstract.objects.create(attendee=ann, event=self.event, title='T', file_path='a/b.docx')
+        self.assertEqual(self.get('attendees', search='Ann Q Lee', field='name')['total'], 1)
+        self.assertEqual(self.get('attendees', search='Ann Lee', field='name')['total'], 1)
+        self.assertEqual(self.get('abstracts', search='ann q lee', field='presenter')['total'], 1)
+        self.assertEqual(self.get('payments', search='Ann Q Lee', field='name')['total'], 1)
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        found = self.client.get('/api/admin/users', {'search': 'ann q lee', 'field': 'name'}).json()
+        self.assertEqual([u['email'] for u in found['items']], ['ann@example.com'])
+
+    def test_addresses_are_compared_as_python_reads_them(self):
+        # PostgreSQL upper-cases "ß" to itself; Python to "SS". Matching is
+        # done the property's way, so the tabs agree with payment_status.
+        odd = self.register('Odd', 'One', self.paid_cat, email='a@straße.de')
+        self.event.speakers.create(name='O', email='A@STRAßE.DE', affiliation='PNU',
+                                   is_domestic=True, type='invited')
+        self.assertEqual(Attendee.objects.get(id=odd.id).payment_status, 'free')
+        self.assertIn(odd.id, [r['id'] for r in self.get('attendees', status='registered')['items']])
+        self.assertNotIn(odd.id, [r['id'] for r in self.get('attendees', status='all', not_speaker='true')['items']])
+        speaker = self.get('admin/speakers')[0]
+        self.assertTrue(speaker['is_registered'])
+
+    def test_odd_input_is_refused_not_a_server_error(self):
+        self.register('Ann', 'Lee', self.free_cat)
+        for path, params in (('attendees', {'ids': '²'}), ('abstracts', {'ids': '1,²'}), ('onsite', {'ids': '²'}),
+                             ('payments', {'search': '²', 'field': 'number'}),
+                             ('attendees', {'offset': str(10 ** 20)}), ('payments', {'offset': str(10 ** 20)})):
+            response = self.client.get(f'/api/event/{self.event.id}/{path}', params)
+            self.assertEqual(response.status_code, 200, (path, params, response.content[:200]))
+        response = self.client.get(f'/api/event/{self.event.id}/attendees', {'search': 'a\x00b'})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.client.get('/api/institutions', {'search': '\x00'}).status_code, 400)
+        response = self.client.post(f'/api/event/{self.event.id}/send_emails',
+                                    data=json.dumps({'to': 'x@example.com', 'subject': 'a\x00', 'body': ''}),
+                                    content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+
+    @patch('main.apis.send_mail')
+    def test_unstorable_text_is_refused_wherever_it_arrives(self, mock_send):
+        url = f'/api/event/{self.event.id}/send_emails'
+        self.assertEqual(self.client.get('/api/invitation/a%00b').status_code, 400)
+        for body, content_type in ((b'{"subject": "a\\u0000"}', 'text/plain'),
+                                   ('{"subject": "a\\u0000"}'.encode('utf-16'), 'application/json'),
+                                   (b'{"subject": "\\ud800"}', 'application/json')):
+            response = self.client.generic('POST', url, body, content_type=content_type)
+            self.assertEqual(response.status_code, 400, (body[:40], content_type))
+        # Text that only mentions the escape is fine, and a body too deep to
+        # read is left for the view rather than crashing here.
+        response = self.client.post(url, data=json.dumps({'to': 'x@example.com', 'subject': 'see \\u0000',
+                                                          'body': ''}), content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        # Not JSON at all: the caller's mistake, said so.
+        response = self.client.post(url, data='{"subject": ', content_type='application/json')
+        self.assertEqual((response.status_code, response.json()['code']), (400, 'invalid_json'))
+        deep = b'[' * 100000 + b'"\\u0000"' + b']' * 100000
+        self.assertNotEqual(self.client.generic('GET', '/api/events', deep, content_type='application/json').status_code, 500)
+
+    def test_unstorable_text_is_refused_however_it_is_wrapped(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        # Declared a form, read by the view as JSON anyway.
+        body = json.dumps({'first_name': 'a\x00', 'last_name': 'b'})
+        self.assertEqual(self.client.generic('POST', '/api/me', body,
+                                             content_type='application/x-www-form-urlencoded').status_code, 400)
+        # JSON inside a JSON string, which the view decodes a second time.
+        body = json.dumps({'name': 'x', 'venue': 'v', 'start_date': '2026-01-01', 'end_date': '2026-01-02',
+                           'capacity': 0, 'organizers': json.dumps([{'name': 'a\x00'}])})
+        self.assertEqual(self.client.post('/api/admin/event/add', data=body,
+                                          content_type='application/json').status_code, 400)
+        self.assertFalse(Event.objects.filter(name='x').exists())
+
+    def test_unstorable_text_in_cookies_and_multipart_fields_is_refused(self):
+        from django.test import Client
+        # A NUL in the session cookie used to crash the session lookup.
+        # Sent as the raw header: an octal escape that Django unquotes to NUL.
+        self.assertEqual(Client().get('/api/events', HTTP_COOKIE='sessionid="\\000abc"').status_code, 400)
+        # Multipart text fields, as the payment gateway's callback posts them.
+        self.assertEqual(self.client.post('/nicepay/callback', data={'Moid': 'a\x00b'}).status_code, 400)
+        # A small multipart request stays readable to a view that parses its body.
+        body = b'--xyz\r\nContent-Disposition: form-data; name="name_en"\r\n\r\nInst\r\n--xyz--\r\n'
+        response = self.client.generic('POST', '/api/institutions', body,
+                                       content_type='multipart/form-data; boundary=xyz')
+        self.assertNotEqual(response.status_code, 500)
+
+    def test_any_malformed_body_is_a_400(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        url = f'/api/event/{self.event.id}/eventadmin/add'
+        for body in (b'{"id":"\xff"}', b'[' * 100000, b'{"id":' + b'1' * 5000 + b'}', b'{"id": '):
+            response = self.client.generic('POST', url, body, content_type='application/json')
+            self.assertEqual((response.status_code, response.json()['code']), (400, 'invalid_json'), body[:20])
+        # A bare JSON string inside a field, decoded a second time by the view.
+        response = self.client.post(f'/api/event/{self.event.id}/update',
+                                    data=json.dumps({'main_languages': json.dumps('\x00')}),
+                                    content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+
+    def test_creating_an_event_with_bad_categories_creates_nothing(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        before = (Event.objects.count(), EmailTemplate.objects.count())
+        base = {'name': 'E', 'venue': 'V', 'start_date': '2027-01-02', 'end_date': '2027-01-03', 'capacity': 0}
+        for categories in (json.dumps([{'name': 'a\x00'}]), 'not json', json.dumps({'name': 'x'})):
+            response = self.client.post('/api/admin/event/add', data=json.dumps({**base, 'registration_categories': categories}),
+                                        content_type='application/json')
+            self.assertEqual(response.status_code, 400, categories)
+        self.assertEqual((Event.objects.count(), EmailTemplate.objects.count()), before)
+        # A body that is JSON but not an object is refused, not a crash.
+        response = self.client.post('/api/admin/event/add', data='[]', content_type='application/json')
+        self.assertEqual((response.status_code, response.json()['code']), (400, 'invalid_json'))
+
+    def test_a_refused_write_leaves_nothing_behind(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        question = CustomQuestion.objects.create(event=self.event, question={'type': 'text', 'question': 'Q?'})
+        # Deleting the old question comes before the new one turns out to lack
+        # its text; the whole request is undone with it.
+        response = self.client.post(f'/api/event/{self.event.id}/questions', data=json.dumps({'questions': [{'id': -1}]}),
+                                    content_type='application/json')
+        self.assertEqual((response.status_code, response.json()['code']), (400, 'missing_field'))
+        self.assertTrue(CustomQuestion.objects.filter(id=question.id).exists())
+
+    def test_odd_values_are_refused_not_a_crash(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        attendee = self.register('Ann', 'Lee', self.paid_cat)
+        url = f'/api/event/{self.event.id}/attendee/{attendee.id}/update'
+        # Not JSON: Python's parser takes these, JSON does not.
+        for raw in ('{"category": Infinity}', '{"category": NaN}', '{"category": 1e400}'):
+            response = self.client.generic('POST', url, raw, content_type='application/json')
+            self.assertEqual((response.status_code, response.json()['code']), (400, 'invalid_json'), raw)
+        for value in (self.paid_cat.id + 0.5, True):
+            response = self.client.post(url, data=json.dumps({'category': value}), content_type='application/json')
+            self.assertEqual((response.status_code, response.json()['code']), (400, 'invalid_category'), value)
+        abstract = Abstract.objects.create(attendee=attendee, event=self.event, title='T', file_path='a/b.docx')
+        for title in ('x' * 1001, None, '   '):
+            response = self.client.post(f'/api/event/{self.event.id}/abstract/{abstract.id}/update',
+                                        data=json.dumps({'title': title}), content_type='application/json')
+            self.assertEqual((response.status_code, response.json()['code']), (400, 'missing_title'), title)
+        self.assertEqual(Abstract.objects.get(id=abstract.id).title, 'T')
+        # JSON null as text means "not sent" on update, as on add.
+        response = self.client.post(f'/api/event/{self.event.id}/update',
+                                    data=json.dumps({'registration_categories': 'null'}), content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.event.registration_categories.count(), 2)
+
+    def test_blank_category_text_keeps_the_defaults(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        body = {'name': 'Blank', 'venue': 'V', 'start_date': '2027-01-02', 'end_date': '2027-01-03', 'capacity': 0,
+                'registration_categories': '   '}
+        self.assertEqual(self.client.post('/api/admin/event/add', data=json.dumps(body),
+                                          content_type='application/json').status_code, 200)
+        self.assertEqual(Event.objects.get(name='Blank').registration_categories.count(), 3)
+
+    def test_registrations_without_a_date_lead_the_unpaid_list(self):
+        newer = self.register('New', 'One', self.paid_cat)
+        legacy = self.register('Old', 'One', self.paid_cat)
+        Attendee.objects.filter(id=legacy.id).update(created_at=None)
+        self.assertEqual([r['id'] for r in self.get('attendees', status='unpaid')['items']], [legacy.id, newer.id])
+
+    def test_an_empty_category_array_makes_a_free_event_too(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        body = {'name': 'Free2', 'venue': 'V', 'start_date': '2027-01-02', 'end_date': '2027-01-03', 'capacity': 0,
+                'registration_categories': []}
+        self.assertEqual(self.client.post('/api/admin/event/add', data=json.dumps(body),
+                                          content_type='application/json').status_code, 200)
+        self.assertEqual(Event.objects.get(name='Free2').registration_categories.count(), 0)
+
+    def test_an_empty_category_list_makes_a_free_event(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        body = {'name': 'Free', 'venue': 'V', 'start_date': '2027-01-02', 'end_date': '2027-01-03', 'capacity': 0,
+                'registration_categories': '[]'}
+        self.assertEqual(self.client.post('/api/admin/event/add', data=json.dumps(body),
+                                          content_type='application/json').status_code, 200)
+        self.assertEqual(Event.objects.get(name='Free').registration_categories.count(), 0)
+
+    def test_a_missing_field_is_named_not_a_crash(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        response = self.client.post(f'/api/event/{self.event.id}/eventadmin/add', data='{}',
+                                    content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {'code': 'missing_field', 'message': 'Missing field: id'})
+
+    def test_text_that_only_looks_like_json_is_stored_as_text(self):
+        # No view decodes a description, so a JSON-looking escape in it is
+        # just text - stored as typed, not refused.
+        text = '"\\u0000"'
+        response = self.client.post(f'/api/event/{self.event.id}/update', data=json.dumps({'description': text}),
+                                    content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        self.assertEqual(Event.objects.get(id=self.event.id).description, text)
+
+    def test_a_big_upload_sent_to_a_json_endpoint_is_a_400(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        response = self.client.post(f'/api/event/{self.event.id}/eventadmin/add',
+                                    data={'f': SimpleUploadedFile('b.bin', b'x' * 3_000_000)})
+        self.assertEqual((response.status_code, response.json()['code']), (400, 'invalid_json'))
+
+    def test_a_stray_cookie_does_not_lock_anyone_out(self):
+        from django.test import Client
+        self.assertEqual(Client().get('/api/events', HTTP_COOKIE='other="\\000x"').status_code, 200)
+
+    def test_the_public_event_list_holds_its_bounds(self):
+        for params in ({'offset': -5}, {'limit': -5}, {'limit': 100000}):
+            response = self.client.get('/api/events', params)
+            self.assertEqual(response.status_code, 200, params)
+        self.assertEqual(self.client.get('/api/events', {'limit': 100000}).json()['limit'], 200)
+
+    def test_staff_asking_for_a_missing_event_get_a_404(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        self.assertEqual(self.client.get('/api/event/999999/attendees').status_code, 404)
+
+    def test_ids_too_long_to_be_ids_are_dropped(self):
+        self.register('Ann', 'Lee', self.free_cat)
+        response = self.client.get(f'/api/event/{self.event.id}/attendees', {'ids': '1' * 5000})
+        self.assertEqual((response.status_code, response.json()['total']), (200, 0))
+
+    def test_addresses_are_read_once_per_request(self):
+        for i in range(3):
+            self.register(f'P{i}', 'X', self.paid_cat)
+        self.event.speakers.create(name='S', email='p0@example.com', affiliation='PNU',
+                                   is_domestic=True, type='invited')
+        with CaptureQueriesContext(connection) as q:
+            self.get('attendees', status='all', not_speaker='true', email='p1@example.com')
+        scans = [x for x in q.captured_queries if '"main_attendee"."user_email"' in x['sql']
+                 and 'SELECT "main_attendee"."id", "main_user"."email"' in x['sql']]
+        self.assertEqual(len(scans), 1, [x['sql'][:120] for x in scans])
+
+    def test_payment_number_found_as_the_table_shows_it(self):
+        ann = self.register('Ann', 'Lee', self.paid_cat)
+        bare = self.pay(ann)                      # no order id: shown as #000123
+        ordered = self.pay(ann)
+        ordered.toss_order_id = 'ORD-77X'
+        ordered.save()
+        def found(term):
+            return {p['id'] for p in self.get('payments', search=term, field='number')['items']}
+        self.assertIn(bare.id, found(f'{bare.id:06d}'))
+        self.assertIn(bare.id, found(f'#{bare.id:06d}'))
+        self.assertEqual(found('#ord-77'), {ordered.id})
+        # Only what is on screen: an ordered payment's row id is not shown.
+        self.assertNotIn(ordered.id, found(f'{ordered.id:06d}'))
+
+    def test_abstracts_filter_by_type_with_chip_counts(self):
+        ann = self.register('Ann', 'Lee', self.free_cat)
+        bob = self.register('Bob', 'Kim', self.free_cat)
+        Abstract.objects.create(attendee=ann, event=self.event, title='Poster one', file_path='a/1.docx')
+        Abstract.objects.create(attendee=bob, event=self.event, title='Talk two', file_path='a/2.docx',
+                                presentation_type='short_talk')
+        page = self.get('abstracts', type='short_talk')
+        self.assertEqual([a['title'] for a in page['items']], ['Talk two'])
+        self.assertEqual(page['counts'], {'poster': 1, 'short_talk': 1, 'all': 2})
+        self.assertEqual([a['title'] for a in self.get('abstracts', search='ann', field='presenter')['items']],
+                         ['Poster one'])
+        self.assertEqual([a['title'] for a in self.get('abstracts', search='short talk only', field='type')['items']],
+                         ['Talk two'])
+        # A type named the way the admin's language shows it: the browser sends
+        # the codes whose label matched.
+        self.assertEqual([a['title'] for a in self.get('abstracts', search='구두', field='type',
+                                                       types='short_talk')['items']], ['Talk two'])
+        self.assertEqual([a['title'] for a in self.get('abstracts', search='구두', types='short_talk')['items']],
+                         ['Talk two'])
+
+    def test_onsite_page_and_search(self):
+        for name in ('Walk Ann', 'Walk Bob'):
+            OnSiteAttendee.objects.create(event=self.event, name=name, email=f'{name[-3:]}@x.com',
+                                          institute='PNU', category=self.free_cat)
+        page = self.get('onsite', search='bob')
+        self.assertEqual([r['name'] for r in page['items']], ['Walk Bob'])
+        self.assertEqual(page['counts'], {'all': 2})
+        self.assertEqual(len(self.client.get(f'/api/event/{self.event.id}/onsite/export').json()), 2)
+
+    def test_account_search_is_staff_only_and_excludes_on_request(self):
+        self.assertEqual(self.client.get('/api/admin/users').status_code, 403)
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        registered = self.register('Ann', 'Lee', self.free_cat)
+        def emails(**params):
+            return {u['email'] for u in self.client.get('/api/admin/users', params).json()['items']}
+        self.assertEqual(emails(search='ann lee', field='name'), {'ann@example.com'})
+        self.assertNotIn('ann@example.com', emails(not_registered_for=self.event.id))
+        self.assertNotIn('ea@example.com', emails(not_admin_of=self.event.id))
+        self.assertIn(registered.user.email, emails())
+
+    def test_site_admin_events_hide_archived_unless_asked(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        Event.objects.create(name='Old one', start_date=date(2020, 1, 1), end_date=date(2020, 1, 2),
+                             venue='Busan', capacity=0, is_archived=True)
+        names = lambda **p: {e['name'] for e in self.client.get('/api/admin/events', p).json()['items']}
+        self.assertEqual(names(), {'Paged'})
+        self.assertEqual(names(archived='true'), {'Paged', 'Old one'})
+        self.assertEqual(names(search='busan', field='venue', archived='true'), {'Old one'})
+
+    def test_institutions_page_past_the_first_hundred(self):
+        staff = User.objects.create_user(username='st@example.com', email='st@example.com',
+                                         password='pw12345!aA', is_staff=True)
+        self.client.force_login(staff)
+        Institution.objects.bulk_create([Institution(name_en=f'Inst {i:03d}') for i in range(120)])
+        page = self.client.get('/api/admin/institutions', {'offset': 100, 'limit': 50}).json()
+        self.assertEqual((page['total'], len(page['items']), page['items'][0]['name_en']), (120, 20, 'Inst 100'))
+        Institution.objects.create(name_en='Pusan National University', name_ko='부산대학교')
+        by_field = lambda **p: [i['name_en'] for i in self.client.get('/api/admin/institutions', p).json()['items']]
+        self.assertEqual(by_field(search='부산', field='name_ko'), ['Pusan National University'])
+        self.assertEqual(by_field(search='부산', field='name_en'), [])
+
+
+class AbstractStatusWithoutConversionTests(TestCase):
+    """Every event page labels its abstract button from /registered, so that
+    must say whether one was submitted; converting the file to HTML is left to
+    the pages that preview it."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Talks', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=10, published=True, accepts_abstract=True)
+        self.user = User.objects.create_user(
+            username='au@example.com', email='au@example.com', password='pw12345!aA')
+        self.attendee = Attendee.objects.create(user=self.user, event=self.event, first_name='A',
+                                                last_name='U', nationality=1, institute='PNU')
+        self.event.attendees.add(self.attendee)
+        self.client.force_login(self.user)
+
+    def status(self):
+        return self.client.get(f'/api/event/{self.event.id}/registered').json()
+
+    def test_registered_reports_whether_an_abstract_was_submitted(self):
+        self.assertFalse(self.status()['abstract_submitted'])
+        Abstract.objects.create(attendee=self.attendee, event=self.event, title='T',
+                                file_path='a/b.docx')
+        self.assertTrue(self.status()['abstract_submitted'])
+
+    @patch('main.schema.docx_to_html', return_value='<p>converted</p>')
+    def test_own_abstract_is_converted_only_when_the_preview_asks(self, convert):
+        Abstract.objects.create(attendee=self.attendee, event=self.event, title='T',
+                                file_path='a/b.docx')
+        url = f'/api/event/{self.event.id}/abstract'
+        plain = self.client.get(url).json()
+        self.assertEqual(plain['title'], 'T')
+        self.assertIsNone(plain['body'])
+        convert.assert_not_called()
+        self.assertEqual(self.client.get(f'{url}?include_body=true').json()['body'], '<p>converted</p>')
+        convert.assert_called_once()
 
 
 class AdminRegisterAccountTests(TestCase):
@@ -2744,12 +3472,12 @@ class AdminRegisterAccountTests(TestCase):
         self.assertEqual(attendee.category, self.paid)
         self.assertEqual(attendee.payment_status, 'pending')
         self.assertTrue(self.event.attendees.filter(id=attendee.id).exists())
-        mock_send.delay.assert_not_called()
+        mock_send.delay_on_commit.assert_not_called()
 
     @patch('main.invitations.send_mail')
     def test_confirmation_only_when_asked(self, mock_send):
         self.register(send_confirmation=True)
-        self.assertEqual(mock_send.delay.call_args.args[2], 'caller@example.com')
+        self.assertEqual(mock_send.delay_on_commit.call_args.args[2], 'caller@example.com')
 
     def test_a_free_category_is_simply_registered(self):
         self.register(category=self.free.id)
@@ -2912,7 +3640,7 @@ class NicePayReceiptTests(TestCase):
         self.user.save()
         response = self.client.get(f'/api/event/{self.event.id}/payments')
         self.assertEqual(response.status_code, 200)
-        row = response.json()[0]
+        row = response.json()['items'][0]
         self.assertEqual(row['provider'], 'nicepay')
         # Both gateways say '카드', so the type alone cannot name the gateway.
         self.assertEqual(row['payment_type'], '카드')
@@ -3148,6 +3876,16 @@ class AbstractUploadErrorTests(TestCase):
 
     def test_a_real_docx_is_accepted(self):
         self.assertEqual(self.submit(self.docx_data_url()).status_code, 200)
+
+    def test_a_title_that_cannot_be_stored_is_refused_before_the_file_is(self):
+        with patch('main.apis.store_abstract_file') as store:
+            for title in ('', '   ', 'x' * 1001):
+                response = self.client.post(
+                    f'/api/event/{self.event.id}/abstract',
+                    data={'title': title, 'file_name': 'a.docx', 'file_content': self.docx_data_url()},
+                    content_type='application/json')
+                self.assertEqual((response.status_code, response.json()['code']), (400, 'missing_title'))
+            store.assert_not_called()
 
     def test_an_uppercase_extension_is_accepted(self):
         # The client used to refuse these before they ever got here.

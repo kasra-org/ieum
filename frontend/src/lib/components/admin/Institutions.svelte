@@ -1,24 +1,24 @@
 <script>
-    import { matchesSearch } from '$lib/utils.js';
     import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell } from '$lib/components/ui';
-    import { Modal, Button, Alert } from '$lib/components/ui';
+    import { Modal, Button, Alert, Spinner } from '$lib/components/ui';
     import { Settings, Trash2 } from '@lucide/svelte';
     import { enhance } from '$app/forms';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
+    import { PagedList } from '$lib/pagedList.svelte.js';
+    import TablePagination from '$lib/components/TablePagination.svelte';
 
     let { data } = $props();
 
-    let institution_search_term = $state('');
-    let institution_search_field = $state('all');
+    // Searched and paged on the server. The page load used to stop at the
+    // first 100; every institution is reachable now.
+    const list = new PagedList('/api/admin/institutions', { pageSize: 20 });
     const institution_search_fields = [
-        { value: 'name_en', name: m.search_nameEn(), get: r => r.name_en },
-        { value: 'name_ko', name: m.search_nameKo(), get: r => r.name_ko },
+        { value: 'name_en', name: m.search_nameEn() },
+        { value: 'name_ko', name: m.search_nameKo() },
     ];
-    let filtered_institutions = $derived(
-        data.admin.institutions.filter((inst) =>
-            matchesSearch(inst, institution_search_term, institution_search_field, institution_search_fields))
-    );
+    // Add/edit/delete re-run the page load; reload this page with it.
+    list.track(() => data);
 
     let selected_institution = $state(null);
     let institution_modal = $state(false);
@@ -58,7 +58,10 @@
 </div>
 <p class="text-gray-600 mb-6">{m.admin_manageInstitutions_description()}</p>
 
-<TableSearch placeholder={m.admin_searchInstitutions()} bind:inputValue={institution_search_term} bind:field={institution_search_field} fields={institution_search_fields} hoverable={true}>
+{#if list.error && list.items.length > 0}
+    <Alert color="red" class="mb-3">{m.common_error()}</Alert>
+{/if}
+<TableSearch placeholder={m.admin_searchInstitutions()} bind:inputValue={list.search} bind:field={list.field} fields={institution_search_fields} hoverable={true}>
     <TableHead>
         <TableHeadCell>{m.admin_tableId()}</TableHeadCell>
         <TableHeadCell>{m.admin_tableInstitutionNameEn()}</TableHeadCell>
@@ -66,7 +69,7 @@
         <TableHeadCell class="w-1">{m.admin_tableActions()}</TableHeadCell>
     </TableHead>
     <TableBody>
-        {#each filtered_institutions as institution}
+        {#each list.items as institution (institution.id)}
             <TableBodyRow>
                 <TableBodyCell>{institution.id}</TableBodyCell>
                 <TableBodyCell>{institution.name_en}</TableBodyCell>
@@ -83,13 +86,17 @@
                 </TableBodyCell>
             </TableBodyRow>
         {/each}
-        {#if filtered_institutions.length === 0}
+        {#if list.items.length === 0}
             <TableBodyRow>
-                <TableBodyCell colspan="4" class="text-center">{m.admin_noInstitutionsFound()}</TableBodyCell>
+                <TableBodyCell colspan="4" class="text-center">
+                    {#if list.loading}<Spinner size="6" />{:else if list.error}{m.common_error()}{:else}{m.admin_noInstitutionsFound()}{/if}
+                </TableBodyCell>
             </TableBodyRow>
         {/if}
     </TableBody>
 </TableSearch>
+
+<TablePagination currentPage={list.page} totalPages={list.totalPages} onPageChange={(p) => list.goto(p)} />
 
 <Modal id="institution_modal" size="md" title={selected_institution ? m.admin_editInstitution() : m.admin_addInstitution()} bind:open={institution_modal} outsideclose>
     <form method="post" action={selected_institution ? '?/update_institution' : '?/create_institution'} use:enhance={afterInstitutionAction}>

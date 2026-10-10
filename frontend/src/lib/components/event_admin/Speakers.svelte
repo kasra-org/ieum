@@ -10,7 +10,7 @@
     import { getDisplayInstitute, getDisplayName, matchesSearch } from '$lib/utils.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
-    import SearchableUserList from '$lib/components/SearchableUserList.svelte';
+    import RemoteSearchList from '$lib/components/RemoteSearchList.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
     import InviteModal from '$lib/components/InviteModal.svelte';
@@ -94,16 +94,44 @@
     let speakerIsChair = $state(false);
     let speakerType = $state('invited'); // Default to 'invited' speaker type
 
-    // Someone who has paid cannot be exempted. Known from the row when
-    // editing; when adding, looked up in the attendee list by the typed address.
-    let modalPersonPaid = $derived.by(() => {
-        if (selected_speaker?.has_paid) return true;
+    // Someone who has paid cannot be exempted. The row knows for the address
+    // it was saved with; the address in the form - typed when adding, perhaps
+    // changed when editing - is asked of the server, since the registrations
+    // are no longer all in the page.
+    let typedEmailPaid = $state(false);
+    // Saving waits for the answer, so an exemption is never posted for a
+    // payer in the moment before the form knows they paid.
+    let paidLookupPending = $state(false);
+    let paidLookupTimer;
+    let paidLookupSequence = 0;
+    $effect(() => {
         const email = (speakerEmail || '').trim().toLowerCase();
-        if (!email) return false;
-        return data.attendees.some(a =>
-            (a.user?.email || a.user_email || '').trim().toLowerCase() === email
-            && a.payment_status === 'paid');
+        const open = speaker_modal;
+        clearTimeout(paidLookupTimer);
+        const mine = ++paidLookupSequence;
+        typedEmailPaid = false;
+        paidLookupPending = false;
+        // Only a whole address can match exactly; skip the half-typed ones.
+        if (!open || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+        paidLookupPending = true;
+        paidLookupTimer = setTimeout(async () => {
+            // `email` asks for exactly this address, as the registration reads it.
+            const query = new URLSearchParams({ status: 'all', email, limit: '200' });
+            try {
+                const response = await fetch(`/api/event/${data.event.id}/attendees?${query}`, { headers: { Accept: 'application/json' } });
+                if (!response.ok) return;
+                const body = await response.json();
+                const paid = (body.items ?? []).some(a => a.payment_status === 'paid');
+                if (mine === paidLookupSequence) typedEmailPaid = paid;
+            } catch {
+                // Unknown counts as unpaid; the server refuses an exemption for a payer anyway.
+            } finally {
+                if (mine === paidLookupSequence) paidLookupPending = false;
+            }
+        }, 300);
+        return () => clearTimeout(paidLookupTimer);
     });
+    let modalPersonPaid = $derived(Boolean(selected_speaker?.has_paid) || typedEmailPaid);
 
     const roleLabel = (row) =>
         [row.is_speaker && m.speakers_roleSpeaker(), row.is_chair && m.speakers_roleChair()]
@@ -122,7 +150,7 @@
     };
 
 
-    // Custom getters for SearchableUserList
+    // Custom getters for RemoteSearchList
     function getAttendeeEmail(attendee) {
         return attendee.user?.email || attendee.user_email || '';
     }
@@ -136,16 +164,9 @@
     }
 
     // Anyone already on the list is not offered again - picking them would only
-    // produce a duplicate, which the API refuses anyway.
-    const listedEmails = $derived(
-        new Set(data.speakers.map(s => (s.email || '').trim().toLowerCase()))
-    );
-    const selectableAttendees = $derived(
-        data.attendees.filter(a => {
-            const email = (a.user?.email || a.user_email || '').trim().toLowerCase();
-            return email && !listedEmails.has(email);
-        })
-    );
+    // produce a duplicate, which the API refuses anyway. The server leaves them
+    // out (not_speaker), so the search covers every registration.
+    const selectableParams = { status: 'all', not_speaker: true };
 
     function selectAttendeeForSpeaker(attendee) {
         speakerName = attendee.name || '';
@@ -392,8 +413,9 @@ The Organising Committee
         {:else}
             <div class="mb-6">
                 <Label class="block mb-2">{m.speakers_selectAttendee()}</Label>
-                <SearchableUserList
-                    items={selectableAttendees}
+                <RemoteSearchList
+                    url={`/api/event/${data.event.id}/attendees`}
+                    params={selectableParams}
                     maxHeight="max-h-60"
                     showChangeButton={false}
                     getItemSecondaryName={getAttendeeSecondaryName}
@@ -473,7 +495,7 @@ The Organising Committee
             <Alert color="red" class="mb-6">{update_speaker_error}</Alert>
         {/if}
         <div class="flex justify-center">
-            <Button color="primary" type="submit" disabled={!speakerIsSpeaker && !speakerIsChair}>{selected_speaker ? m.speakers_update() : m.speakers_add()}</Button>
+            <Button color="primary" type="submit" disabled={(!speakerIsSpeaker && !speakerIsChair) || paidLookupPending}>{selected_speaker ? m.speakers_update() : m.speakers_add()}</Button>
         </div>
     </form>
 </Modal>

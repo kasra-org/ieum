@@ -1,17 +1,19 @@
 <script>
     import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Button, Badge } from '$lib/components/ui';
-    import { Modal, Heading, Textarea, Select, Label, Input, Alert } from '$lib/components/ui';
+    import { Modal, Heading, Textarea, Select, Label, Input, Alert, Spinner } from '$lib/components/ui';
     import { enhance } from '$app/forms';
+    import { untrack } from 'svelte';
     import { CircleX, Pencil, Plus } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
-    import { getCategoryLabel, matchesSearch } from '$lib/utils.js';
+    import { getCategoryLabel } from '$lib/utils.js';
+    import { PagedList } from '$lib/pagedList.svelte.js';
 
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ConfirmModal from '$lib/components/ConfirmModal.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
-    import SearchableUserList from '$lib/components/SearchableUserList.svelte';
+    import RemoteSearchList from '$lib/components/RemoteSearchList.svelte';
     import { calculateVat, calculateSuppliedAmount } from '$lib/cardPayment.js';
 
     let { data } = $props();
@@ -130,39 +132,29 @@
         return name;
     }
 
-    // Search and pagination
-    let searchTerm = $state('');
-    let currentPage = $state(1);
-    const itemsPerPage = 10;
+    // Search and pagination run on the server, newest payment first; `track`
+    // reloads the page after every save, since each one re-runs the page load.
+    // The "number" search takes the number as shown, "#" and padding included.
+    const list = new PagedList(() => `/api/event/${data.event.id}/payments`);
+    list.track(() => data);
 
-    let payments = $derived(data.payments || []);
-
-    let searchField = $state('all');
     const searchFields = [
-        { value: 'name', name: m.search_name(), get: r => [r.attendee_name, r.attendee_name_ko] },
-        { value: 'email', name: m.search_email(), get: r => r.attendee_email },
-        { value: 'institute', name: m.search_institute(), get: r => [r.attendee_institute, r.attendee_institute_ko] },
-        { value: 'number', name: m.search_number(), get: r => [r.number, String(r.number).padStart(6, '0')] },
+        { value: 'name', name: m.search_name() },
+        { value: 'email', name: m.search_email() },
+        { value: 'institute', name: m.search_institute() },
+        { value: 'number', name: m.search_number() },
     ];
 
-    let filteredPayments = $derived(
-        payments.filter((item) => matchesSearch(item, searchTerm, searchField, searchFields))
-    );
-
-    // Reset to page 1 when search changes
+    // The modals hold the row they were opened with; once the list reloads
+    // after a save, point them at the fresh copy so the note shown is current.
     $effect(() => {
-        searchTerm;
-        currentPage = 1;
+        const items = list.items;
+        untrack(() => {
+            const fresh = (payment) => payment && (items.find(p => p.id === payment.id) ?? payment);
+            selected_payment = fresh(selected_payment);
+            detail_payment = fresh(detail_payment);
+        });
     });
-
-    let totalPages = $derived(Math.ceil(filteredPayments.length / itemsPerPage));
-    let paginatedPayments = $derived(
-        filteredPayments.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-    );
-
-    function handlePageChange(page) {
-        currentPage = page;
-    }
 
 
     // Helper to get attendee display name (for attendee objects, not payment objects)
@@ -195,6 +187,7 @@
     let create_modal = $state(false);
     let create_error = $state('');
     let selected_attendee_id = $state(null);
+    let selected_attendee = $state(null);
     let payment_amount = $state(0);
 
     // Which category the attendee registered under decides the price, so
@@ -212,7 +205,7 @@
     // Picking someone pre-selects the category they registered under, so the
     // common case needs no thought; the admin can still override it.
     $effect(() => {
-        const attendee = data.attendees.find(a => a.id === selected_attendee_id);
+        const attendee = selected_attendee_id !== null ? selected_attendee : null;
         if (!attendee) return;
         payment_category = attendee.category ?? data.event.registration_categories?.[0]?.id ?? null;
         payment_amount = feeForCategory(payment_category);
@@ -244,7 +237,7 @@
         }
     });
 
-    // Custom getters for SearchableUserList (attendee objects)
+    // Custom getters for RemoteSearchList (attendee objects)
     function getAttendeeEmail(attendee) {
         return attendee.user?.email || attendee.user_email || '';
     }
@@ -366,14 +359,35 @@
         { value: '12', name: m.transactions_installmentMonths({ months: 12 }) }
     ];
 
-    // Summary stats
-    let totalCompleted = $derived(payments.filter(p => p.status === 'completed').reduce((sum, p) => sum + p.amount, 0));
-    let totalCancelled = $derived(payments.filter(p => p.status === 'cancelled').reduce((sum, p) => sum + p.amount, 0));
-    let countCompleted = $derived(payments.filter(p => p.status === 'completed').length);
-    let countCancelled = $derived(payments.filter(p => p.status === 'cancelled').length);
+    // Summary cards: the whole event's figures, whatever the search.
+    let totalCompleted = $derived(list.summary.total_completed ?? 0);
+    let totalCancelled = $derived(list.summary.total_cancelled ?? 0);
+    let countCompleted = $derived(list.summary.count_completed ?? 0);
+    let countCancelled = $derived(list.summary.count_cancelled ?? 0);
+    let countAll = $derived(list.summary.count_all ?? 0);
 
-    // CSV Export function
-    function exportToCSV() {
+    // CSV Export function. It always covered every payment, not the search
+    // results, so it asks /export without the search box's terms.
+    let export_error = $state('');
+    // Busy while the payments are fetched, so a second click does not fetch
+    // and download them twice.
+    let csv_exporting = $state(false);
+    async function exportToCSV() {
+        if (csv_exporting) return;
+        csv_exporting = true;
+        export_error = '';
+        let payments;
+        try {
+            const response = await fetch(`${list.url}/export`, { headers: { Accept: 'application/json' } });
+            if (!response.ok) throw new Error(`${response.status}`);
+            payments = await response.json();
+        } catch {
+            export_error = m.common_error();
+            return;
+        } finally {
+            csv_exporting = false;
+        }
+
         // CSV headers
         const headers = [
             m.transactions_id(),
@@ -440,31 +454,37 @@
 <div class="grid grid-cols-3 gap-4 mb-6">
     <div class="bg-green-50 border border-green-200 rounded-lg p-4">
         <div class="text-sm text-green-600">{m.transactions_completedCount()}</div>
-        <div class="text-2xl font-bold text-green-700">{countCompleted}</div>
-        <div class="text-sm text-green-600">{formatAmount(totalCompleted)}</div>
+        <div class="text-2xl font-bold text-green-700">{list.loaded ? countCompleted : (list.error && !list.loading ? '–' : '…')}</div>
+        <div class="text-sm text-green-600">{list.loaded ? formatAmount(totalCompleted) : (list.error && !list.loading ? '–' : '…')}</div>
     </div>
     <div class="bg-red-50 border border-red-200 rounded-lg p-4">
         <div class="text-sm text-red-600">{m.transactions_cancelledCount()}</div>
-        <div class="text-2xl font-bold text-red-700">{countCancelled}</div>
-        <div class="text-sm text-red-600">{formatAmount(totalCancelled)}</div>
+        <div class="text-2xl font-bold text-red-700">{list.loaded ? countCancelled : (list.error && !list.loading ? '–' : '…')}</div>
+        <div class="text-sm text-red-600">{list.loaded ? formatAmount(totalCancelled) : (list.error && !list.loading ? '–' : '…')}</div>
     </div>
     <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
         <div class="text-sm text-blue-600">{m.transactions_totalCount()}</div>
-        <div class="text-2xl font-bold text-blue-700">{payments.length}</div>
+        <div class="text-2xl font-bold text-blue-700">{list.loaded ? countAll : (list.error && !list.loading ? '–' : '…')}</div>
     </div>
 </div>
 
 <div class="flex justify-end gap-2 mb-4">
-    <Button color="light" size="sm" onclick={exportToCSV}>
-        {m.common_exportCSV()}
+    <Button color="light" size="sm" onclick={exportToCSV} disabled={csv_exporting}>
+        {csv_exporting ? '...' : m.common_exportCSV()}
     </Button>
     <Button color="primary" size="sm" onclick={showCreateModal}>
         <Plus class="w-4 h-4 me-2" />
         {m.transactions_createPayment()}
     </Button>
 </div>
+{#if export_error}
+    <Alert color="red" class="mb-4">{export_error}</Alert>
+{/if}
 
-<TableSearch placeholder={m.transactions_searchPlaceholder()} hoverable={true} bind:inputValue={searchTerm} bind:field={searchField} fields={searchFields}>
+{#if list.error && list.items.length > 0}
+    <Alert color="red" class="mb-3">{m.common_error()}</Alert>
+{/if}
+<TableSearch placeholder={m.transactions_searchPlaceholder()} hoverable={true} bind:inputValue={list.search} bind:field={list.field} fields={searchFields}>
     <TableHead>
         <TableHeadCell>{m.transactions_id()}</TableHeadCell>
         <TableHeadCell>{m.transactions_date()}</TableHeadCell>
@@ -476,7 +496,7 @@
         <TableHeadCell class="w-1">{m.transactions_actions()}</TableHeadCell>
     </TableHead>
     <TableBody tableBodyClass="divide-y">
-        {#each paginatedPayments as payment}
+        {#each list.items as payment (payment.id)}
             <TableBodyRow>
                 <TableBodyCell>
                     <button class="text-primary-600 hover:underline cursor-pointer" onclick={() => showDetailModal(payment)}>
@@ -522,15 +542,17 @@
                 </TableBodyCell>
             </TableBodyRow>
         {/each}
-        {#if filteredPayments.length === 0}
+        {#if list.items.length === 0}
             <TableBodyRow>
-                <TableBodyCell colspan="8" class="text-center">{m.transactions_noRecords()}</TableBodyCell>
+                <TableBodyCell colspan="8" class="text-center">
+                    {#if list.loading}<Spinner size="6" />{:else if list.error}{m.common_error()}{:else}{m.transactions_noRecords()}{/if}
+                </TableBodyCell>
             </TableBodyRow>
         {/if}
     </TableBody>
 </TableSearch>
 
-<TablePagination {currentPage} {totalPages} onPageChange={handlePageChange} />
+<TablePagination currentPage={list.page} totalPages={list.totalPages} onPageChange={(p) => list.goto(p)} />
 
 <!-- Create Payment Modal -->
 <Modal id="create_payment_modal" size="lg" title={m.transactions_createPayment()} bind:open={create_modal} outsideclose>
@@ -539,9 +561,12 @@
 
         <div class="mb-4">
             <Label class="block mb-2">{m.transactions_selectAttendee()}*</Label>
-            <SearchableUserList
-                items={data.attendees.filter(a => !data.payments.some(p => p.attendee_id === a.id && p.status === 'completed'))}
+            <!-- Anyone registered, paid-up or not, who has no completed payment yet. -->
+            <RemoteSearchList
+                url={`/api/event/${data.event.id}/attendees`}
+                params={{ status: 'all', has_completed_payment: false }}
                 bind:selectedId={selected_attendee_id}
+                bind:selectedItem={selected_attendee}
                 placeholder={m.transactions_searchAttendeePlaceholder()}
                 noResultsMessage={m.transactions_noAttendeesFound()}
                 getItemName={getAttendeeDisplayName}

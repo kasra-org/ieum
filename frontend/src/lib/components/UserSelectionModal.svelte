@@ -4,11 +4,17 @@
     import { getDisplayInstitute, getDisplayName } from '$lib/utils.js';
     import * as m from '$lib/paraglide/messages.js';
     import SearchableUserList from '$lib/components/SearchableUserList.svelte';
+    import RemoteSearchList from '$lib/components/RemoteSearchList.svelte';
 
     let {
         open = $bindable(false),
         title,
         userList = [],
+        // Search the server instead of `userList` - for lists too big to load:
+        // a relay route answering {items}, with the picker's query parameters.
+        url = null,
+        params = {},
+        getItemId = (item) => item.id,
         action,
         submitLabel,
         error = $bindable(''),
@@ -36,15 +42,31 @@
         <input type="hidden" name="id" value={selectedUserId || ''} />
 
         <div class="mb-6">
-            <SearchableUserList
-                items={userList}
-                bind:selectedId={selectedUserId}
-                maxHeight="max-h-80"
-                showChangeButton={false}
-                getItemName={getDisplayName}
-                getItemInstitute={getDisplayInstitute}
-                getItemEmail={getUserEmail}
-            />
+            {#if url}
+                {#if open}
+                    <RemoteSearchList
+                        {url}
+                        {params}
+                        {getItemId}
+                        bind:selectedId={selectedUserId}
+                        maxHeight="max-h-80"
+                        showChangeButton={false}
+                        getItemName={getDisplayName}
+                        getItemInstitute={getDisplayInstitute}
+                        getItemEmail={getUserEmail}
+                    />
+                {/if}
+            {:else}
+                <SearchableUserList
+                    items={userList}
+                    bind:selectedId={selectedUserId}
+                    maxHeight="max-h-80"
+                    showChangeButton={false}
+                    getItemName={getDisplayName}
+                    getItemInstitute={getDisplayInstitute}
+                    getItemEmail={getUserEmail}
+                />
+            {/if}
         </div>
 
         {#if error}

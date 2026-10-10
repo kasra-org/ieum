@@ -2,7 +2,9 @@
     import { Heading, TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Checkbox, Card } from '$lib/components/ui';
     import { Button, Modal, Label, Input, Select, Textarea, Alert } from '$lib/components/ui';
     import { Tabs, TabItem, Dropdown, DropdownItem } from '$lib/components/ui';
+    import { Spinner } from '$lib/components/ui';
     import { ChevronDown, Download, Pencil, Trash2, UserMinus } from '@lucide/svelte';
+    import { untrack } from 'svelte';
     import { enhance } from '$app/forms';
     import { error } from '@sveltejs/kit';
     import { browser } from '$app/environment';
@@ -10,7 +12,8 @@
     import { apiMessage } from '$lib/apiMessages.js';
     import { getDisplayInstitute, getDisplayName, getPresentationTypeLabel, matchesSearch } from '$lib/utils.js';
     import UserSelectionModal from '$lib/components/UserSelectionModal.svelte';
-    import SearchableUserList from '$lib/components/SearchableUserList.svelte';
+    import RemoteSearchList from '$lib/components/RemoteSearchList.svelte';
+    import { PagedList } from '$lib/pagedList.svelte.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
@@ -35,13 +38,13 @@
         return '';
     }
 
-    // Normalize attendees list for UserSelectionModal
-    const attendeeUserList = $derived(data.attendees.map(a => ({ id: a.id, email: a.user?.email || a.user_email || '', ...a })));
+    // Registrations are searched on the server by the pickers (add reviewer,
+    // add abstract) rather than loaded whole with the page.
+    const attendeesUrl = $derived(`/api/event/${data.event.id}/attendees`);
 
     let searchTermReviewer = $state('');
     let selectedReviewers = $state([]);
     let reviewerCurrentPage = $state(1);
-    let abstractCurrentPage = $state(1);
     const itemsPerPage = 10;
 
     let reviewerSearchField = $state('all');
@@ -62,64 +65,96 @@
         reviewerCurrentPage = 1;
     });
 
-    // The abstract list's search box used to be bound to nothing.
-    let searchTermAbstract = $state('');
-    let abstractSearchField = $state('all');
+    // The abstract table pages, searches and filters by type on the server.
+    // Its search fields are the server's (title, presenter, institute, type).
+    const list = new PagedList(() => `/api/event/${data.event.id}/abstracts`, { filters: { type: '', types: '' } });
+    list.track(() => data);
     const abstractSearchFields = [
-        { value: 'title', name: m.search_title(), get: r => r.title },
-        { value: 'presenter', name: m.search_presenter(), get: r => [getDisplayName(r.attendee), r.attendee?.name, r.attendee?.korean_name] },
-        { value: 'institute', name: m.search_institute(), get: r => [r.attendee?.institute, r.attendee?.institute_ko] },
-        { value: 'type', name: m.search_type(), get: r => getPresentationTypeLabel(r, m) },
+        { value: 'title', name: m.search_title() },
+        { value: 'presenter', name: m.search_presenter() },
+        { value: 'institute', name: m.search_institute() },
+        { value: 'type', name: m.search_type() },
     ];
     // Presentation type filter - the abstract table only; the reviewer table
-    // above keeps its own search. Older rows predate presentation_type and are
-    // read the same way getPresentationTypeLabel reads them.
+    // above keeps its own search. The chip counts come from the server and
+    // cover every abstract whatever the search; a type it leaves out has none.
     const PRESENTATION_TYPES = ['poster', 'short_talk_poster', 'short_talk', 'flash_talk_poster', 'invited'];
-    const typeOf = (r) => r.presentation_type
-        ?? (r.type === 'speaker' ? 'short_talk' : (r.wants_short_talk ? 'short_talk_poster' : 'poster'));
-    let abstractTypeFilter = $state('all');
-    // How many abstracts each type has, so a filter button says what it holds.
-    let abstractTypeCounts = $derived(
-        data.abstracts.reduce((acc, r) => { acc[typeOf(r)] = (acc[typeOf(r)] ?? 0) + 1; return acc; }, {})
-    );
-
-    let filteredAbstracts = $derived(
-        data.abstracts.filter((item) =>
-            (abstractTypeFilter === 'all' || typeOf(item) === abstractTypeFilter)
-            && matchesSearch(item, searchTermAbstract, abstractSearchField, abstractSearchFields))
-    );
+    // The server matches type names in English only; the names on screen may
+    // be Korean. Send the codes whose name, as shown, contains the search, so
+    // typing a type the way it reads here finds it. Set before the debounced
+    // reload fires, and carried by exportAll too.
     $effect(() => {
-        searchTermAbstract;
-        abstractSearchField;
-        abstractTypeFilter;
-        abstractCurrentPage = 1;
+        const term = list.search.trim().toLowerCase();
+        const byType = term && (list.field === 'all' || list.field === 'type');
+        const types = byType
+            ? PRESENTATION_TYPES.filter(t =>
+                getPresentationTypeLabel({ presentation_type: t }, m).toLowerCase().includes(term))
+            : [];
+        // Only a real change: rewriting the same value would still read as a
+        // new request and send the pager back to page 1.
+        untrack(() => {
+            const joined = types.join(',');
+            if (list.filters.types !== joined) list.filters = { ...list.filters, types: joined };
+        });
     });
+    let abstractTypeFilter = $derived(list.filters.type || 'all');
 
-    // Ticked abstract rows. Only those the current filter shows are acted on,
-    // so a row ticked under another filter is never emailed unseen.
+    // Ticked abstract rows, by id across pages. Only those the current filter
+    // shows are acted on, so a row ticked under another filter is never
+    // emailed unseen.
     let selectedAbstracts = $state([]);
-    let activeAbstractSelection = $derived(
-        selectedAbstracts.filter(id => filteredAbstracts.some(a => a.id === id))
+    let pageAllSelected = $derived(
+        list.items.length > 0 && list.items.every(a => selectedAbstracts.includes(a.id))
     );
     const presenterEmail = (r) => r.attendee?.user?.email || r.attendee?.user_email || '';
+    const uniqueEmails = (rows) => [...new Set(rows.map(presenterEmail).filter(Boolean))];
+
+    // The email menu counts people, and the rows behind them are on the
+    // server now: as the menu opens it fetches every abstract the current
+    // type and search match, and the ticked ones are picked out of those -
+    // so both counts, and the recipients, are exact. Null while fetching.
+    let abstract_email_menu = $state(false);
+    let filteredEmailRows = $state(null);
+    let emailRowsError = $state(false);
+    let emailRowsSequence = 0;
+    async function loadEmailRows() {
+        const sequence = ++emailRowsSequence;
+        filteredEmailRows = null;
+        emailRowsError = false;
+        let rows = [];
+        let failed = false;
+        try {
+            rows = await list.exportAll();
+        } catch {
+            // Leave the menu with nobody to send to rather than half a list,
+            // and say why the counts are empty.
+            failed = true;
+        }
+        if (sequence === emailRowsSequence) {
+            filteredEmailRows = rows;
+            emailRowsError = failed;
+        }
+    }
+    $effect(() => {
+        if (abstract_email_menu) untrack(loadEmailRows);
+    });
+    let selectedEmailRows = $derived(
+        filteredEmailRows?.filter(a => selectedAbstracts.includes(a.id)) ?? null
+    );
+    // People, not rows: a row whose presenter has no address on file cannot be
+    // emailed, and counting it would open the window with nobody to send to.
+    let filteredPresenterCount = $derived(filteredEmailRows ? uniqueEmails(filteredEmailRows).length : null);
+    let selectedPresenterCount = $derived(selectedEmailRows ? uniqueEmails(selectedEmailRows).length : null);
+
     let abstract_email_modal = $state(false);
     let abstract_email_scope = $state('selected');
     const showAbstractEmailModal = (scope) => {
         abstract_email_scope = scope;
         abstract_email_modal = true;
     };
-    let abstractEmailRecipients = $derived.by(() => {
-        const rows = abstract_email_scope === 'filtered'
-            ? filteredAbstracts
-            : filteredAbstracts.filter(a => activeAbstractSelection.includes(a.id));
-        return [...new Set(rows.map(presenterEmail).filter(Boolean))].join('; ');
-    });
-    let filteredPresenterCount = $derived(new Set(filteredAbstracts.map(presenterEmail).filter(Boolean)).size);
-    // People, not rows: a row whose presenter has no address on file cannot be
-    // emailed, and counting it would open the window with nobody to send to.
-    let selectedPresenterCount = $derived(new Set(
-        filteredAbstracts.filter(a => activeAbstractSelection.includes(a.id)).map(presenterEmail).filter(Boolean)
-    ).size);
+    let abstractEmailRecipients = $derived(
+        uniqueEmails((abstract_email_scope === 'filtered' ? filteredEmailRows : selectedEmailRows) ?? []).join('; ')
+    );
 
     // Ready-made texts for the presenter email. Rendered per recipient on the
     // server, so one send covers every type: each person reads the paragraph
@@ -152,21 +187,13 @@ The Organising Committee
         filteredReviewers.slice((reviewerCurrentPage - 1) * itemsPerPage, reviewerCurrentPage * itemsPerPage)
     );
 
-    let abstractTotalPages = $derived(Math.ceil(filteredAbstracts.length / itemsPerPage));
-    let paginatedAbstracts = $derived(
-        filteredAbstracts.slice((abstractCurrentPage - 1) * itemsPerPage, abstractCurrentPage * itemsPerPage)
-    );
-
     function handleReviewerPageChange(page) {
         reviewerCurrentPage = page;
     }
 
-    function handleAbstractPageChange(page) {
-        abstractCurrentPage = page;
-    }
-
     // Adding an abstract on a registrant's behalf - one that arrived by email
-    // or on paper. Only registrants without one are offered: one each.
+    // or on paper. Only registrants without one are offered (the server
+    // leaves the others out of the picker's search): one each.
     let add_abstract_modal = $state(false);
     let newAbstractAttendeeId = $state(null);
     let newAbstractTitle = $state('');
@@ -176,10 +203,6 @@ The Organising Committee
     let add_abstract_error = $state('');
     let adding_abstract = $state(false);
     let abstractFileInput = $state(null);
-    const attendeesWithoutAbstract = $derived.by(() => {
-        const taken = new Set(data.abstracts.map(a => a.attendee?.id));
-        return attendeeUserList.filter(a => !taken.has(a.id));
-    });
     const showAddAbstractModal = () => {
         newAbstractAttendeeId = null;
         newAbstractTitle = '';
@@ -299,7 +322,7 @@ The Organising Committee
         }
     };
     const showAbstractDeleteModal = (id) => {
-        selected_abstract = data.abstracts.find((item) => item.id === id);
+        selected_abstract = list.items.find((item) => item.id === id);
         abstract_delete_modal = true;
     };
     const afterUpdateAbstract = () => {
@@ -393,35 +416,45 @@ The Organising Committee
 <Heading tag="h3" class="text-lg font-bold mt-12 mb-3">{m.abstracts_abstractsTitle()}</Heading>
 <div class="flex flex-wrap items-center justify-between gap-3 mb-2">
     <div class="flex flex-wrap items-center gap-2" role="group" aria-label={m.abstracts_filterType()}>
-        <Button size="xs" color={abstractTypeFilter === 'all' ? 'primary' : 'light'} onclick={() => abstractTypeFilter = 'all'}>
-            {m.search_all()} ({data.abstracts.length})
+        <Button size="xs" color={abstractTypeFilter === 'all' ? 'primary' : 'light'} onclick={() => list.setFilter('type', '')}>
+            {m.search_all()} ({list.loaded ? (list.counts.all ?? 0) : (list.error && !list.loading ? '–' : '…')})
         </Button>
         {#each PRESENTATION_TYPES as t}
-            <Button size="xs" color={abstractTypeFilter === t ? 'primary' : 'light'} onclick={() => abstractTypeFilter = t}>
-                {getPresentationTypeLabel({ presentation_type: t }, m)} ({abstractTypeCounts[t] ?? 0})
+            <Button size="xs" color={abstractTypeFilter === t ? 'primary' : 'light'} onclick={() => list.setFilter('type', t)}>
+                {getPresentationTypeLabel({ presentation_type: t }, m)} ({list.loaded ? (list.counts[t] ?? 0) : (list.error && !list.loading ? '–' : '…')})
             </Button>
         {/each}
     </div>
     <div class="flex items-center gap-2">
         <Button color="primary" size="sm" onclick={showAddAbstractModal}>{m.abstracts_addManually()}</Button>
         <Button color="primary" size="sm">{m.abstracts_emailActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
-        <Dropdown class="w-auto list-none p-1">
-            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showAbstractEmailModal('filtered')} disabled={filteredPresenterCount === 0}>
-                {m.abstracts_emailFiltered({ count: filteredPresenterCount })}
+        <Dropdown class="w-auto list-none p-1" bind:open={abstract_email_menu}>
+            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showAbstractEmailModal('filtered')} disabled={!filteredPresenterCount}>
+                {m.abstracts_emailFiltered({ count: filteredPresenterCount ?? '…' })}
             </DropdownItem>
-            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showAbstractEmailModal('selected')} disabled={selectedPresenterCount === 0}>
-                {m.abstracts_emailSelected({ count: selectedPresenterCount })}
+            <DropdownItem class="text-sm whitespace-nowrap" onclick={() => showAbstractEmailModal('selected')} disabled={!selectedPresenterCount}>
+                {m.abstracts_emailSelected({ count: selectedPresenterCount ?? '…' })}
             </DropdownItem>
         </Dropdown>
     </div>
 </div>
-<p class="text-sm text-gray-600 mb-1">{m.abstracts_resultCount({ count: filteredAbstracts.length })}</p>
-<TableSearch placeholder={m.abstracts_searchAbstractPlaceholder()} hoverable={true} bind:inputValue={searchTermAbstract} bind:field={abstractSearchField} fields={abstractSearchFields}>
+{#if emailRowsError}
+    <Alert color="red" class="mb-3">{m.common_error()}</Alert>
+{/if}
+{#if list.loaded}<p class="text-sm text-gray-600 mb-1">{m.abstracts_resultCount({ count: list.total })}</p>{/if}
+{#if list.error && list.items.length > 0}
+    <Alert color="red" class="mb-3">{m.common_error()}</Alert>
+{/if}
+<TableSearch placeholder={m.abstracts_searchAbstractPlaceholder()} hoverable={true} bind:inputValue={list.search} bind:field={list.field} fields={abstractSearchFields}>
     <TableHead>
+        <!-- The rows on this page: the others are not loaded to tick. -->
         <TableHeadCell class="w-1"><Checkbox
-            checked={activeAbstractSelection.length > 0 && activeAbstractSelection.length === filteredAbstracts.length}
+            checked={pageAllSelected}
             onclick={(e) => {
-                selectedAbstracts = e.target.checked ? filteredAbstracts.map(a => a.id) : [];
+                const pageIds = list.items.map(a => a.id);
+                selectedAbstracts = e.target.checked
+                    ? [...new Set([...selectedAbstracts, ...pageIds])]
+                    : selectedAbstracts.filter(id => !pageIds.includes(id));
             }}
         /></TableHeadCell>
         <TableHeadCell>{m.abstracts_title()}</TableHeadCell>
@@ -431,7 +464,7 @@ The Organising Committee
         <TableHeadCell class="w-1">{m.abstracts_actions()}</TableHeadCell>
     </TableHead>
     <TableBody tableBodyClass="divide-y">
-        {#each paginatedAbstracts as row}
+        {#each list.items as row (row.id)}
             <TableBodyRow>
                 <TableBodyCell><Checkbox checked={selectedAbstracts.includes(row.id)} onclick={(e) => {
                     selectedAbstracts = e.target.checked
@@ -471,20 +504,23 @@ The Organising Committee
                 </TableBodyCell>
             </TableBodyRow>
         {/each}
-        {#if filteredAbstracts.length === 0}
+        {#if list.items.length === 0}
             <TableBodyRow>
-                <TableBodyCell colspan="6" class="text-center">{m.abstracts_noRecords()}</TableBodyCell>
+                <TableBodyCell colspan="6" class="text-center">
+                    {#if list.loading}<Spinner size="6" />{:else if list.error}{m.common_error()}{:else}{m.abstracts_noRecords()}{/if}
+                </TableBodyCell>
             </TableBodyRow>
         {/if}
     </TableBody>
 </TableSearch>
 
-<TablePagination currentPage={abstractCurrentPage} totalPages={abstractTotalPages} onPageChange={handleAbstractPageChange} />
+<TablePagination currentPage={list.page} totalPages={list.totalPages} onPageChange={(p) => list.goto(p)} />
 
 <UserSelectionModal
     bind:open={reviewer_modal}
     title={m.abstracts_addReviewer()}
-    userList={attendeeUserList}
+    url={attendeesUrl}
+    params={{ status: 'all' }}
     action="?/add_reviewer"
     submitLabel={m.abstracts_add()}
     bind:error={add_reviwer_error}
@@ -516,8 +552,9 @@ The Organising Committee
 
         <div class="mb-6">
             <Label class="block mb-2">{m.abstracts_registrant()} <span class="text-red-500">*</span></Label>
-            <SearchableUserList
-                items={attendeesWithoutAbstract}
+            <RemoteSearchList
+                url={attendeesUrl}
+                params={{ status: 'all', has_abstract: false }}
                 bind:selectedId={newAbstractAttendeeId}
                 maxHeight="max-h-60"
                 showChangeButton={true}

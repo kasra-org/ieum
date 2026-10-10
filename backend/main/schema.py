@@ -52,14 +52,22 @@ class InstitutionCreateSchema(Schema):
     name_en: str
     name_ko: str = ""
 
+def prefetched(obj, attr, manager):
+    """The list a list endpoint attached as `attr` (Prefetch to_attr), else
+    the related manager's rows - so one schema serves lists and single rows."""
+    rows = getattr(obj, attr, None)
+    return rows if rows is not None else getattr(obj, manager).all()
+
+
 def linked_account(user, provider):
     """The user's linked social account for `provider`, or None.
 
-    Reads socialaccount_set.all() rather than filtering, so a list endpoint that
-    prefetched the accounts pays nothing per user. Filtering bypassed the
-    prefetch and cost a count and a fetch per provider - four queries a user.
+    Picked from the accounts rather than filtered for, so a list endpoint that
+    prefetched them pays nothing per user. Filtering bypassed the prefetch and
+    cost a count and a fetch per provider - four queries a user.
     """
-    return next((a for a in user.socialaccount_set.all() if a.provider == provider), None)
+    accounts = prefetched(user, 'social_accounts', 'socialaccount_set')
+    return next((a for a in accounts if a.provider == provider), None)
 
 
 class UserSchema(Schema):
@@ -135,10 +143,18 @@ class UserSchema(Schema):
 
     @staticmethod
     def resolve_email_verified(user: User) -> bool:
-        # Through emailaddress_set.all() so a prefetching list pays nothing
-        # per user; a filtered query here was one more query for every row.
-        primary = next((e for e in user.emailaddress_set.all() if e.primary), None)
+        # Picked from the addresses so a prefetching list pays nothing per
+        # user; a filtered query here was one more query for every row.
+        addresses = prefetched(user, 'email_addresses', 'emailaddress_set')
+        primary = next((e for e in addresses if e.primary), None)
         return primary.verified if primary else False
+
+
+class UserPageSchema(Schema):
+    items: List[UserSchema]
+    total: int
+    offset: int
+    limit: int
 
 
 class PublicUserSchema(Schema):
@@ -243,7 +259,7 @@ class EventSchema(Schema):
 
     @staticmethod
     def resolve_organizers(obj):
-        return obj.organizer_set.all()
+        return obj.organizers
 
     @staticmethod
     def resolve_registration_categories(event) -> list:
@@ -350,7 +366,7 @@ class EventAdminSchema(Schema):
 
     @staticmethod
     def resolve_organizers(obj):
-        return obj.organizer_set.all()
+        return obj.organizers
 
     @staticmethod
     def resolve_registration_categories(event) -> list:
@@ -360,6 +376,9 @@ class EventAdminSchema(Schema):
 class RegistrationStatusSchema(Schema):
     registered: bool
     payment_status: Union[str, None] = None  # 'pending', 'completed', or None (free event/not registered)
+    # Every event page asks this to label its abstract button, so it is
+    # answered here rather than by fetching the abstract itself.
+    abstract_submitted: bool = False
 
 class QuestionSchema(Schema):
     id: int
@@ -408,6 +427,10 @@ class AttendeeSchema(Schema):
     @staticmethod
     def resolve_category(da: Attendee):
         return da.category_id
+
+    @staticmethod
+    def resolve_custom_answers(da: Attendee) -> list:
+        return prefetched(da, 'answer_list', 'custom_answers')
 
     @staticmethod
     def resolve_registration_fee(da: Attendee) -> int:
@@ -459,6 +482,10 @@ class SpeakerSchema(Schema):
     is_speaker: bool
     is_chair: bool
     type: str
+    # The three below are matched to the speaker's registration by address, as
+    # the fee exemption is, and set on each row by get_speakers_for_admin from
+    # one lookup for the whole event rather than queried per speaker.
+
     # Whether this speaker has registered yet, so the admin table can say so
     # next to the exemption tick.
     is_registered: bool = False
@@ -467,29 +494,9 @@ class SpeakerSchema(Schema):
     # since waiving a settled fee would report the registration as free.
     has_paid: bool = False
 
-    @staticmethod
-    def resolve_is_registered(speaker) -> bool:
-        from main.models import attendees_for_email
-        return bool(attendees_for_email(speaker.event, speaker.email))
-
-    @staticmethod
-    def resolve_has_paid(speaker) -> bool:
-        from main.models import has_paid_for
-        return has_paid_for(speaker.event, speaker.email)
-
-    # The abstract they submitted for this event, if any - matched through
-    # their registration by address, as the fee exemption is. Admin-only: the
+    # The abstract they submitted for this event, if any. Admin-only: the
     # public speaker list carries none of this.
     abstract_title: str = ''
-
-    @staticmethod
-    def resolve_abstract_title(speaker) -> str:
-        from main.models import Abstract, attendees_for_email
-        attendees = attendees_for_email(speaker.event, speaker.email)
-        if not attendees:
-            return ''
-        abstract = Abstract.objects.filter(event=speaker.event, attendee__in=attendees).first()
-        return abstract.title if abstract else ''
 
 class AttendeeUpdateSchema(Schema):
     """An attendee update's answer: the saved row comes back with it, so the
@@ -555,28 +562,21 @@ class AbstractSchema(Schema):
         return full_path
     
 class AbstractUserSchema(Schema):
-    """Schema for user's own abstract - excludes votes"""
+    """Schema for user's own abstract - excludes votes.
+
+    `body` is the file converted to HTML, and is only filled in when the
+    caller asks for it (get_user_abstract's include_body) - converting is the
+    expensive part, and only the author's preview shows it.
+    """
     id: int
     attendee: AttendeeSchema
     title: str
-    body: str
+    body: Optional[str] = None
     type: str
     wants_short_talk: bool
     presentation_type: str
     is_reviewable: bool
     link: str
-    @staticmethod
-    def resolve_body(abstract: Abstract) -> str:
-        from django.conf import settings
-        import os
-        full_path = os.path.join(settings.MEDIA_ROOT, abstract.file_path)
-        try:
-            if full_path.endswith(".docx"):
-                return docx_to_html(full_path)
-            elif full_path.endswith(".odt"):
-                return odt_to_html(full_path)
-        except:
-            return "An error occured while trying to convert the file to HTML. Please contact the administrator."
     @staticmethod
     def resolve_link(abstract: Abstract) -> str:
         from django.conf import settings
@@ -885,6 +885,63 @@ class ApiKeySchema(Schema):
     name: str
     prefix: str
     user_id: int
+    # Who the key acts as, so the table can name them without the account list.
+    user_email: str = ''
     created_at: datetime
     last_used_at: Optional[datetime] = None
     revoked_at: Optional[datetime] = None
+
+    @staticmethod
+    def resolve_user_email(key) -> str:
+        return key.user.email if key.user_id else ''
+
+
+# ── Pages ───────────────────────────────────────────────────────────────────
+# Every paginated list answers {items, total, offset, limit}; `counts` and
+# `summary` are figures over the whole list, before the search narrows it, for
+# the filter chips and totals a table shows above its rows.
+
+class AttendeePageSchema(Schema):
+    items: List[AttendeeSchema]
+    total: int
+    offset: int
+    limit: int
+    counts: dict = {}
+
+
+class AbstractPageSchema(Schema):
+    items: List[AbstractShortSchema]
+    total: int
+    offset: int
+    limit: int
+    counts: dict = {}
+
+
+class OnSiteAttendeePageSchema(Schema):
+    items: List[OnSiteAttendeeSchema]
+    total: int
+    offset: int
+    limit: int
+    counts: dict = {}
+
+
+class EventPaymentPageSchema(Schema):
+    items: List[EventPaymentSchema]
+    total: int
+    offset: int
+    limit: int
+    summary: dict = {}
+
+
+class EventAdminPageSchema(Schema):
+    items: List[EventAdminSchema]
+    total: int
+    offset: int
+    limit: int
+
+
+class InstitutionPageSchema(Schema):
+    items: List[InstitutionSchema]
+    total: int
+    offset: int
+    limit: int

@@ -267,9 +267,8 @@ def cleanup_media_files(min_age_hours=24):
     file_pattern = re.compile(r'/media/(editor/(?:images|attachments)/[^"\'\s\)]+)')
 
     # Check Event descriptions
-    for event in Event.objects.exclude(description=''):
-        matches = file_pattern.findall(event.description)
-        referenced_files.update(matches)
+    for description in Event.objects.exclude(description='').values_list('description', flat=True):
+        referenced_files.update(file_pattern.findall(description))
 
     # Email template bodies carry the same uploads - an image inlined in a
     # confirmation email is only referenced from here, and deleting it would

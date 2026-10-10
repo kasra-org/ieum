@@ -15,21 +15,16 @@ export async function load({ parent, params, cookies }) {
 
     if (rtn.user) {
         const response_registered = await get(`api/event/${params.slug}/registered`, cookies); // true if registered, false if not
+        // Whether they submitted an abstract comes with it: only the button
+        // label needs it, so the abstract itself is not fetched on every page.
+        // Only for internal abstract management.
+        rtn.abstract_submitted = false;
         if (response_registered.ok && response_registered.status === 200) {
             rtn.registered = response_registered.data.registered;
             rtn.payment_status = response_registered.data.payment_status;
-        }
-
-        // Check if user has submitted an abstract (only for internal abstract management)
-        if (rtn.event.accepts_abstract && rtn.event.abstract_submission_type !== 'external') {
-            const response_abstract = await get(`api/event/${params.slug}/abstract`, cookies);
-            if (response_abstract.ok && response_abstract.status === 200) {
-                rtn.abstract_submitted = true;
-            } else {
-                rtn.abstract_submitted = false;
-            }
-        } else {
-            rtn.abstract_submitted = false;
+            rtn.abstract_submitted = Boolean(
+                rtn.event.accepts_abstract && rtn.event.abstract_submission_type !== 'external'
+                && response_registered.data.abstract_submitted);
         }
     }
 

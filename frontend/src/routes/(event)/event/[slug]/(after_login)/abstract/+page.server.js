@@ -7,7 +7,8 @@ export async function load({ parent, params, cookies }) {
 
     if (rtn.user) {
         rtn.abstract_submitted = false;
-        const response_abstract = await get(`api/event/${params.slug}/abstract`, cookies);
+        // The preview below the title shows the converted file, so ask for it.
+        const response_abstract = await get(`api/event/${params.slug}/abstract?include_body=true`, cookies);
         if (response_abstract.ok && response_abstract.status === 200) {
             rtn.abstract_submitted = true;
             rtn.abstract = response_abstract.data;

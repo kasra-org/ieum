@@ -120,6 +120,7 @@
         <Input
             type="text"
             bind:value={searchKeyword}
+            onkeydown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
             placeholder={placeholder || m.userSelection_searchPlaceholder()}
             class="pl-10"
         />

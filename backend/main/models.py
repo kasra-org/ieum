@@ -1,5 +1,7 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import prefetch_related_objects
+from django.db.models.functions import Upper
 
 def default_main_languages():
     return ['en']
@@ -50,6 +52,15 @@ class User(AbstractUser):
     # Test account created by an admin rather than by someone signing up. Marked
     # so real registrations stay distinguishable from throwaway ones.
     is_guest = models.BooleanField(default=False)
+
+    class Meta(AbstractUser.Meta):
+        indexes = [
+            # Accounts are looked up by address case-insensitively - by allauth
+            # at login and signup, and by the admin's people search. On
+            # PostgreSQL email__iexact compares UPPER(email), which a plain
+            # index on the column cannot serve.
+            models.Index(Upper('email'), name='main_user_email_upper_idx'),
+        ]
 
     @property
     def name(self):
@@ -196,8 +207,15 @@ class Attendee(models.Model):
         """
         if self.registration_fee <= 0:
             return 'free'
-        paid = any(p.status == 'completed' for p in self.payments.all())
+        paid = any(p.status == 'completed' for p in self.payment_records)
         return 'paid' if paid else 'pending'
+
+    @property
+    def payment_records(self):
+        """This registration's payments: the list a list endpoint attached
+        (Prefetch to_attr='payment_list'), else the related manager."""
+        records = getattr(self, 'payment_list', None)
+        return records if records is not None else self.payments.all()
 
     @property
     def has_outstanding_payment(self):
@@ -385,13 +403,39 @@ class Event(models.Model):
         query rather than one per attendee.
         """
         if not hasattr(self, '_exempt_speaker_emails'):
-            self._exempt_speaker_emails = {
-                email.strip().lower()
-                for email in self.speakers.filter(is_payment_exempt=True)
-                                  .values_list('email', flat=True)
-                if email and email.strip()
-            }
+            Event.prime_exempt_speaker_emails([self])
         return self._exempt_speaker_emails
+
+    @staticmethod
+    def prime_exempt_speaker_emails(events):
+        """Fill exempt_speaker_emails for several events in one query.
+
+        For lists that span events - a user's registration history - where
+        each row would otherwise read its own event's speaker list.
+        """
+        events = [e for e in events if not hasattr(e, '_exempt_speaker_emails')]
+        if not events:
+            return
+        by_event = {e.id: set() for e in events}
+        rows = (Speaker.objects.filter(event__in=events, is_payment_exempt=True)
+                .values_list('event_id', 'email'))
+        for event_id, email in rows:
+            if email and email.strip():
+                by_event[event_id].add(email.strip().lower())
+        for event in events:
+            event._exempt_speaker_emails = by_event[event.id]
+
+    @property
+    def organizers(self):
+        """organizer_set, read once per instance.
+
+        The English and Korean lines and the API schema each walk the list;
+        prefetching it on first use lets them share one query, and a queryset
+        that already prefetched it pays nothing.
+        """
+        if 'organizer_set' not in getattr(self, '_prefetched_objects_cache', {}):
+            prefetch_related_objects([self], 'organizer_set')
+        return self.organizer_set.all()
 
     @property
     def has_onsite_fee(self):
@@ -411,7 +455,7 @@ class Event(models.Model):
     def organizers_en(self):
         """Return formatted organizers in English: Name (Affiliation)"""
         organizer_list = []
-        for org in self.organizer_set.all():
+        for org in self.organizers:
             name = org.name
             # An organization hosts under its own name, so it never gets the
             # "Name (Affiliation)" treatment even if a stale value lingers.
@@ -425,7 +469,7 @@ class Event(models.Model):
     def organizers_ko(self):
         """Return formatted organizers in Korean: 한글이름 (기관명)"""
         organizer_list = []
-        for org in self.organizer_set.all():
+        for org in self.organizers:
             name = org.korean_name if org.korean_name else org.name
             affiliation = org.affiliation_ko if org.affiliation_ko else org.affiliation
             if org.is_organization:
@@ -548,6 +592,15 @@ class Abstract(models.Model):
     # in competition, so they are not scored.
     NON_REVIEWABLE_PRESENTATION_TYPES = ('invited',)
 
+    class Meta:
+        indexes = [
+            # Caddy asks /api/media-auth/abstract before serving any abstract
+            # file, which finds the abstract by its folder - a prefix match.
+            # A LIKE 'x%' needs the pattern opclass to use an index.
+            models.Index(fields=['file_path'], name='main_abstract_file_path_idx',
+                         opclasses=['varchar_pattern_ops']),
+        ]
+
     @property
     def is_reviewable(self):
         return self.presentation_type not in self.NON_REVIEWABLE_PRESENTATION_TYPES
@@ -665,7 +718,8 @@ class PaymentHistory(models.Model):
     # Gateway identifiers. Historically named after Toss; also reused for the
     # PayPal order/capture pair and the NicePay Moid/TID pair.
     toss_payment_key = models.CharField(max_length=200, blank=True, null=True)
-    toss_order_id = models.CharField(max_length=64, blank=True, null=True)  # Our generated order ID
+    # Our generated order ID. Indexed: receipts are looked up by it.
+    toss_order_id = models.CharField(max_length=64, blank=True, null=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Copied attendee information for receipts (preserved even if attendee is deleted)
@@ -1305,6 +1359,100 @@ def attendees_for_email(event, email):
         .filter(models.Q(user__email__iexact=email) | models.Q(user_email__iexact=email))
         .select_related('event')
     )
+
+
+def attendee_addresses(event):
+    """(id, account address, kept address) for each registration on `event`.
+
+    Three short columns, so a filter that must agree with Python's own
+    reading of an address - Attendee.email strips and lower-cases it, and
+    PostgreSQL's UPPER/LOWER/BTRIM fold some characters differently - can
+    decide in Python which ids match and then select those ids in SQL.
+
+    Read once per event instance: a list request filters, counts and
+    excludes with it several times over.
+    """
+    if not hasattr(event, '_attendee_addresses'):
+        event._attendee_addresses = list(event.attendees.values_list('id', 'user__email', 'user_email'))
+    return event._attendee_addresses
+
+
+def contact_address(account_email, kept_email):
+    """Attendee.email from the two stored addresses, lower-cased."""
+    return ((account_email or '') or kept_email or '').strip().lower()
+
+
+def with_payment_state(attendees, event):
+    """`attendees` annotated with `is_free` and `has_paid`, computed in SQL.
+
+    The database form of Attendee.payment_status, so a list can be filtered
+    and counted by it a page at a time: 'free' is is_free, 'paid' is has_paid
+    on a charged registration, and 'pending' - owing money - is neither. Free
+    means what registration_fee says: waived, uncharged category, or the
+    address is on the speaker list's exemptions.
+    """
+    free = models.Q(fee_waived=True) | models.Q(category__isnull=True) | models.Q(category__fee__lte=0)
+    exempt = event.exempt_speaker_emails
+    if exempt:
+        # Matched as is_fee_exempt matches, address by address in Python.
+        if not hasattr(event, '_exempt_attendee_ids'):
+            event._exempt_attendee_ids = [pk for pk, account, kept in attendee_addresses(event)
+                                          if contact_address(account, kept) in exempt]
+        free |= models.Q(id__in=event._exempt_attendee_ids)
+    return attendees.annotate(
+        is_free=models.Case(
+            models.When(free, then=models.Value(True)),
+            default=models.Value(False), output_field=models.BooleanField()),
+        has_paid=models.Exists(PaymentHistory.objects.filter(
+            attendee=models.OuterRef('pk'), status='completed')),
+    )
+
+
+# The payment states as filters over with_payment_state: on the roster, or
+# still owing money (the unpaid tab).
+REGISTERED_Q = models.Q(is_free=True) | models.Q(has_paid=True)
+UNPAID_Q = models.Q(is_free=False, has_paid=False)
+
+
+def registrations_by_email(event, emails=None):
+    """Registrations on `event`, keyed by lowercased address.
+
+    The bulk form of attendees_for_email, for lists that look up one address
+    per row: a registration is filed under both its account address and the
+    copy kept on it, so either finds it. Each comes with its account and
+    category, its payments as `payment_list` and its abstracts as
+    `abstract_list`, and shares `event`, so reading its fee or abstract costs
+    nothing more.
+
+    `emails` limits it to the registrations those addresses could match -
+    thirty speakers need not load an event's two thousand registrations.
+    """
+    index = {}
+    rows = (event.attendees.order_by('id')
+            .select_related('user', 'category')
+            .prefetch_related(models.Prefetch('payments', to_attr='payment_list'),
+                              models.Prefetch('abstracts', to_attr='abstract_list')))
+    if emails is not None:
+        # Chosen with the very keys the index below files them under, so a
+        # row the filter keeps is always found by its address, and none is
+        # dropped by SQL case-folding a character differently from Python.
+        wanted = {e.strip().lower() for e in emails if e and e.strip()}
+        if not wanted:
+            return index
+        rows = rows.filter(id__in=[pk for pk, account, kept in attendee_addresses(event)
+                                   if (account or '').lower() in wanted or (kept or '').lower() in wanted])
+    for attendee in rows:
+        attendee.event = event
+        keys = {(attendee.user.email if attendee.user_id else '').lower(),
+                (attendee.user_email or '').lower()}
+        for key in keys - {''}:
+            index.setdefault(key, []).append(attendee)
+    return index
+
+
+def lookup_registrations(index, email):
+    """attendees_for_email, answered from a registrations_by_email index."""
+    return index.get((email or '').strip().lower(), [])
 
 
 

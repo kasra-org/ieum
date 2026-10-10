@@ -71,7 +71,7 @@ def send(event, emails, subject, body, fee_waived, invited_by, attachments=None,
             invited_by=invited_by,
         )
         context = template_context(invitation)
-        send_mail.delay(
+        send_mail.delay_on_commit(
             render_email_template(subject, context),
             render_email_template(body, context),
             email,
@@ -196,7 +196,7 @@ def send_registration_confirmation(event, attendee, to):
         return
     context = {'event': event, 'attendee': attendee}
     reply_to = event.main_admin.email if event.main_admin else None
-    send_mail.delay(
+    send_mail.delay_on_commit(
         render_email_template(template.subject, context),
         render_email_template(template.body, context),
         to,
