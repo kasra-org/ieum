@@ -1374,10 +1374,13 @@ def admin_attendee_rows(queryset):
     The admin page reloads every list after each save, so a query per row
     made each save slower the larger the event: the account and its
     institute, linked social accounts, custom answers and their questions,
-    and payments are all fetched here in a fixed number of queries.
+    and payments are all fetched here in a fixed number of queries - and
+    whether each has submitted an abstract, in the same one as the rows.
     """
     return (queryset
             .select_related('category', 'user__institute')
+            .annotate(has_abstract=Exists(Abstract.objects.filter(
+                attendee=OuterRef('pk'), event=OuterRef('event_id'))))
             .prefetch_related(*attendee_prefetches()))
 
 
@@ -1657,6 +1660,18 @@ def update_attendee(request, event_id: int, attendee_id: int):
 
     if "fee_waived" in data:
         attendee.fee_waived = bool(data.get("fee_waived", False))
+
+    # The roles an admin gives; the speaker list's own are added on top
+    # whatever is stored here. Kept in display order, each once.
+    if "roles" in data:
+        roles = data["roles"] if data["roles"] is not None else []
+        if not isinstance(roles, list) or any(not isinstance(r, str) or r not in Attendee.ROLES for r in roles):
+            return api.create_response(
+                request,
+                {"code": "invalid_role", "message": "Invalid attendee type"},
+                status=400,
+            )
+        attendee.roles = [r for r in Attendee.ROLES if r in roles]
 
     # Any of this event's categories, retired ones included: an admin moving
     # someone is not a registrant picking from what is on offer. A category

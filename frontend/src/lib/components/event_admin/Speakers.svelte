@@ -7,7 +7,7 @@
     import { error } from '@sveltejs/kit';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
-    import { getDisplayInstitute, getDisplayName, matchesSearch } from '$lib/utils.js';
+    import { downloadTsv, getDisplayInstitute, getDisplayName, matchesSearch } from '$lib/utils.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import RemoteSearchList from '$lib/components/RemoteSearchList.svelte';
@@ -134,8 +134,8 @@
     let modalPersonPaid = $derived(Boolean(selected_speaker?.has_paid) || typedEmailPaid);
 
     const roleLabel = (row) =>
-        [row.is_speaker && m.speakers_roleSpeaker(), row.is_chair && m.speakers_roleChair()]
-            .filter(Boolean).join(' · ');
+        [row.is_chair && m.speakers_roleChair(), row.is_speaker && m.speakers_roleSpeaker()]
+            .filter(Boolean).join('/');
 
     // Toggling the tick in the table posts the speaker unchanged except for the
     // exemption, so the row is the control rather than a trip through the modal.
@@ -252,6 +252,38 @@
         }
     };
 
+    // The whole list, in both languages whatever the page is shown in: a
+    // programme or a certificate may need either name and affiliation.
+    const exportSpeakersAsCSV = () => {
+        const yesNo = (value) => value ? m.common_yes() : m.common_no();
+        downloadTsv([
+            [
+                m.speakers_nameEn(), m.speakers_nameKo(),
+                m.speakers_email(),
+                m.speakers_affiliationEn(), m.speakers_affiliationKo(),
+                m.speakers_domestic(),
+                m.speakers_role(),
+                m.speakers_type(),
+                m.speakers_paymentExempt(),
+                m.speakers_registered(),
+                m.speakers_alreadyPaid(),
+                m.speakers_abstract(),
+            ],
+            ...data.speakers.map(row => [
+                row.name, row.korean_name,
+                row.email,
+                row.affiliation, row.affiliation_ko,
+                yesNo(row.is_domestic),
+                roleLabel(row),
+                format_type(row.type),
+                yesNo(row.is_payment_exempt && !row.has_paid),
+                yesNo(row.is_registered),
+                yesNo(row.has_paid),
+                row.abstract_title,
+            ]),
+        ], 'speakers');
+    };
+
 
     let send_email_modal = $state(false);
     let invite_modal = $state(false);
@@ -309,6 +341,7 @@ The Organising Committee
     </Dropdown>
     <Button color="primary" size="sm" onclick={() => invite_modal = true}>{m.speakers_inviteByEmail()}</Button>
     <Button color="primary" size="sm" onclick={addSpeakerModal}>{m.speakers_addSpeaker()}</Button>
+    <Button color="primary" size="sm" onclick={exportSpeakersAsCSV} disabled={data.speakers.length === 0}>{m.speakers_exportCSV()}</Button>
 </div>
 <div class="flex flex-wrap items-center gap-2 mt-4" role="group" aria-label={m.speakers_role()}>
     {#each roleFilters as f}

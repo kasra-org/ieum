@@ -219,6 +219,9 @@ export const actions = {
             // Only the admin modals carry this; leaving it out keeps the
             // category as it is.
             category: formdata.has('category') ? formdata.get('category') : undefined,
+            // The roles ticked in the attendee modal; the speaker list's own
+            // are added on top by the server.
+            roles: formdata.has('roles_present') ? formdata.getAll('roles') : undefined,
         }, cookies);
 
         if (response.ok && response.status === 200) {

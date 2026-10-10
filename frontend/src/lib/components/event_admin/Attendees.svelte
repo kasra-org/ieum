@@ -10,7 +10,7 @@
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
     import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
-    import { getCategoryLabel, toTsv } from '$lib/utils.js';
+    import { getCategoryLabel, downloadTsv } from '$lib/utils.js';
     import { PagedList } from '$lib/pagedList.svelte.js';
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
@@ -85,6 +85,34 @@
         return item.institute;
     }
 
+    // The roles an admin gave, plus speaker and chair as the speaker list has
+    // them - the same address the fee exemption matches - in this order;
+    // none is a general participant. Each label takes the language, so the
+    // CSV can carry both whatever the page is shown in.
+    const ROLES = ['organizer', 'chair', 'speaker', 'staff'];
+    const ROLE_LABELS = {
+        organizer: (languageTag) => m.attendees_roleOrganizer({}, { languageTag }),
+        chair: (languageTag) => m.speakers_roleChair({}, { languageTag }),
+        speaker: (languageTag) => m.speakers_roleSpeaker({}, { languageTag }),
+        staff: (languageTag) => m.attendees_roleStaff({}, { languageTag }),
+    };
+    // A role the speaker list gives: shown ticked in the modal, and changed
+    // there rather than here.
+    const listedRole = (item, role) =>
+        (role === 'speaker' && item.is_speaker) || (role === 'chair' && item.is_chair);
+    const rolesOf = (item) => ROLES.filter(r => (item.roles ?? []).includes(r) || listedRole(item, r));
+    const roleLabel = (item, lang) =>
+        rolesOf(item).map(r => ROLE_LABELS[r](lang)).join('/') || m.attendees_roleGeneral({}, { languageTag: lang });
+    // What this registration is charged: exempt (speaker list or a waiver),
+    // free (a free category), or the category's fee.
+    const feeLabel = (item) => {
+        if (item.is_fee_exempt) return m.attendees_feeExempt();
+        if (!item.registration_fee) return m.attendees_feeFree();
+        const amount = item.registration_fee.toLocaleString('ko-KR');
+        return languageTag() === 'ko' ? `${amount} 원` : `KRW ${amount}`;
+    };
+    const abstractMark = (item) => item.has_abstract ? 'O' : 'X';
+
     // The server hands rows over ordered by id already.
     function transformToTableFormat(attendees) {
         // Extract all unique questions object
@@ -115,6 +143,14 @@
                 category: item.category,
                 category_name: item.category_name,
                 category_name_ko: item.category_name_ko,
+                role: roleLabel(item, languageTag()),
+                role_ko: roleLabel(item, 'ko'),
+                role_en: roleLabel(item, 'en'),
+                roles: item.roles,
+                fee: feeLabel(item),
+                abstract: abstractMark(item),
+                is_speaker: item.is_speaker,
+                is_chair: item.is_chair,
                 name: getDisplayName(item),
                 first_name: item.first_name,
                 middle_initial: item.middle_initial,
@@ -175,16 +211,19 @@
             csv_exporting = false;
         }
 
-        const currentLang = languageTag();
-        const isKorean = currentLang === 'ko';
-
-        // Build headers based on UI language
+        // Both languages, whatever the page is shown in: the list goes to
+        // name tags, programmes and reports in either, and a Korean-only
+        // export left the English names to be typed back in by hand.
         const headers = [
             m.attendees_id(),
-            ...(isKorean ? [m.attendees_koreanName()] : [m.attendees_firstName(), m.attendees_middleInitial(), m.attendees_lastName()]),
+            m.attendees_roleKo(), m.attendees_roleEn(),
+            m.attendees_fee(),
+            m.attendees_abstractSubmitted(),
+            m.attendees_firstName(), m.attendees_middleInitial(), m.attendees_lastName(),
+            m.attendees_koreanName(),
             m.attendees_email(),
             m.attendees_nationality(),
-            m.attendees_institute(),
+            m.attendees_instituteEn(), m.attendees_instituteKo(),
             m.attendees_department(),
             m.attendees_jobTitle(),
             m.attendees_disability(),
@@ -192,13 +231,16 @@
             ...custom_headers.map(q => q.replace(/\n/, ' ').replace(/\s+/g, ' '))
         ];
 
-        // Build data rows based on UI language
         const dataRows = table_data.map(row => [
             row.id,
-            ...(isKorean ? [row.korean_name || row.name] : [row.first_name, row.middle_initial, row.last_name]),
+            row.role_ko, row.role_en,
+            row.fee,
+            row.abstract,
+            row.first_name, row.middle_initial, row.last_name,
+            row.korean_name,
             row.email,
             stringify_nationality(row.nationality),
-            row.institute,
+            row.institute_en, row.institute_ko,
             row.department,
             row.job_title,
             row.disability,
@@ -206,28 +248,7 @@
             ...row.custom_answers.map(answer => answer ? answer.answer.replace(/^- /, '').replace(/\n- /g, '; ') : "")
         ]);
 
-        const csv = toTsv([headers, ...dataRows]);
-
-        // Convert to UTF-16 LE with BOM for Excel compatibility
-        const BOM = '\uFEFF';
-        const csvWithBOM = BOM + csv;
-
-        // Encode to UTF-16 LE
-        const buffer = new ArrayBuffer(csvWithBOM.length * 2);
-        const view = new Uint16Array(buffer);
-        for (let i = 0; i < csvWithBOM.length; i++) {
-            view[i] = csvWithBOM.charCodeAt(i);
-        }
-
-        const blob = new Blob([buffer], { type: 'text/csv;charset=utf-16le;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        // Get current timestamp in YYYY-MM-DD_HH-MM-SS format
-        const timestamp = new Date().toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '-');
-        a.href = url;
-        a.download = `attendees_${timestamp}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadTsv([headers, ...dataRows], 'attendees');
     };
 
     // Selection is by id, so it survives paging and searching.
@@ -820,8 +841,11 @@
         </TableHeadCell>
         <TableHeadCell>{m.attendees_id()}</TableHeadCell>
         <TableHeadCell class="w-1">{m.attendees_attended()}</TableHeadCell>
+        <TableHeadCell>{m.attendees_role()}</TableHeadCell>
         <TableHeadCell>{m.attendees_name()}</TableHeadCell>
         <TableHeadCell>{m.attendees_tier()}</TableHeadCell>
+        <TableHeadCell>{m.attendees_fee()}</TableHeadCell>
+        <TableHeadCell class="w-1 whitespace-nowrap">{m.attendees_abstractSubmitted()}</TableHeadCell>
         <TableHeadCell>{m.attendees_email()}</TableHeadCell>
         <TableHeadCell>{m.attendees_nationality()}</TableHeadCell>
         <TableHeadCell>{m.attendees_institute()}</TableHeadCell>
@@ -853,8 +877,11 @@
                         <CircleCheck class="w-5 h-5 {row.is_attended ? 'text-green-500' : 'text-gray-300'}" />
                     </button>
                 </TableBodyCell>
+                <TableBodyCell class="whitespace-nowrap">{row.role}</TableBodyCell>
                 <TableBodyCell>{row.name}</TableBodyCell>
                 <TableBodyCell>{getCategoryLabel(row, languageTag())}</TableBodyCell>
+                <TableBodyCell class="whitespace-nowrap">{row.fee}</TableBodyCell>
+                <TableBodyCell class="text-center">{row.abstract}</TableBodyCell>
                 <TableBodyCell>{row.email}</TableBodyCell>
                 <TableBodyCell>{stringify_nationality(row.nationality)}</TableBodyCell>
                 <TableBodyCell>{row.institute}</TableBodyCell>
@@ -897,7 +924,7 @@
         {#if table_data_attendees.length === 0}
             <TableBodyRow>
                 <TableBodyCell colspan={
-                    expand_attendees ? custom_headers_attendees.length + 14 : 9
+                    expand_attendees ? custom_headers_attendees.length + 17 : 12
                 } class="text-center">{#if list.loading}<Spinner size="6" />{:else if list.error}{m.common_error()}{:else}{m.attendees_noRecords()}{/if}</TableBodyCell>
             </TableBodyRow>
         {/if}
@@ -910,9 +937,30 @@
     <form method="post" action="?/update_attendee" use:enhance={afterSuccessfulSubmitDefaultAnswerChanges}>
         <input type="hidden" name="id" value={selected_row.id} />
         <Heading tag="h2" class="text-lg font-bold pt-3 mb-6">{m.attendees_basicInformation()}</Heading>
-        <div class="mb-6">
-            <Label for="attendee_category" class="block mb-2">{m.attendees_tier()}</Label>
-            <Select id="attendee_category" name="category" value={selected_row.category ?? ''} items={categoryOptions(selected_row)} />
+        <div class="grid gap-6 mb-6 md:grid-cols-2">
+            <div>
+                <Label for="attendee_category" class="block mb-2">{m.attendees_tier()}</Label>
+                <Select id="attendee_category" name="category" value={selected_row.category ?? ''} items={categoryOptions(selected_row)} />
+            </div>
+            <div>
+                <Label class="block mb-2">{m.attendees_role()}</Label>
+                <input type="hidden" name="roles_present" value="1" />
+                <div class="flex flex-wrap gap-x-6 gap-y-2 pt-2">
+                    {#each ROLES as role (role)}
+                        {#if listedRole(selected_row, role)}
+                            <!-- From the speaker list: a disabled box sends nothing,
+                                 so a role also given here is kept as it was. -->
+                            <Checkbox checked disabled>{ROLE_LABELS[role](languageTag())}</Checkbox>
+                            {#if selected_row.roles?.includes(role)}<input type="hidden" name="roles" value={role} />{/if}
+                        {:else}
+                            <Checkbox name="roles" value={role} checked={selected_row.roles?.includes(role) ?? false}>{ROLE_LABELS[role](languageTag())}</Checkbox>
+                        {/if}
+                    {/each}
+                </div>
+                {#if listedRole(selected_row, 'speaker') || listedRole(selected_row, 'chair')}
+                    <p class="mt-2 text-xs text-gray-500">{m.attendees_roleFromSpeakerList()}</p>
+                {/if}
+            </div>
         </div>
         <RegistrationForm data={selected_row} config={form_config} institution_resolved={edit_institution_resolved} />
         {#if message_default_answer_changes.type === 'success'}

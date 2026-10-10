@@ -149,6 +149,14 @@ class Attendee(models.Model):
     # are exempt through the speaker list instead, so this stays False for them.
     fee_waived = models.BooleanField(default=False)
 
+    # The roles an event admin gave this person, for the admin table's "type"
+    # column - in ROLES order, which is the order they are shown in. The
+    # speaker list adds speaker and chair on top (see speaker_roles); none at
+    # all is a general participant. Only a label - the fee follows the
+    # speaker list and the waiver, never this.
+    ROLES = ['organizer', 'chair', 'speaker', 'staff']
+    roles = models.JSONField(default=list, blank=True)
+
     class Meta:
         unique_together = [['event', 'attendee_nametag_id']]
 
@@ -182,6 +190,14 @@ class Attendee(models.Model):
             return True
         email = self.email.lower()
         return bool(email) and email in self.event.exempt_speaker_emails
+
+    @property
+    def speaker_roles(self):
+        """What this person is on the event's speaker list - 'speaker' and/or
+        'chair' - matched by address as the fee exemption is. Empty for
+        everyone else."""
+        email = self.email.lower()
+        return self.event.speaker_roles.get(email, set()) if email else set()
 
     @property
     def registration_fee(self):
@@ -406,9 +422,21 @@ class Event(models.Model):
             Event.prime_exempt_speaker_emails([self])
         return self._exempt_speaker_emails
 
+    @property
+    def speaker_roles(self):
+        """Lowercased address -> {'speaker', 'chair'} subset, from the speaker list.
+
+        Read in the same query as exempt_speaker_emails, so a list showing
+        both costs nothing more.
+        """
+        if not hasattr(self, '_speaker_roles'):
+            Event.prime_exempt_speaker_emails([self])
+        return self._speaker_roles
+
     @staticmethod
     def prime_exempt_speaker_emails(events):
-        """Fill exempt_speaker_emails for several events in one query.
+        """Fill exempt_speaker_emails and speaker_roles for several events in
+        one query.
 
         For lists that span events - a user's registration history - where
         each row would otherwise read its own event's speaker list.
@@ -416,14 +444,25 @@ class Event(models.Model):
         events = [e for e in events if not hasattr(e, '_exempt_speaker_emails')]
         if not events:
             return
-        by_event = {e.id: set() for e in events}
-        rows = (Speaker.objects.filter(event__in=events, is_payment_exempt=True)
-                .values_list('event_id', 'email'))
-        for event_id, email in rows:
-            if email and email.strip():
-                by_event[event_id].add(email.strip().lower())
+        exempt = {e.id: set() for e in events}
+        roles = {e.id: {} for e in events}
+        rows = (Speaker.objects.filter(event__in=events)
+                .values_list('event_id', 'email', 'is_payment_exempt', 'is_speaker', 'is_chair'))
+        for event_id, email, is_exempt, is_speaker, is_chair in rows:
+            email = (email or '').strip().lower()
+            if not email:
+                continue
+            if is_exempt:
+                exempt[event_id].add(email)
+            # The same address may be listed twice, once per role.
+            held = roles[event_id].setdefault(email, set())
+            if is_speaker:
+                held.add('speaker')
+            if is_chair:
+                held.add('chair')
         for event in events:
-            event._exempt_speaker_emails = by_event[event.id]
+            event._exempt_speaker_emails = exempt[event.id]
+            event._speaker_roles = roles[event.id]
 
     @property
     def organizers(self):

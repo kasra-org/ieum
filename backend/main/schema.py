@@ -421,6 +421,15 @@ class AttendeeSchema(Schema):
     # free either way - a speaker is exempt without the waiver being set.
     fee_waived: bool
     is_fee_exempt: bool
+    # The admin table's "type" column: the roles an admin gave (`roles`),
+    # plus speaker and/or chair from the speaker list - none of them all
+    # being a general participant.
+    roles: List[str]
+    is_speaker: bool
+    is_chair: bool
+    # Whether they submitted an abstract to this event. Only the admin lists
+    # read it (see admin_attendee_rows); elsewhere it is left out as None.
+    has_abstract: Optional[bool] = None
     registered_at: str
     custom_answers: List[AnswerSchema]
 
@@ -435,6 +444,18 @@ class AttendeeSchema(Schema):
     @staticmethod
     def resolve_registration_fee(da: Attendee) -> int:
         return da.registration_fee
+
+    @staticmethod
+    def resolve_is_speaker(da: Attendee) -> bool:
+        return 'speaker' in da.speaker_roles
+
+    @staticmethod
+    def resolve_is_chair(da: Attendee) -> bool:
+        return 'chair' in da.speaker_roles
+
+    @staticmethod
+    def resolve_has_abstract(da: Attendee):
+        return getattr(da, 'has_abstract', None)
 
     @staticmethod
     def resolve_payment_status(da: Attendee) -> str:

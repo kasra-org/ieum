@@ -8,7 +8,7 @@
     import { Award, CircleCheck, Tag, UserMinus, UserPen } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
-    import { getCategoryLabel, toTsv } from '$lib/utils.js';
+    import { getCategoryLabel, downloadTsv } from '$lib/utils.js';
     import { PagedList } from '$lib/pagedList.svelte.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
 
@@ -87,7 +87,7 @@
         } finally {
             csv_exporting = false;
         }
-        const csv = toTsv([
+        downloadTsv([
             [   "ID",
                 "Name",
                 "Email",
@@ -101,28 +101,7 @@
                 row.institute,
                 row.job_title
             ])
-        ]);
-
-        // Convert to UTF-16 LE with BOM for Excel compatibility
-        const BOM = '\uFEFF';
-        const csvWithBOM = BOM + csv;
-
-        // Encode to UTF-16 LE
-        const buffer = new ArrayBuffer(csvWithBOM.length * 2);
-        const view = new Uint16Array(buffer);
-        for (let i = 0; i < csvWithBOM.length; i++) {
-            view[i] = csvWithBOM.charCodeAt(i);
-        }
-
-        const blob = new Blob([buffer], { type: 'text/csv;charset=utf-16le;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        // Get current timestamp in YYYY-MM-DD_HH-MM-SS format
-        const timestamp = new Date().toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '-');
-        a.href = url;
-        a.download = `onsite_attendees_${timestamp}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
+        ], 'onsite_attendees');
     };
 
     // Ticked rows, by id: the selection survives paging and searching.

@@ -312,6 +312,24 @@ export function toTsv(rows) {
 }
 
 /**
+ * Save rows as `<basename>_<timestamp>.csv` for Excel: tab-separated, in
+ * UTF-16 LE with a byte-order mark, the one form Excel opens with Korean
+ * intact by a double click.
+ */
+export function downloadTsv(rows, basename) {
+    const text = '\uFEFF' + toTsv(rows);
+    const view = new Uint16Array(text.length);
+    for (let i = 0; i < text.length; i++) view[i] = text.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([view.buffer], { type: 'text/csv;charset=utf-16le;' }));
+    const timestamp = new Date().toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '-');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${basename}_${timestamp}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+/**
  * Whether a table row matches a search, for the admin tables' search boxes.
  *
  * `fields` is the table's list of `{ value, name, get }`, where `get(row)`

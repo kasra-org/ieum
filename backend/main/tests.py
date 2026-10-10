@@ -18,7 +18,7 @@ from main import email_body, nicepay
 from main.apis import template_attachment_paths
 from main.tasks import build_email, cleanup_media_files
 from main.utils import render_email_template
-from main.models import CustomAnswer, CustomQuestion, Abstract, AbstractVote, Attendee, Institution, EmailAttachment, EmailTemplate, Event, EventInvitation, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory
+from main.models import CustomAnswer, CustomQuestion, Abstract, AbstractVote, Attendee, Institution, EmailAttachment, EmailTemplate, Event, EventInvitation, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory, Speaker
 
 User = get_user_model()
 
@@ -1464,6 +1464,100 @@ class SpeakerPaymentExemptionTests(TestCase):
         self.assertEqual(len(speaker_queries), 1, speaker_queries)
 
 
+class AttendeeRoleTests(TestCase):
+    """The roster's "type" column: general, or speaker and/or chair, read
+    from the speaker list by address as the fee exemption is."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Symposium', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, published=True)
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA', is_staff=True)
+        self.client.force_login(self.admin_user)
+
+    def register(self, email):
+        user = User.objects.create_user(username=email, email=email, password='pw12345!aA')
+        attendee = Attendee.objects.create(user=user, event=self.event, first_name='A', last_name='B',
+                                           nationality=1, institute='PNU')
+        self.event.attendees.add(attendee)
+        return attendee
+
+    def roles(self):
+        rows = self.client.get(f'/api/event/{self.event.id}/attendees?status=all').json()['items']
+        return {row['user_email'] or row['user']['email']: (row['is_speaker'], row['is_chair']) for row in rows}
+
+    def test_roles_follow_the_speaker_list(self):
+        for email in ('plain@example.com', 'talk@example.com', 'chair@example.com',
+                      'both@example.com', 'twice@example.com'):
+            self.register(email)
+        def speak(email, **flags):
+            Speaker.objects.create(event=self.event, name='S', email=email, type='invited', **flags)
+        # Address matched however it was typed; the fee exemption plays no part.
+        speak(' Talk@Example.com ', is_payment_exempt=False)
+        speak('chair@example.com', is_speaker=False, is_chair=True)
+        speak('both@example.com', is_chair=True)
+        # Listed once per role, the two rows add up.
+        speak('twice@example.com')
+        speak('twice@example.com', is_speaker=False, is_chair=True)
+        self.assertEqual(self.roles(), {
+            'plain@example.com': (False, False),
+            'talk@example.com': (True, False),
+            'chair@example.com': (False, True),
+            'both@example.com': (True, True),
+            'twice@example.com': (True, True),
+        })
+
+    def set_roles(self, attendee, roles):
+        return self.client.post(f'/api/event/{self.event.id}/attendee/{attendee.id}/update',
+                                data=json.dumps({'roles': roles}), content_type='application/json')
+
+    def test_an_admin_gives_several_roles_kept_in_display_order(self):
+        attendee = self.register('chair@example.com')
+        Speaker.objects.create(event=self.event, name='S', email='chair@example.com', type='invited',
+                               is_speaker=False, is_chair=True)
+        response = self.set_roles(attendee, ['staff', 'organizer', 'staff'])
+        self.assertEqual(response.status_code, 200)
+        saved = response.json()['attendee']
+        # Stored as given, once each, in Organizer/Chair/Speaker/Staff order;
+        # the speaker list's chair is reported beside it, not stored.
+        self.assertEqual((saved['roles'], saved['is_chair']), (['organizer', 'staff'], True))
+        attendee.refresh_from_db()
+        self.assertEqual(attendee.roles, ['organizer', 'staff'])
+        # The label only: the speaker list still waives the fee.
+        self.assertTrue(saved['is_fee_exempt'])
+        self.assertEqual(self.set_roles(attendee, []).json()['attendee']['roles'], [])
+        self.assertEqual(self.set_roles(attendee, ['speaker']).json()['attendee']['roles'], ['speaker'])
+        self.assertEqual(self.set_roles(attendee, None).json()['attendee']['roles'], [])
+
+    def test_an_unknown_role_is_refused(self):
+        attendee = self.register('x@example.com')
+        self.set_roles(attendee, ['staff'])
+        for bad in (['boss'], 'staff', 5, [5], [['staff']], {'staff': True}, ['general']):
+            response = self.set_roles(attendee, bad)
+            self.assertEqual(response.status_code, 400, bad)
+            self.assertEqual(response.json()['code'], 'invalid_role')
+        attendee.refresh_from_db()
+        self.assertEqual(attendee.roles, ['staff'])
+
+    def test_rows_say_whether_an_abstract_was_submitted(self):
+        wrote = self.register('wrote@example.com')
+        self.register('silent@example.com')
+        Abstract.objects.create(attendee=wrote, event=self.event, title='T', file_path='a/b.docx')
+        rows = self.client.get(f'/api/event/{self.event.id}/attendees?status=all').json()['items']
+        self.assertEqual({r['user']['email']: r['has_abstract'] for r in rows},
+                         {'wrote@example.com': True, 'silent@example.com': False})
+        row, = self.client.get(f'/api/event/{self.event.id}/attendees/export?ids={wrote.id}').json()
+        self.assertTrue(row['has_abstract'])
+
+    def test_the_export_carries_the_roles(self):
+        self.register('chair@example.com')
+        Speaker.objects.create(event=self.event, name='S', email='chair@example.com', type='invited',
+                               is_speaker=False, is_chair=True)
+        row, = self.client.get(f'/api/event/{self.event.id}/attendees/export').json()
+        self.assertEqual((row['is_speaker'], row['is_chair']), (False, True))
+
+
 class AdminFeeWaiverTests(TestCase):
     """An event admin can excuse one registration from its category's fee."""
 
@@ -2732,6 +2826,9 @@ class AdminListQueryCountTests(TestCase):
             Abstract.objects.create(attendee=attendee, event=self.event, title=f'T{self.n}', file_path='a/b.docx')
             OnSiteAttendee.objects.create(event=self.event, name=f'W{self.n}', institute='PNU', category=self.category)
             PaymentHistory.objects.create(attendee=attendee, event=self.event, amount=1000, status='completed')
+            # On the speaker list too, so each row's role is read as well.
+            Speaker.objects.create(event=self.event, name='P', email=email, type='invited',
+                                   is_chair=self.n % 2 == 0)
 
     def count(self, url):
         with CaptureQueriesContext(connection) as q:
