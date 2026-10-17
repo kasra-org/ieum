@@ -4,6 +4,7 @@
     import { Alert, Spinner } from '$lib/components/ui';
     import { ChevronDown } from '@lucide/svelte';
     import { enhance } from '$app/forms';
+    import { apiMessage } from '$lib/apiMessages.js';
     import { invalidateAll } from '$app/navigation';
     import { Award, CircleCheck, Tag, UserMinus, UserPen } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
@@ -14,6 +15,7 @@
 
     import OnSiteRegistrationForm from '$lib/components/OnSiteRegistrationForm.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
     import ConfirmModal from '$lib/components/ConfirmModal.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
@@ -136,6 +138,34 @@
     const showRemoveAttenteeModal = (row) => {
         selected_attendee = $state.snapshot(row);
         remove_attendee_modal = true;
+    };
+
+    // Adding a walk-in by hand: at the desk, or afterwards from a paper list.
+    let add_modal = $state(false);
+    let add_error = $state('');
+    let new_attendee = $state({ name: '', email: '', institute: '', job_title: '' });
+    let new_category = $state('');
+    let new_confirmed = $state(false);
+    const addCategoryOptions = $derived([
+        { value: '', name: '—' },
+        ...(data.event.registration_categories ?? []).map(c => ({ value: c.id, name: getCategoryLabel(c, languageTag()) })),
+    ]);
+    const showAddModal = () => {
+        new_attendee = { name: '', email: '', institute: '', job_title: '' };
+        new_category = data.event.registration_categories?.[0]?.id ?? '';
+        new_confirmed = false;
+        add_error = '';
+        add_modal = true;
+    };
+    const afterAdd = () => {
+        return async ({ result, update }) => {
+            if (result.type === 'success') {
+                await update({ reset: false });
+                add_modal = false;
+            } else {
+                add_error = apiMessage(result.data ?? result.error);
+            }
+        };
     };
 
     let message_update = $state({});
@@ -573,6 +603,7 @@
 <p class="font-light mb-6">{m.onsiteAttendees_description()}</p>
 
 <div class="flex justify-end items-center gap-2 flex-wrap mb-4">
+    <Button color="primary" size="sm" onclick={showAddModal}>{m.onsiteAttendees_add()}</Button>
     <Button color="primary" size="sm">{m.attendees_emailActions()}<ChevronDown class="w-3 h-3 ms-1" /></Button>
     <Dropdown class="w-auto list-none p-1">
         <DropdownItem class="text-sm whitespace-nowrap" onclick={showSendEmailToAllModal} disabled={email_preparing || totalAttendees === 0}>{m.attendees_sendEmailToAll()}</DropdownItem>
@@ -618,13 +649,13 @@
                 }}
             />
         </TableHeadCell>
-        <TableHeadCell>{m.onsiteAttendees_id()}</TableHeadCell>
-        <TableHeadCell class="w-1">{m.onsiteAttendees_confirmed()}</TableHeadCell>
-        <TableHeadCell>{m.onsiteAttendees_name()}</TableHeadCell>
-        <TableHeadCell>{m.attendees_tier()}</TableHeadCell>
-        <TableHeadCell>{m.onsiteAttendees_email()}</TableHeadCell>
-        <TableHeadCell>{m.onsiteAttendees_institute()}</TableHeadCell>
-        <TableHeadCell>{m.onsiteAttendees_jobTitle()}</TableHeadCell>
+        <SortableHeadCell key="id" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.onsiteAttendees_id()}</SortableHeadCell>
+        <SortableHeadCell key="confirmed" sort={list.sort} onsort={(s) => list.setSort(s)} class="w-1">{m.onsiteAttendees_confirmed()}</SortableHeadCell>
+        <SortableHeadCell key="name" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.onsiteAttendees_name()}</SortableHeadCell>
+        <SortableHeadCell key={languageTag() === 'ko' ? 'category_ko' : 'category'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_tier()}</SortableHeadCell>
+        <SortableHeadCell key="email" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.onsiteAttendees_email()}</SortableHeadCell>
+        <SortableHeadCell key="institute" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.onsiteAttendees_institute()}</SortableHeadCell>
+        <SortableHeadCell key="job_title" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.onsiteAttendees_jobTitle()}</SortableHeadCell>
         <TableHeadCell class="w-1">{m.onsiteAttendees_actions()}</TableHeadCell>
     </TableHead>
     <TableBody tableBodyClass="divide-y">
@@ -697,6 +728,28 @@
         {/if}
         <div class="flex justify-center mt-6">
             <Button color="primary" type="submit">{m.onsiteAttendees_updateAttendee()}</Button>
+        </div>
+    </form>
+</Modal>
+
+<Modal id="add_onsite_modal" size="xl" title={m.onsiteAttendees_add()} bind:open={add_modal} outsideclose>
+    <form method="post" action="?/add_onsite_attendee" use:enhance={afterAdd}>
+        <OnSiteRegistrationForm data={new_attendee} />
+        {#if (data.event.registration_categories ?? []).length > 0}
+            <div class="mb-6">
+                <Label for="add_onsite_category" class="block mb-2">{m.attendees_tier()}</Label>
+                <Select id="add_onsite_category" name="category" bind:value={new_category} items={addCategoryOptions} />
+            </div>
+        {/if}
+        <div class="mb-6">
+            <Checkbox name="is_confirmed" value="true" bind:checked={new_confirmed}>{m.onsiteAttendees_addConfirmed()}</Checkbox>
+            <p class="mt-1 text-xs text-gray-500">{m.onsiteAttendees_addConfirmedHelp()}</p>
+        </div>
+        {#if add_error}
+            <Alert color="red" class="mb-4">{add_error}</Alert>
+        {/if}
+        <div class="flex justify-center mt-6">
+            <Button color="primary" type="submit">{m.onsiteAttendees_addSubmit()}</Button>
         </div>
     </form>
 </Modal>

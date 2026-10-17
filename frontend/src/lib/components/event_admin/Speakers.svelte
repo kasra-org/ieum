@@ -15,6 +15,8 @@
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
     import InviteModal from '$lib/components/InviteModal.svelte';
     import { page } from '$app/state';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
+    import { sortRows } from '$lib/tableSort.js';
 
     let { data } = $props();
 
@@ -68,9 +70,28 @@
         selectedSpeakers.filter(id => filteredSpeakers.some(s => s.id === id))
     );
 
+    // Column sorting (see $lib/tableSort.js), over every speaker the filter
+    // shows - the list is all here, so it sorts in the browser.
+    const SPEAKER_TYPES = ['keynote', 'invited', 'contributed', 'short', 'poster'];
+    const speakerColumn = {
+        name: r => r.name,
+        // By first role, as the attendee table: chair before speaker.
+        role: r => (r.is_chair ? 1 : 2),
+        // Submitted before missing; non-speakers, who owe none, last.
+        abstract: r => (r.is_speaker ? !hasAbstract(r) : null),
+        email: r => r.email,
+        affiliation: r => r.affiliation,
+        domestic: r => r.is_domestic,
+        type: r => SPEAKER_TYPES.indexOf(r.type),
+        exempt: r => r.is_payment_exempt && !r.has_paid,
+    };
+    let sortSpeakers = $state([]);
+    const sortSpeakersBy = (sort) => { sortSpeakers = sort; currentPage = 1; };
+    let sortedSpeakers = $derived(sortRows(filteredSpeakers, sortSpeakers, (r, key) => speakerColumn[key](r)));
+
     let totalPages = $derived(Math.ceil(filteredSpeakers.length / itemsPerPage));
     let paginatedSpeakers = $derived(
-        filteredSpeakers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+        sortedSpeakers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
     );
 
     function handlePageChange(page) {
@@ -269,7 +290,8 @@
                 m.speakers_alreadyPaid(),
                 m.speakers_abstract(),
             ],
-            ...data.speakers.map(row => [
+            // Everyone, in the order the table is sorted.
+            ...sortRows(data.speakers, sortSpeakers, (r, key) => speakerColumn[key](r)).map(row => [
                 row.name, row.korean_name,
                 row.email,
                 row.affiliation, row.affiliation_ko,
@@ -362,14 +384,14 @@ The Organising Committee
                 }
             }}
         /></TableHeadCell>
-        <TableHeadCell>{m.speakers_name()}</TableHeadCell>
-        <TableHeadCell>{m.speakers_role()}</TableHeadCell>
-        {#if tracksAbstracts}<TableHeadCell>{m.speakers_abstract()}</TableHeadCell>{/if}
-        <TableHeadCell>{m.speakers_email()}</TableHeadCell>
-        <TableHeadCell>{m.speakers_affiliation()}</TableHeadCell>
-        <TableHeadCell>{m.speakers_domestic()}</TableHeadCell>
-        <TableHeadCell>{m.speakers_type()}</TableHeadCell>
-        <TableHeadCell>{m.speakers_paymentExempt()}</TableHeadCell>
+        <SortableHeadCell key="name" sort={sortSpeakers} onsort={sortSpeakersBy}>{m.speakers_name()}</SortableHeadCell>
+        <SortableHeadCell key="role" sort={sortSpeakers} onsort={sortSpeakersBy}>{m.speakers_role()}</SortableHeadCell>
+        {#if tracksAbstracts}<SortableHeadCell key="abstract" sort={sortSpeakers} onsort={sortSpeakersBy}>{m.speakers_abstract()}</SortableHeadCell>{/if}
+        <SortableHeadCell key="email" sort={sortSpeakers} onsort={sortSpeakersBy}>{m.speakers_email()}</SortableHeadCell>
+        <SortableHeadCell key="affiliation" sort={sortSpeakers} onsort={sortSpeakersBy}>{m.speakers_affiliation()}</SortableHeadCell>
+        <SortableHeadCell key="domestic" sort={sortSpeakers} onsort={sortSpeakersBy}>{m.speakers_domestic()}</SortableHeadCell>
+        <SortableHeadCell key="type" sort={sortSpeakers} onsort={sortSpeakersBy}>{m.speakers_type()}</SortableHeadCell>
+        <SortableHeadCell key="exempt" sort={sortSpeakers} onsort={sortSpeakersBy}>{m.speakers_paymentExempt()}</SortableHeadCell>
         <TableHeadCell class="w-1">{m.speakers_actions()}</TableHeadCell>
     </TableHead>
     <TableBody tableBodyClass="divide-y">

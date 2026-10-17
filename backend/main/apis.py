@@ -25,8 +25,8 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.template import Template, Context
 from django.db import IntegrityError, transaction
-from django.db.models import Case, CharField, Count, Exists, F, Max, OuterRef, Prefetch, Q, Sum, Value, When, prefetch_related_objects
-from django.db.models.functions import Cast, Coalesce, Concat, Length, LPad, NullIf
+from django.db.models import Case, CharField, Count, Exists, F, IntegerField, Max, OuterRef, Prefetch, Q, Sum, Value, When, prefetch_related_objects
+from django.db.models.functions import Cast, Coalesce, Collate, Concat, Length, LPad, NullIf, Trim
 
 from django.conf import settings
 from django.http import FileResponse
@@ -35,7 +35,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from main.models import (ApiKey, User, Event, EmailTemplate, EmailAttachment, EventInvitation, Attendee, RegistrationCategory, has_paid_for, registrations_by_email, lookup_registrations, with_payment_state, REGISTERED_Q, UNPAID_Q,
+from main.models import (HANGUL, ApiKey, User, Event, EmailTemplate, EmailAttachment, EventInvitation, Attendee, RegistrationCategory, has_paid_for, registrations_by_email, lookup_registrations, with_payment_state, REGISTERED_Q, UNPAID_Q,
     attendee_addresses, contact_address,
     CustomQuestion, CustomAnswer, Abstract, AbstractVote, OnSiteAttendee, Institution, PaymentHistory, BusinessSettings, ExchangeRate, ManualTransaction, AccountSettings, PrivacyPolicy, TermsOfService, Organizer, SiteSettings, NicePayTransaction, PaymentSettings)
 from main.schema import *
@@ -274,6 +274,59 @@ def search_q(term, field, fields):
     for column in columns:
         q |= Q(**{f'{column}__icontains': term})
     return q
+
+
+# Columns a table can be sorted by at once; more is never a real request.
+MAX_SORT_KEYS = 5
+
+
+# The database's own collation (glibc en_US) ignores a syllable's silent
+# initial ㅇ, sorting 이 before 김; ICU's Korean one orders Hangul as a
+# Korean reader does, then Latin letters, case aside - as the browser's
+# Korean collator sorts the tables it holds.
+SORT_COLLATION = 'ko-x-icu'
+
+
+def text_sort(column):
+    """A text column to sort by, in Korean order, with blank read as
+    missing - so blanks go last whichever the direction, as the tables
+    sorting in the browser put them. Trimmed, so a name built of empty
+    parts is blank too."""
+    return Collate(NullIf(Trim(F(column) if isinstance(column, str) else column), Value('')), SORT_COLLATION)
+
+
+def text_sort_or(primary, fallback):
+    """`primary`, or `fallback` where it is blank: what a table shows in
+    Korean - the Korean name if there is one, the English otherwise."""
+    return Coalesce(text_sort(primary), text_sort(fallback))
+
+
+def ordered(queryset, order, sorts):
+    """`queryset` sorted as a table's column headers ask.
+
+    `order` is the sort the browser sends - column keys, comma-separated,
+    the first deciding and each next one breaking its ties, a leading '-'
+    for descending (`name,-email`). `sorts` maps the keys a table offers to
+    the expressions behind them, or to a function returning them, for one
+    that costs a query to build. Unknown keys are ignored. Missing values
+    go last both ways; what still ties keeps the list's own order, and then
+    its id, so pages never overlap.
+    """
+    terms, seen = [], set()
+    for token in (order or '').split(',')[:MAX_SORT_KEYS]:
+        token = token.strip()
+        key = token.lstrip('-')
+        if key in seen or key not in sorts:
+            continue
+        seen.add(key)
+        expressions = sorts[key]() if callable(sorts[key]) else sorts[key]
+        for expression in expressions:
+            expression = F(expression) if isinstance(expression, str) else expression
+            terms.append(expression.desc(nulls_last=True) if token.startswith('-')
+                         else expression.asc(nulls_last=True))
+    if not terms:
+        return queryset
+    return queryset.order_by(*terms, *queryset.query.order_by, 'pk')
 
 
 @api.get("/me", response=UserSchema)
@@ -526,10 +579,6 @@ def get_institution(request, institution_id: int):
     except Institution.DoesNotExist:
         return api.create_response(request, {"error": "Institution not found"}, status=404)
 
-# Hangul syllables and jamo, in every block they are encoded in.
-HANGUL = re.compile('[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7af\ud7b0-\ud7ff]')
-
-
 def korean_in_english_name(request, name_en):
     """A 400 when an institution's English name holds Korean, else None.
 
@@ -566,9 +615,12 @@ def create_institution(request, data: InstitutionCreateSchema):
 
 @api.get("/admin/institutions", response=InstitutionPageSchema)
 @ensure_staff
-def get_admin_institutions(request, offset: int = 0, limit: int = 50, search: str = "", field: str = "all"):
+def get_admin_institutions(request, offset: int = 0, limit: int = 50, search: str = "", field: str = "all",
+                           order: str = ""):
     institutions = (Institution.objects.order_by('name_en', 'id')
                     .filter(search_q(search, field, {'name_en': ['name_en'], 'name_ko': ['name_ko']})))
+    institutions = ordered(institutions, order, {
+        'id': ['id'], 'name_en': [text_sort('name_en')], 'name_ko': [text_sort('name_ko')]})
     return page_of(institutions, offset, limit)
 
 @api.get("/admin/institution/{institution_id}", response=InstitutionSchema)
@@ -659,7 +711,7 @@ EVENT_SEARCH_FIELDS = {
 @api.get("/admin/events", response=EventAdminPageSchema)
 @ensure_staff
 def get_admin_events(request, offset: int = 0, limit: int = 20, search: str = "", field: str = "all",
-                     archived: bool = False):
+                     archived: bool = False, order: str = ""):
     """Every event, a page at a time, newest first. Archived ones only when
     asked for (`archived`), as the table's toggle shows them."""
     events = (Event.objects.annotate(id_text=Cast('id', CharField()))
@@ -667,6 +719,9 @@ def get_admin_events(request, offset: int = 0, limit: int = 20, search: str = ""
               .order_by('-start_date', '-id'))
     if not archived:
         events = events.filter(is_archived=False)
+    events = ordered(events, order, {
+        'id': ['id'], 'name': [text_sort('name')], 'venue': [text_sort('venue')],
+        'venue_ko': [text_sort_or('venue_ko', 'venue')], 'archived': ['is_archived']})
     return page_of(admin_event_rows(events), offset, limit)
 
 @api.get("/events", response=PaginatedEventsSchema, auth=None)
@@ -1548,6 +1603,57 @@ def filtered_attendees(event, status='all', search='', field='all', ids='', has_
     return attendees.order_by('id')
 
 
+def attendee_sorts(event):
+    """What the registration tables (roster, unpaid) can be sorted by.
+
+    A column showing the Korean name where there is one sorts by that under
+    its `_ko` key, which the browser asks for on a Korean page.
+    """
+    name = full_name('first_name', 'middle_initial', 'last_name')[1]
+
+    def role_rank():
+        # By the first of their roles in display order - organizer, chair,
+        # speaker, staff - then everyone else. The speaker list's roles are
+        # matched in Python by address, as the column's own are.
+        listed = event.speaker_roles
+        chairs, speakers = [], []
+        for pk, account, kept in attendee_addresses(event):
+            held = listed.get(contact_address(account, kept), ())
+            if 'chair' in held:
+                chairs.append(pk)
+            if 'speaker' in held:
+                speakers.append(pk)
+        return [Case(
+            When(roles__contains=['organizer'], then=Value(0)),
+            When(Q(roles__contains=['chair']) | Q(id__in=chairs), then=Value(1)),
+            When(Q(roles__contains=['speaker']) | Q(id__in=speakers), then=Value(2)),
+            When(roles__contains=['staff'], then=Value(3)),
+            default=Value(4), output_field=IntegerField())]
+
+    return {
+        'id': ['attendee_nametag_id'],
+        'attended': ['is_attended'],
+        'role': role_rank,
+        'name': [text_sort(name)],
+        'name_ko': [text_sort_or('korean_name', name)],
+        'category': [text_sort('category__name')],
+        'category_ko': [text_sort_or('category__name_ko', 'category__name')],
+        # What they are charged, as the fee column reads: nothing if free.
+        'fee': [Case(When(is_free=True, then=Value(0)), default=F('category__fee'))],
+        'abstract': ['has_abstract'],
+        'email': [text_sort_or('user__email', 'user_email')],
+        'nationality': ['nationality'],
+        'institute': [text_sort('institute')],
+        'institute_ko': [text_sort_or('institute_ko', 'institute')],
+        'korean_name': [text_sort('korean_name')],
+        'department': [text_sort('department')],
+        'job_title': [text_sort('job_title')],
+        'disability': [text_sort('disability')],
+        'dietary': [text_sort('dietary')],
+        'registered_at': ['created_at'],
+    }
+
+
 def attendee_rows_for(event, attendees):
     """Hand each row the event already loaded, for its fee exemption."""
     for attendee in attendees:
@@ -1561,7 +1667,7 @@ def get_event_attendees(request, event_id: int, status: str = 'registered', sear
                         field: str = 'all', offset: int = 0, limit: int = 10, ids: str = '',
                         has_user: bool = None, has_abstract: bool = None,
                         has_completed_payment: bool = None, not_speaker: bool = False,
-                        not_admin: bool = False, email: str = ''):
+                        not_admin: bool = False, email: str = '', order: str = ''):
     """A page of the event's registrations, for the admin tables and pickers.
 
     `counts` sizes each tab whatever the search: the roster and the unpaid.
@@ -1583,7 +1689,8 @@ def get_event_attendees(request, event_id: int, status: str = 'registered', sear
             and has_user is None and has_abstract is None and has_completed_payment is None):
         total = {'registered': counts['registered'], 'unpaid': counts['unpaid'],
                  'all': counts['registered'] + counts['unpaid']}.get(status)
-    page = page_of(admin_attendee_rows(attendees), offset, limit, total=total, counts=counts)
+    rows = ordered(admin_attendee_rows(attendees), order, attendee_sorts(event))
+    page = page_of(rows, offset, limit, total=total, counts=counts)
     attendee_rows_for(event, page['items'])
     return page
 
@@ -1592,7 +1699,7 @@ def get_event_attendees(request, event_id: int, status: str = 'registered', sear
 @api.get("/event/{event_id}/attendees/export", response=List[AttendeeSchema])
 @ensure_event_staff
 def export_event_attendees(request, event_id: int, status: str = None, search: str = '',
-                           field: str = 'all', ids: str = '', attended: bool = None):
+                           field: str = 'all', ids: str = '', attended: bool = None, order: str = ''):
     """Every registration matching the same filters, unpaged - for what works
     on the whole list: the CSV export, email to all, certificates and name
     tags for a selection spanning pages.
@@ -1604,7 +1711,7 @@ def export_event_attendees(request, event_id: int, status: str = None, search: s
     if status is None:
         status = 'all' if ids else 'registered'
     attendees = filtered_attendees(event, status, search, field, ids, attended=attended)
-    return attendee_rows_for(event, list(admin_attendee_rows(attendees)))
+    return attendee_rows_for(event, list(ordered(admin_attendee_rows(attendees), order, attendee_sorts(event))))
 
 @api.get("/event/{event_id}/registration", response=AttendeeSchema)
 def get_my_registration(request, event_id: int):
@@ -2592,6 +2699,17 @@ def filtered_abstracts(event, type='', search='', field='all', ids='', types='')
     return abstracts.order_by('id')
 
 
+_presenter = full_name('attendee__first_name', 'attendee__middle_initial', 'attendee__last_name')[1]
+ABSTRACT_SORTS = {
+    'id': ['id'],
+    'title': [text_sort('title')],
+    'presenter': [text_sort(_presenter)],
+    'presenter_ko': [text_sort_or('attendee__korean_name', _presenter)],
+    'type': ['presentation_type'],
+    'votes': [Count('votes', distinct=True)],
+}
+
+
 def abstract_rows(event, abstracts):
     """Abstracts with their author's full registration and vote count loaded.
 
@@ -2613,13 +2731,13 @@ def abstract_rows(event, abstracts):
 @api.get("/event/{event_id}/abstracts", response=AbstractPageSchema)
 @ensure_event_staff
 def get_abstracts(request, event_id: int, type: str = '', search: str = '', field: str = 'all',
-                  offset: int = 0, limit: int = 10, ids: str = '', types: str = ''):
+                  offset: int = 0, limit: int = 10, ids: str = '', types: str = '', order: str = ''):
     """A page of the event's abstracts. `counts` holds each presentation
     type's total, and 'all', whatever the search - the chips above the table."""
     event = Event.objects.get(id=event_id)
     counts = dict(event.abstracts.values_list('presentation_type').annotate(n=Count('id')).order_by())
     counts['all'] = sum(counts.values())
-    abstracts = filtered_abstracts(event, type, search, field, ids, types)
+    abstracts = ordered(filtered_abstracts(event, type, search, field, ids, types), order, ABSTRACT_SORTS)
     total = abstracts.count()
     offset, limit = page_bounds(offset, limit)
     return {'items': abstract_rows(event, abstracts[offset:offset + limit]), 'total': total,
@@ -2629,11 +2747,12 @@ def get_abstracts(request, event_id: int, type: str = '', search: str = '', fiel
 @api.get("/event/{event_id}/abstracts/export", response=List[AbstractShortSchema])
 @ensure_event_staff
 def export_abstracts(request, event_id: int, type: str = '', search: str = '', field: str = 'all',
-                     ids: str = '', types: str = ''):
+                     ids: str = '', types: str = '', order: str = ''):
     """Every abstract matching the same filters, unpaged - to email their
     presenters."""
     event = Event.objects.get(id=event_id)
-    return abstract_rows(event, filtered_abstracts(event, type, search, field, ids, types))
+    return abstract_rows(event, ordered(filtered_abstracts(event, type, search, field, ids, types),
+                                        order, ABSTRACT_SORTS))
 
 def reviewer_attendee(user, event):
     """This user's registration on `event` if they review for it, else None.
@@ -2874,7 +2993,7 @@ USER_SEARCH_FIELDS = {
 @api.get("/admin/users", response=UserPageSchema)
 @ensure_staff
 def get_all_users(request, offset: int = 0, limit: int = 50, search: str = "", field: str = "all",
-                  not_registered_for: int = None, not_admin_of: int = None):
+                  not_registered_for: int = None, not_admin_of: int = None, order: str = ""):
     """Accounts, a page at a time, newest first - for the users table and for
     every account picker, which search here rather than holding them all.
 
@@ -2891,6 +3010,19 @@ def get_all_users(request, offset: int = 0, limit: int = 50, search: str = "", f
         users = users.exclude(attendee__event_id=not_registered_for)
     if not_admin_of is not None:
         users = users.exclude(admins__id=not_admin_of)
+    name = full_name('first_name', 'middle_initial', 'last_name')[1]
+    users = ordered(users, order, {
+        'id': ['id'],
+        'name': [text_sort(name)],
+        'name_ko': [text_sort_or('korean_name', name)],
+        'email': [text_sort('email')],
+        'institute': [text_sort('institute__name_en')],
+        'institute_ko': [text_sort_or('institute__name_ko', 'institute__name_en')],
+        'joined': ['date_joined'],
+        'active': ['is_active'],
+        # As the table reads it: the primary address verified.
+        'verified': [Exists(EmailAddress.objects.filter(user=OuterRef('pk'), primary=True, verified=True))],
+    })
     page = page_of(users, offset, limit)
     prefetch_related_objects(page['items'], *user_prefetches())
     return page
@@ -3455,7 +3587,19 @@ ONSITE_SEARCH_FIELDS = {
 }
 
 
-def filtered_onsite(event, search='', field='all', ids='', confirmed=None):
+ONSITE_SORTS = {
+    'id': ['onsiteattendee_nametag_id'],
+    'confirmed': ['is_confirmed'],
+    'name': [text_sort('name')],
+    'category': [text_sort('category__name')],
+    'category_ko': [text_sort_or('category__name_ko', 'category__name')],
+    'email': [text_sort('email')],
+    'institute': [text_sort('institute')],
+    'job_title': [text_sort('job_title')],
+}
+
+
+def filtered_onsite(event, search='', field='all', ids='', confirmed=None, has_completed_payment=None):
     onsite = (event.onsite_attendees.select_related('category', 'event')
               .annotate(nametag_text=Cast('onsiteattendee_nametag_id', CharField()))
               .filter(search_q(search, field, ONSITE_SEARCH_FIELDS)))
@@ -3463,31 +3607,75 @@ def filtered_onsite(event, search='', field='all', ids='', confirmed=None):
         onsite = onsite.filter(id__in=parse_ids(ids))
     if confirmed is not None:
         onsite = onsite.filter(is_confirmed=confirmed)
+    if has_completed_payment is not None:
+        # The payment form's walk-in picker: who has no payment recorded yet.
+        paid = Exists(PaymentHistory.objects.filter(onsite_attendee=OuterRef('pk'), status='completed'))
+        onsite = onsite.filter(paid if has_completed_payment else ~paid)
     return onsite.order_by('id')
 
 
 @api.get("/event/{event_id}/onsite", response=OnSiteAttendeePageSchema)
 @ensure_event_staff
 def get_on_site_attendees(request, event_id: int, search: str = '', field: str = 'all',
-                          offset: int = 0, limit: int = 10, ids: str = ''):
+                          offset: int = 0, limit: int = 10, ids: str = '',
+                          has_completed_payment: bool = None, order: str = ''):
     """A page of the event's walk-ins. `counts.all` is every walk-in, whatever
     the search - the headcount above the table."""
     event = Event.objects.get(id=event_id)
-    onsite = filtered_onsite(event, search, field, ids)
+    onsite = ordered(filtered_onsite(event, search, field, ids, has_completed_payment=has_completed_payment),
+                     order, ONSITE_SORTS)
     everyone = event.onsite_attendees.count()
     # Just the list, unsearched: its total is the headcount already taken.
-    total = everyone if not search.strip() and not ids else None
+    total = everyone if not search.strip() and not ids and has_completed_payment is None else None
     return page_of(onsite, offset, limit, total=total, counts={'all': everyone})
 
 
 @api.get("/event/{event_id}/onsite/export", response=List[OnSiteAttendeeSchema])
 @ensure_event_staff
 def export_on_site_attendees(request, event_id: int, search: str = '', field: str = 'all',
-                             ids: str = '', confirmed: bool = None):
+                             ids: str = '', confirmed: bool = None, order: str = ''):
     """Every walk-in matching the same filters, unpaged - for the export,
     email to all, certificates and name tags."""
     event = Event.objects.get(id=event_id)
-    return list(filtered_onsite(event, search, field, ids, confirmed))
+    return list(ordered(filtered_onsite(event, search, field, ids, confirmed), order, ONSITE_SORTS))
+
+@api.post("/event/{event_id}/onsite/add", response=MessageSchema)
+@ensure_event_staff
+def add_on_site_attendee(request, event_id: int):
+    """An event admin enters a walk-in by hand - at the desk, or afterwards
+    from a paper list. Unlike the public form it needs no on-site code and is
+    open outside the event's dates; any of the event's categories may be
+    given, retired ones included, as an admin moving a registration may."""
+    event = Event.objects.get(id=event_id)
+    data = read_body(request)
+    name = str(data.get("name") or "").strip()
+    email = str(data.get("email") or "").strip()
+    if not name:
+        return api.create_response(
+            request, {"code": "name_required", "message": "Name is required."}, status=400)
+    if not email:
+        return api.create_response(
+            request, {"code": "email_required", "message": "Email is required."}, status=400)
+    category = None
+    if data.get("category") not in (None, ""):
+        try:
+            category = event.registration_categories.get(id=whole_number(data["category"]))
+        except RegistrationCategory.DoesNotExist:
+            return api.create_response(
+                request, {"code": "invalid_category", "message": "Invalid registration category"}, status=400)
+    oa = OnSiteAttendee.objects.create(
+        event=event,
+        name=name,
+        email=email,
+        institute=str(data.get("institute") or "").strip(),
+        job_title=str(data.get("job_title") or "").strip(),
+        category=category,
+        # Ticked when they are already through the desk - paid, or nothing
+        # to pay.
+        is_confirmed=bool(data.get("is_confirmed", False)),
+    )
+    return {"code": "success", "message": f"On-site attendee {oa.onsiteattendee_nametag_id} added."}
+
 
 @api.post("/event/{event_id}/onsite/{onsite_id}/delete", response=MessageSchema)
 @ensure_event_staff
@@ -3517,17 +3705,10 @@ def update_on_site_attendee(request, event_id: int, onsite_id: int):
             )
         oa.name = data.get("name")
         oa.email = email
-
-        # Auto-create institution if it doesn't exist
-        institute_name = data.get("institute", "")
-        if institute_name:
-            institution, _ = Institution.objects.get_or_create(
-                name_en=institute_name,
-                defaults={'name_ko': ''}
-            )
-            oa.institute = institution.name_en
-        else:
-            oa.institute = institute_name
+        # Kept as typed, as the public form keeps it. It used to be added to
+        # the institutions list too, under its English name whatever the
+        # language - a Korean one included, which that list now refuses.
+        oa.institute = data.get("institute", "")
 
         oa.job_title = data.get("job_title")
 
@@ -3749,6 +3930,7 @@ def payment_row(payment):
         'manual_payment_type': manual_payment_type,
         'note': payment.note,
         'attendee_id': payment.attendee_id,
+        'onsite_attendee_id': payment.onsite_attendee_id,
         'attendee_name': payment.attendee_name,
         'attendee_name_ko': payment.attendee_korean_name or '',
         'attendee_email': payment.attendee_email or '',
@@ -3770,6 +3952,20 @@ PAYMENT_SEARCH_FIELDS = {
     'email': ['attendee_email'],
     'institute': ['attendee_institute', 'attendee_institute_ko'],
     'number': ['shown_number'],
+}
+
+
+# Over filtered_payments' annotations: the number as shown, the payer's name.
+PAYMENT_SORTS = {
+    'number': ['shown_number'],
+    'date': ['created_at'],
+    # attendee_name: the English name, or the Korean where there is none.
+    'payer': [text_sort_or('payer_name_mi', 'attendee_korean_name')],
+    'payer_ko': [text_sort_or('attendee_korean_name', 'payer_name_mi')],
+    'type': ['payment_type', text_sort('manual_transaction__payment_type')],
+    'amount': ['amount'],
+    'status': ['status'],
+    'note': [text_sort('note')],
 }
 
 
@@ -3800,7 +3996,7 @@ def filtered_payments(event, search='', field='all', status=''):
 @api.get("/event/{event_id}/payments", response=EventPaymentPageSchema)
 @ensure_event_staff
 def get_event_payments(request, event_id: int, search: str = '', field: str = 'all', status: str = '',
-                       offset: int = 0, limit: int = 10):
+                       offset: int = 0, limit: int = 10, order: str = ''):
     """A page of the event's payments, newest first (event admin only).
 
     `summary` is the whole event's figures, whatever the search: how many
@@ -3816,37 +4012,53 @@ def get_event_payments(request, event_id: int, search: str = '', field: str = 'a
         total_cancelled=Sum('amount', filter=Q(status='cancelled')),
     )
     summary = {key: value or 0 for key, value in totals.items()}
-    page = page_of(filtered_payments(event, search, field, status), offset, limit, summary=summary)
+    page = page_of(ordered(filtered_payments(event, search, field, status), order, PAYMENT_SORTS),
+                   offset, limit, summary=summary)
     page['items'] = [payment_row(p) for p in page['items']]
     return page
 
 
 @api.get("/event/{event_id}/payments/export", response=List[EventPaymentSchema])
 @ensure_event_staff
-def export_event_payments(request, event_id: int, search: str = '', field: str = 'all', status: str = ''):
+def export_event_payments(request, event_id: int, search: str = '', field: str = 'all', status: str = '',
+                          order: str = ''):
     """Every payment matching the same filters, unpaged - for the CSV export."""
     event = Event.objects.get(id=event_id)
-    return [payment_row(p) for p in filtered_payments(event, search, field, status)]
+    return [payment_row(p) for p in ordered(filtered_payments(event, search, field, status), order, PAYMENT_SORTS)]
 
 
 @api.post("/event/{event_id}/payment/add", response=MessageSchema)
 @ensure_event_staff
 def create_event_payment(request, event_id: int, data: PaymentCreateSchema):
-    """Create a new payment for an attendee (event admin only)."""
+    """Record a payment taken outside the gateways (event admin only): for a
+    registration still unpaid, or for a walk-in who paid at the desk by card
+    or cash."""
     event = Event.objects.get(id=event_id)
 
-    # Validate attendee exists and belongs to this event
+    if (data.attendee_id is None) == (data.onsite_attendee_id is None):
+        return api.create_response(
+            request,
+            {"code": "attendee_required", "message": "Choose one registration or walk-in."},
+            status=400,
+        )
+
+    # Validate the payer exists and belongs to this event
+    attendee = onsite = None
     try:
-        attendee = Attendee.objects.get(id=data.attendee_id, event=event)
-    except Attendee.DoesNotExist:
+        if data.attendee_id is not None:
+            attendee = Attendee.objects.get(id=data.attendee_id, event=event)
+        else:
+            onsite = OnSiteAttendee.objects.get(id=data.onsite_attendee_id, event=event)
+    except (Attendee.DoesNotExist, OnSiteAttendee.DoesNotExist):
         return api.create_response(
             request,
             {"code": "attendee_not_found", "message": "Attendee not found."},
             status=404,
         )
 
-    # Check if attendee already has a completed payment
-    if PaymentHistory.objects.filter(attendee=attendee, status='completed').exists():
+    # Check if they already have a completed payment
+    paid = PaymentHistory.objects.filter(status='completed')
+    if (paid.filter(attendee=attendee) if attendee else paid.filter(onsite_attendee=onsite)).exists():
         return api.create_response(
             request,
             {"code": "payment_exists", "message": "This attendee already has a completed payment."},
@@ -3864,6 +4076,7 @@ def create_event_payment(request, event_id: int, data: PaymentCreateSchema):
     # Create payment with "직접입력" as the main payment type
     payment = PaymentHistory(
         attendee=attendee,
+        onsite_attendee=onsite,
         event=event,
         amount=data.amount,
         status='completed',
@@ -3872,9 +4085,18 @@ def create_event_payment(request, event_id: int, data: PaymentCreateSchema):
         note=data.note,
         toss_order_id=data.order_id,
     )
-    payment.copy_attendee_info(attendee)
+    if attendee:
+        payment.copy_attendee_info(attendee)
+    else:
+        payment.copy_onsite_info(onsite)
     payment.copy_event_info(event)
     payment.save()
+
+    # Taking a walk-in's money at the desk is what confirming them means
+    # where the event charges on site - so recording it confirms them.
+    if onsite and not onsite.is_confirmed:
+        onsite.is_confirmed = True
+        onsite.save(update_fields=['is_confirmed'])
 
     # Create ManualTransaction with actual payment details
     manual_tx = ManualTransaction(

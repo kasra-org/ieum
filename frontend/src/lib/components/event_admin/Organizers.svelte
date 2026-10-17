@@ -11,6 +11,8 @@
     import RemoteSearchList from '$lib/components/RemoteSearchList.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
+    import { sortRows } from '$lib/tableSort.js';
 
     let { data } = $props();
 
@@ -36,9 +38,23 @@
         currentPage = 1;
     });
 
+    // Column sorting (see $lib/tableSort.js), by what each column shows. The
+    // order column is the list's own order, so it is what an unsorted table
+    // shows; moving a row only makes sense there, so the arrows wait for it.
+    const organizersColumn = {
+        name: r => (languageTag() === 'ko' ? (r.korean_name || r.name) : r.name),
+        email: r => r.email,
+        // An organization has no affiliation; it reads as blank.
+        institute: r => (r.organizer_type === 'organization' ? null
+            : languageTag() === 'ko' ? (r.affiliation_ko || r.affiliation) : r.affiliation),
+    };
+    let sortOrganizers = $state([]);
+    const sortOrganizersBy = (sort) => { sortOrganizers = sort; currentPage = 1; };
+    let sortedOrganizers = $derived(sortRows(filteredOrganizers, sortOrganizers, (r, key) => organizersColumn[key](r)));
+
     let totalPages = $derived(Math.ceil(filteredOrganizers.length / itemsPerPage));
     let paginatedOrganizers = $derived(
-        filteredOrganizers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+        sortedOrganizers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
     );
 
     function handlePageChange(page) {
@@ -177,9 +193,9 @@
 <TableSearch placeholder={m.organizers_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermOrganizer} bind:field={searchField} fields={searchFields}>
     <TableHead>
         <TableHeadCell class="w-1">{m.organizers_order()}</TableHeadCell>
-        <TableHeadCell>{m.organizers_name()}</TableHeadCell>
-        <TableHeadCell>{m.organizers_email()}</TableHeadCell>
-        <TableHeadCell>{m.organizers_institute()}</TableHeadCell>
+<SortableHeadCell key="name" sort={sortOrganizers} onsort={sortOrganizersBy}>{m.organizers_name()}</SortableHeadCell>
+        <SortableHeadCell key="email" sort={sortOrganizers} onsort={sortOrganizersBy}>{m.organizers_email()}</SortableHeadCell>
+        <SortableHeadCell key="institute" sort={sortOrganizers} onsort={sortOrganizersBy}>{m.organizers_institute()}</SortableHeadCell>
         <TableHeadCell class="w-1">{m.organizers_actions()}</TableHeadCell>
     </TableHead>
     <TableBody tableBodyClass="divide-y">
@@ -190,14 +206,14 @@
                     <div class="flex flex-col gap-0.5">
                         <button
                             onclick={() => moveOrganizer(globalIndex, -1)}
-                            disabled={globalIndex === 0 || reordering || searchTermOrganizer}
+                            disabled={globalIndex === 0 || reordering || searchTermOrganizer || sortOrganizers.length > 0}
                             class="p-0.5 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                             <ChevronUp class="w-4 h-4" />
                         </button>
                         <button
                             onclick={() => moveOrganizer(globalIndex, 1)}
-                            disabled={globalIndex === data.organizers.length - 1 || reordering || searchTermOrganizer}
+                            disabled={globalIndex === data.organizers.length - 1 || reordering || searchTermOrganizer || sortOrganizers.length > 0}
                             class="p-0.5 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                             <ChevronDown class="w-4 h-4" />

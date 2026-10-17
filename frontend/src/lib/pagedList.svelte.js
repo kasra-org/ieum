@@ -1,4 +1,5 @@
 import { untrack } from 'svelte';
+import { orderParam } from '$lib/tableSort.js';
 
 // Ids per request when fetching a selection: well inside URL length limits.
 const ID_BATCH = 200;
@@ -25,7 +26,8 @@ const ID_BATCH = 200;
  *
  * then bind the search box to `list.search` / `list.field`, render
  * `list.items`, and hand TablePagination `list.page`, `list.totalPages` and
- * `p => list.goto(p)`.
+ * `p => list.goto(p)`. Sortable headers (SortableHeadCell) take `list.sort`
+ * and `s => list.setSort(s)`; the server orders the whole list by it.
  */
 export class PagedList {
     items = $state([]);
@@ -36,6 +38,8 @@ export class PagedList {
     search = $state('');
     field = $state('all');
     filters = $state({});
+    // [{key, dir}] - see $lib/tableSort.js. Empty is the server's own order.
+    sort = $state([]);
     // True from the start: the first page is always on its way, and a page
     // rendered on the server must show that rather than "no records".
     loading = $state(true);
@@ -58,13 +62,14 @@ export class PagedList {
     #issued = null;
 
     // Built from what params() actually sends: an empty filter is no filter,
-    // and the order filters were set in does not matter.
+    // and the order filters were set in does not matter. A new sort is a new
+    // request too, so it starts at the first page.
     #requestKey() {
         const term = this.search.trim();
         const filters = Object.entries(this.filters)
             .filter(([, value]) => value !== undefined && value !== null && value !== '')
             .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-        return JSON.stringify([term ? this.field || 'all' : '', term, filters]);
+        return JSON.stringify([term ? this.field || 'all' : '', term, filters, orderParam(this.sort)]);
     }
 
     /**
@@ -86,7 +91,7 @@ export class PagedList {
         return Math.max(1, Math.ceil(this.total / this.pageSize));
     }
 
-    /** The search and filters as query parameters, plus `extra`. */
+    /** The search, filters and sort as query parameters, plus `extra`. */
     params(extra = {}) {
         const params = new URLSearchParams();
         const term = this.search.trim();
@@ -94,6 +99,7 @@ export class PagedList {
             params.set('search', term);
             params.set('field', this.field || 'all');
         }
+        if (this.sort.length) params.set('order', orderParam(this.sort));
         for (const [key, value] of Object.entries({ ...this.filters, ...extra })) {
             if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
         }
@@ -163,13 +169,20 @@ export class PagedList {
         return this.load();
     }
 
+    /** Sort by other columns (a header was clicked); load() starts it at page 1. */
+    setSort(sort) {
+        this.sort = sort;
+        return this.load();
+    }
+
     /** Change one filter (a tab, a chip); load() starts it at page 1. */
     setFilter(name, value) {
         this.filters = { ...this.filters, [name]: value };
         return this.load();
     }
 
-    /** Every row matching the current search and filters, from /export. */
+    /** Every row matching the current search and filters, from /export, in
+     * the order on screen. */
     async exportAll(extra = {}) {
         const response = await fetch(`${this.url}/export?${this.params(extra)}`, {
             headers: { Accept: 'application/json' },

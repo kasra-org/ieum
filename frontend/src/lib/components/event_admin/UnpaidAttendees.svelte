@@ -9,6 +9,8 @@
     import { getDisplayInstitute, getDisplayName, getCategoryLabel, downloadTsv } from '$lib/utils.js';
     import { PagedList } from '$lib/pagedList.svelte.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
+    import { orderParam } from '$lib/tableSort.js';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
@@ -82,7 +84,10 @@
     // directly because list.exportAll would carry the search along. A
     // selection goes through list.fetchByIds, which batches long id lists.
     async function fetchUnpaid(extra = {}) {
-        const response = await fetch(`${list.url}/export?${new URLSearchParams({ status: 'unpaid', ...extra })}`, {
+        // In the order on screen, so the CSV lists them as the table does.
+        const params = new URLSearchParams({ status: 'unpaid', ...extra });
+        if (list.sort.length) params.set('order', orderParam(list.sort));
+        const response = await fetch(`${list.url}/export?${params}`, {
             headers: { Accept: 'application/json' },
         });
         if (!response.ok) throw new Error(`${response.status}`);
@@ -399,13 +404,13 @@
                 <input type="checkbox" checked={allOnPageSelected} onchange={toggleAllOnPage}
                     class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
             </TableHeadCell>
-            <TableHeadCell class="w-1">{m.unpaidAttendees_id()}</TableHeadCell>
-            <TableHeadCell>{m.unpaidAttendees_name()}</TableHeadCell>
-            <TableHeadCell>{m.attendees_tier()}</TableHeadCell>
-            <TableHeadCell>{m.unpaidAttendees_email()}</TableHeadCell>
-            <TableHeadCell>{m.unpaidAttendees_institute()}</TableHeadCell>
-            <TableHeadCell>{m.unpaidAttendees_registeredAt()}</TableHeadCell>
-            <TableHeadCell>{m.unpaidAttendees_amountDue()}</TableHeadCell>
+            <SortableHeadCell key="id" sort={list.sort} onsort={(s) => list.setSort(s)} class="w-1">{m.unpaidAttendees_id()}</SortableHeadCell>
+            <SortableHeadCell key={languageTag() === 'ko' ? 'name_ko' : 'name'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.unpaidAttendees_name()}</SortableHeadCell>
+            <SortableHeadCell key={languageTag() === 'ko' ? 'category_ko' : 'category'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_tier()}</SortableHeadCell>
+            <SortableHeadCell key="email" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.unpaidAttendees_email()}</SortableHeadCell>
+            <SortableHeadCell key={languageTag() === 'ko' ? 'institute_ko' : 'institute'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.unpaidAttendees_institute()}</SortableHeadCell>
+            <SortableHeadCell key="registered_at" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.unpaidAttendees_registeredAt()}</SortableHeadCell>
+            <SortableHeadCell key="fee" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.unpaidAttendees_amountDue()}</SortableHeadCell>
             <TableHeadCell class="w-1">{m.unpaidAttendees_feeExempt()}</TableHeadCell>
             <TableHeadCell class="w-1">{m.unpaidAttendees_actions()}</TableHeadCell>
         </TableHead>

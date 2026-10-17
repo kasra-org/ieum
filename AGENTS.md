@@ -256,7 +256,7 @@ Customizable email templates:
 
 All endpoints use base URL `/api/` with CSRF protection enabled.
 
-**Pagination**: the admin lists that can grow large answer a page at a time as `{items, total, offset, limit}` (plus `counts`/`summary` computed over the whole list, before search), taking `offset`, `limit` (max 200), `search` and `field` (which column group to search; `all` searches every one). Each event list also has an unpaged `.../export` twin with the same filters for whole-list actions (CSV, email to all, certificates, a selection spanning pages; `ids=` fetches a selection). Django is not reachable from the browser - Caddy sends `/api/*` to SvelteKit - so the admin tables fetch these through per-endpoint relay routes under `frontend/src/routes/api/` (no catch-all), via `$lib/pagedList.svelte.js`; pickers search through `RemoteSearchList.svelte`.
+**Pagination**: the admin lists that can grow large answer a page at a time as `{items, total, offset, limit}` (plus `counts`/`summary` computed over the whole list, before search), taking `offset`, `limit` (max 200), `search` and `field` (which column group to search; `all` searches every one), and `order` - the sortable column headers' sort, comma-separated keys each endpoint allowlists, `-` for descending (`name,-email`), text in ICU Korean collation (`ko-x-icu`) with blanks last. Each event list also has an unpaged `.../export` twin with the same filters for whole-list actions (CSV, email to all, certificates, a selection spanning pages; `ids=` fetches a selection). Django is not reachable from the browser - Caddy sends `/api/*` to SvelteKit - so the admin tables fetch these through per-endpoint relay routes under `frontend/src/routes/api/` (no catch-all), via `$lib/pagedList.svelte.js`; pickers search through `RemoteSearchList.svelte`.
 
 ### Authentication & User Management
 - `GET /api/me` - Get authenticated user profile
@@ -317,6 +317,7 @@ All endpoints use base URL `/api/` with CSRF protection enabled.
 ### On-Site Registration
 - `POST /api/event/{event_id}/onsite` - Register on-site (public)
 - `GET /api/event/{event_id}/onsite` - On-site attendees, paginated (event admin); `.../onsite/export` unpaged
+- `POST /api/event/{event_id}/onsite/add` - Add a walk-in by hand (event admin; no on-site code or date window)
 - `POST /api/event/{event_id}/onsite/{onsite_id}/update` - Update on-site attendee
 - `POST /api/event/{event_id}/onsite/{onsite_id}/delete` - Delete on-site attendee
 

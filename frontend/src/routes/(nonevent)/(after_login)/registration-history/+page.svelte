@@ -3,6 +3,8 @@
     import { TableSearch, TableBody, TableBodyCell, TableBodyRow, TableHead, TableHeadCell, Button } from '$lib/components/ui';
     import * as m from '$lib/paraglide/messages.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
+    import { sortRows } from '$lib/tableSort.js';
     import { getDisplayVenue, getDisplayOrganizers, formatDateRange } from '$lib/utils.js';
     import { generateCertificatePDF } from '$lib/pdfUtils.js';
 
@@ -97,9 +99,21 @@
         currentPage = 1;
     });
 
+    // Column sorting (see $lib/tableSort.js), by what each column shows.
+    const registrationsColumn = {
+        dates: r => r.start_date,
+        event: r => r.event_name,
+        venue: r => getDisplayVenue(r),
+        organizers: r => getDisplayOrganizers(r),
+        payment: r => getPaymentStatusText(r.payment_status),
+    };
+    let sortRegistrations = $state([]);
+    const sortRegistrationsBy = (sort) => { sortRegistrations = sort; currentPage = 1; };
+    let sortedRegistrations = $derived(sortRows(filteredRegistrations, sortRegistrations, (r, key) => registrationsColumn[key](r)));
+
     let totalPages = $derived(Math.ceil(filteredRegistrations.length / itemsPerPage));
     let paginatedRegistrations = $derived(
-        filteredRegistrations.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+        sortedRegistrations.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
     );
 
     function handlePageChange(page) {
@@ -124,11 +138,11 @@
 <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
     <TableSearch placeholder={m.registrationHistory_searchPlaceholder()} hoverable={true} striped={true} bind:inputValue={searchTerm}>
         <TableHead>
-            <TableHeadCell class="whitespace-nowrap">{m.registrationHistory_dates()}</TableHeadCell>
-            <TableHeadCell class="w-full">{m.registrationHistory_eventName()}</TableHeadCell>
-            <TableHeadCell class="whitespace-nowrap">{m.registrationHistory_venue()}</TableHeadCell>
-            <TableHeadCell class="whitespace-nowrap">{m.registrationHistory_organizers()}</TableHeadCell>
-            <TableHeadCell class="whitespace-nowrap">{m.registrationHistory_paymentStatus()}</TableHeadCell>
+<SortableHeadCell key="dates" sort={sortRegistrations} onsort={sortRegistrationsBy} class="whitespace-nowrap">{m.registrationHistory_dates()}</SortableHeadCell>
+            <SortableHeadCell key="event" sort={sortRegistrations} onsort={sortRegistrationsBy} class="w-full">{m.registrationHistory_eventName()}</SortableHeadCell>
+            <SortableHeadCell key="venue" sort={sortRegistrations} onsort={sortRegistrationsBy} class="whitespace-nowrap">{m.registrationHistory_venue()}</SortableHeadCell>
+            <SortableHeadCell key="organizers" sort={sortRegistrations} onsort={sortRegistrationsBy} class="whitespace-nowrap">{m.registrationHistory_organizers()}</SortableHeadCell>
+            <SortableHeadCell key="payment" sort={sortRegistrations} onsort={sortRegistrationsBy} class="whitespace-nowrap">{m.registrationHistory_paymentStatus()}</SortableHeadCell>
             <TableHeadCell class="whitespace-nowrap">{m.registrationHistory_actions()}</TableHeadCell>
         </TableHead>
         <TableBody>

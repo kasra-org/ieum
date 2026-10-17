@@ -11,6 +11,7 @@
     import { PagedList } from '$lib/pagedList.svelte.js';
 
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
     import ConfirmModal from '$lib/components/ConfirmModal.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import RemoteSearchList from '$lib/components/RemoteSearchList.svelte';
@@ -186,14 +187,22 @@
     // Create payment modal
     let create_modal = $state(false);
     let create_error = $state('');
+    // Who paid: a registration still unpaid, or a walk-in who paid at the
+    // desk by card or cash - one tab each.
+    let payer_kind = $state('attendee');
     let selected_attendee_id = $state(null);
     let selected_attendee = $state(null);
+    let selected_onsite_id = $state(null);
+    let selected_onsite = $state(null);
     let payment_amount = $state(0);
 
     // Which category the attendee registered under decides the price, so
-    // recording a manual payment offers the same choice.
-    const feeForCategory = (id) =>
-        (data.event.registration_categories ?? []).find(c => c.id === id)?.fee || 0;
+    // recording a manual payment offers the same choice - at the on-site
+    // price for a walk-in.
+    const feeForCategory = (id) => {
+        const category = (data.event.registration_categories ?? []).find(c => c.id === id);
+        return (payer_kind === 'onsite' ? category?.onsite_fee : category?.fee) || 0;
+    };
     const categoryOptions = $derived(
         (data.event.registration_categories ?? []).map(c => ({
             value: c.id,
@@ -205,11 +214,25 @@
     // Picking someone pre-selects the category they registered under, so the
     // common case needs no thought; the admin can still override it.
     $effect(() => {
-        const attendee = selected_attendee_id !== null ? selected_attendee : null;
-        if (!attendee) return;
-        payment_category = attendee.category ?? data.event.registration_categories?.[0]?.id ?? null;
-        payment_amount = feeForCategory(payment_category);
+        const payer = payer_kind === 'onsite'
+            ? (selected_onsite_id !== null ? selected_onsite : null)
+            : (selected_attendee_id !== null ? selected_attendee : null);
+        if (!payer) return;
+        untrack(() => {
+            payment_category = payer.category ?? data.event.registration_categories?.[0]?.id ?? null;
+            payment_amount = feeForCategory(payment_category);
+        });
     });
+
+    // Switching tabs starts the choice over, at that tab's prices.
+    const choosePayerKind = (kind) => {
+        if (kind === payer_kind) return;
+        payer_kind = kind;
+        selected_attendee_id = selected_attendee = null;
+        selected_onsite_id = selected_onsite = null;
+        payment_category = data.event.registration_categories?.[0]?.id ?? null;
+        payment_amount = feeForCategory(payment_category);
+    };
 
     const onCategoryChange = (id) => {
         payment_category = id;
@@ -243,7 +266,9 @@
     }
 
     const showCreateModal = () => {
+        payer_kind = 'attendee';
         selected_attendee_id = null;
+        selected_onsite_id = selected_onsite = null;
         payment_category = data.event.registration_categories?.[0]?.id ?? null;
         payment_amount = feeForCategory(payment_category);
         payment_type = 'card';
@@ -486,13 +511,13 @@
 {/if}
 <TableSearch placeholder={m.transactions_searchPlaceholder()} hoverable={true} bind:inputValue={list.search} bind:field={list.field} fields={searchFields}>
     <TableHead>
-        <TableHeadCell>{m.transactions_id()}</TableHeadCell>
-        <TableHeadCell>{m.transactions_date()}</TableHeadCell>
-        <TableHeadCell>{m.transactions_attendee()}</TableHeadCell>
-        <TableHeadCell>{m.transactions_type()}</TableHeadCell>
-        <TableHeadCell>{m.transactions_amount()}</TableHeadCell>
-        <TableHeadCell>{m.transactions_status()}</TableHeadCell>
-        <TableHeadCell>{m.transactions_note()}</TableHeadCell>
+        <SortableHeadCell key="number" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.transactions_id()}</SortableHeadCell>
+        <SortableHeadCell key="date" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.transactions_date()}</SortableHeadCell>
+        <SortableHeadCell key={languageTag() === 'ko' ? 'payer_ko' : 'payer'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.transactions_attendee()}</SortableHeadCell>
+        <SortableHeadCell key="type" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.transactions_type()}</SortableHeadCell>
+        <SortableHeadCell key="amount" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.transactions_amount()}</SortableHeadCell>
+        <SortableHeadCell key="status" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.transactions_status()}</SortableHeadCell>
+        <SortableHeadCell key="note" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.transactions_note()}</SortableHeadCell>
         <TableHeadCell class="w-1">{m.transactions_actions()}</TableHeadCell>
     </TableHead>
     <TableBody tableBodyClass="divide-y">
@@ -505,7 +530,10 @@
                 </TableBodyCell>
                 <TableBodyCell>{formatDate(payment.checkout_date)}</TableBodyCell>
                 <TableBodyCell>
-                    <div class="font-medium">{getDisplayNameWithInstitute(payment)}</div>
+                    <div class="font-medium">
+                        {getDisplayNameWithInstitute(payment)}
+                        {#if payment.onsite_attendee_id}<Badge color="gray" class="ms-1">{m.transactions_onsiteBadge()}</Badge>{/if}
+                    </div>
                     <div class="text-sm text-gray-500">{payment.attendee_email}</div>
                 </TableBodyCell>
                 <TableBodyCell>
@@ -557,22 +585,52 @@
 <!-- Create Payment Modal -->
 <Modal id="create_payment_modal" size="lg" title={m.transactions_createPayment()} bind:open={create_modal} outsideclose>
     <form method="post" action="?/create_payment" use:enhance={afterCreatePayment}>
-        <input type="hidden" name="attendee_id" value={selected_attendee_id || ''} />
+        {#if payer_kind === 'onsite'}
+            <input type="hidden" name="onsite_attendee_id" value={selected_onsite_id || ''} />
+        {:else}
+            <input type="hidden" name="attendee_id" value={selected_attendee_id || ''} />
+        {/if}
+
+        <ul class="flex border-b border-gray-200 text-center text-sm font-medium text-gray-500 mb-4" role="tablist">
+            {#each [['attendee', m.transactions_payerUnpaid()], ['onsite', m.transactions_payerOnsite()]] as [kind, label] (kind)}
+                <li class="me-2">
+                    <button type="button" role="tab" aria-selected={payer_kind === kind}
+                        class="inline-block rounded-t-lg px-4 py-3 {payer_kind === kind ? 'border-b-2 border-primary-600 text-primary-600' : 'hover:border-b-2 hover:border-gray-300 hover:text-gray-600'}"
+                        onclick={() => choosePayerKind(kind)}>{label}</button>
+                </li>
+            {/each}
+        </ul>
 
         <div class="mb-4">
-            <Label class="block mb-2">{m.transactions_selectAttendee()}*</Label>
-            <!-- Anyone registered, paid-up or not, who has no completed payment yet. -->
-            <RemoteSearchList
-                url={`/api/event/${data.event.id}/attendees`}
-                params={{ status: 'all', has_completed_payment: false }}
-                bind:selectedId={selected_attendee_id}
-                bind:selectedItem={selected_attendee}
-                placeholder={m.transactions_searchAttendeePlaceholder()}
-                noResultsMessage={m.transactions_noAttendeesFound()}
-                getItemName={getAttendeeDisplayName}
-                getItemInstitute={getAttendeeDisplayInstitute}
-                getItemEmail={getAttendeeEmail}
-            />
+            {#if payer_kind === 'onsite'}
+                <Label class="block mb-2">{m.transactions_selectOnsite()}*</Label>
+                <!-- Walk-ins with no payment recorded yet. -->
+                <RemoteSearchList
+                    url={`/api/event/${data.event.id}/onsite`}
+                    params={{ has_completed_payment: false }}
+                    bind:selectedId={selected_onsite_id}
+                    bind:selectedItem={selected_onsite}
+                    placeholder={m.transactions_searchAttendeePlaceholder()}
+                    noResultsMessage={m.transactions_noOnsiteFound()}
+                    getItemName={(walkin) => walkin.name}
+                    getItemInstitute={(walkin) => walkin.institute}
+                    getItemEmail={(walkin) => walkin.email}
+                />
+            {:else}
+                <Label class="block mb-2">{m.transactions_selectAttendee()}*</Label>
+                <!-- Anyone registered, paid-up or not, who has no completed payment yet. -->
+                <RemoteSearchList
+                    url={`/api/event/${data.event.id}/attendees`}
+                    params={{ status: 'all', has_completed_payment: false }}
+                    bind:selectedId={selected_attendee_id}
+                    bind:selectedItem={selected_attendee}
+                    placeholder={m.transactions_searchAttendeePlaceholder()}
+                    noResultsMessage={m.transactions_noAttendeesFound()}
+                    getItemName={getAttendeeDisplayName}
+                    getItemInstitute={getAttendeeDisplayInstitute}
+                    getItemEmail={getAttendeeEmail}
+                />
+            {/if}
         </div>
         {#if data.event.has_tiered_fees}
             <div class="mb-4">

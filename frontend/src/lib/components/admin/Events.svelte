@@ -9,6 +9,8 @@
     import { PagedList } from '$lib/pagedList.svelte.js';
 
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
+    import { languageTag } from '$lib/paraglide/runtime.js';
     import EventAdminForm from '$lib/components/event_admin/EventAdminForm.svelte';
     import MultiUserSelector from '$lib/components/MultiUserSelector.svelte';
 
@@ -150,10 +152,10 @@
 {/if}
 <TableSearch placeholder={m.admin_searchEvents()} bind:inputValue={list.search} bind:field={list.field} fields={search_fields} hoverable={true}>
     <TableHead>
-        <TableHeadCell>{m.admin_tableId()}</TableHeadCell>
-        <TableHeadCell>{m.admin_tableName()}</TableHeadCell>
-        <TableHeadCell>{m.admin_tableVenue()}</TableHeadCell>
-        <TableHeadCell class="text-center">{m.admin_tableArchived()}</TableHeadCell>
+        <SortableHeadCell key="id" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableId()}</SortableHeadCell>
+        <SortableHeadCell key="name" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableName()}</SortableHeadCell>
+        <SortableHeadCell key={languageTag() === 'ko' ? 'venue_ko' : 'venue'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableVenue()}</SortableHeadCell>
+        <SortableHeadCell key="archived" sort={list.sort} onsort={(s) => list.setSort(s)} class="text-center">{m.admin_tableArchived()}</SortableHeadCell>
         <TableHeadCell class="w-1">{m.admin_tableActions()}</TableHeadCell>
     </TableHead>
     <TableBody>

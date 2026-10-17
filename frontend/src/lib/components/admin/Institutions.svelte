@@ -7,6 +7,7 @@
     import { apiMessage } from '$lib/apiMessages.js';
     import { PagedList } from '$lib/pagedList.svelte.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
 
     let { data } = $props();
 
@@ -63,9 +64,9 @@
 {/if}
 <TableSearch placeholder={m.admin_searchInstitutions()} bind:inputValue={list.search} bind:field={list.field} fields={institution_search_fields} hoverable={true}>
     <TableHead>
-        <TableHeadCell>{m.admin_tableId()}</TableHeadCell>
-        <TableHeadCell>{m.admin_tableInstitutionNameEn()}</TableHeadCell>
-        <TableHeadCell>{m.admin_tableInstitutionNameKo()}</TableHeadCell>
+        <SortableHeadCell key="id" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableId()}</SortableHeadCell>
+        <SortableHeadCell key="name_en" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableInstitutionNameEn()}</SortableHeadCell>
+        <SortableHeadCell key="name_ko" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableInstitutionNameKo()}</SortableHeadCell>
         <TableHeadCell class="w-1">{m.admin_tableActions()}</TableHeadCell>
     </TableHead>
     <TableBody>

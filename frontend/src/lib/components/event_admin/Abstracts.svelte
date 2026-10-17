@@ -15,6 +15,9 @@
     import RemoteSearchList from '$lib/components/RemoteSearchList.svelte';
     import { PagedList } from '$lib/pagedList.svelte.js';
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
+    import { sortRows } from '$lib/tableSort.js';
+    import { languageTag } from '$lib/paraglide/runtime.js';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
 
@@ -182,9 +185,19 @@ The Organising Committee
 {{ event.name }}`,
     }];
 
+    // The reviewers are all here, so they sort in the browser (see $lib/tableSort.js).
+    const reviewersColumn = {
+        name: r => getDisplayName(r),
+        email: r => r.user?.email || r.user_email,
+        institute: r => getDisplayInstitute(r),
+    };
+    let sortReviewers = $state([]);
+    const sortReviewersBy = (sort) => { sortReviewers = sort; reviewerCurrentPage = 1; };
+    let sortedReviewers = $derived(sortRows(filteredReviewers, sortReviewers, (r, key) => reviewersColumn[key](r)));
+
     let reviewerTotalPages = $derived(Math.ceil(filteredReviewers.length / itemsPerPage));
     let paginatedReviewers = $derived(
-        filteredReviewers.slice((reviewerCurrentPage - 1) * itemsPerPage, reviewerCurrentPage * itemsPerPage)
+        sortedReviewers.slice((reviewerCurrentPage - 1) * itemsPerPage, reviewerCurrentPage * itemsPerPage)
     );
 
     function handleReviewerPageChange(page) {
@@ -374,9 +387,9 @@ The Organising Committee
                 }
             }}
         /></TableHeadCell>
-        <TableHeadCell>{m.abstracts_name()}</TableHeadCell>
-        <TableHeadCell>{m.abstracts_email()}</TableHeadCell>
-        <TableHeadCell>{m.abstracts_institute()}</TableHeadCell>
+<SortableHeadCell key="name" sort={sortReviewers} onsort={sortReviewersBy}>{m.abstracts_name()}</SortableHeadCell>
+        <SortableHeadCell key="email" sort={sortReviewers} onsort={sortReviewersBy}>{m.abstracts_email()}</SortableHeadCell>
+        <SortableHeadCell key="institute" sort={sortReviewers} onsort={sortReviewersBy}>{m.abstracts_institute()}</SortableHeadCell>
         <TableHeadCell class="w-1">{m.abstracts_actions()}</TableHeadCell>
     </TableHead>
     <TableBody tableBodyClass="divide-y">
@@ -457,10 +470,10 @@ The Organising Committee
                     : selectedAbstracts.filter(id => !pageIds.includes(id));
             }}
         /></TableHeadCell>
-        <TableHeadCell>{m.abstracts_title()}</TableHeadCell>
-        <TableHeadCell>{m.abstracts_presenter()}</TableHeadCell>
-        <TableHeadCell>{m.abstracts_type()}</TableHeadCell>
-        <TableHeadCell>{m.abstracts_votes()}</TableHeadCell>
+        <SortableHeadCell key="title" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.abstracts_title()}</SortableHeadCell>
+        <SortableHeadCell key={languageTag() === 'ko' ? 'presenter_ko' : 'presenter'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.abstracts_presenter()}</SortableHeadCell>
+        <SortableHeadCell key="type" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.abstracts_type()}</SortableHeadCell>
+        <SortableHeadCell key="votes" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.abstracts_votes()}</SortableHeadCell>
         <TableHeadCell class="w-1">{m.abstracts_actions()}</TableHeadCell>
     </TableHead>
     <TableBody tableBodyClass="divide-y">

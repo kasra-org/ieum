@@ -9,6 +9,8 @@
     import { PagedList } from '$lib/pagedList.svelte.js';
 
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
+    import { languageTag } from '$lib/paraglide/runtime.js';
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
     import InstitutionLookup from '$lib/components/InstitutionLookup.svelte';
 
@@ -142,13 +144,13 @@
 {/if}
 <TableSearch placeholder={m.admin_searchUsers()} bind:inputValue={list.search} bind:field={list.field} fields={user_search_fields} hoverable={true}>
     <TableHead>
-        <TableHeadCell>{m.admin_tableId()}</TableHeadCell>
-        <TableHeadCell>{m.admin_tableUserName()}</TableHeadCell>
-        <TableHeadCell>{m.admin_tableEmail()}</TableHeadCell>
-        <TableHeadCell>{m.admin_tableInstitute()}</TableHeadCell>
-        <TableHeadCell>{m.admin_tableJoinDate()}</TableHeadCell>
-        <TableHeadCell>{m.admin_tableActiveStatus()}</TableHeadCell>
-        <TableHeadCell>{m.admin_tableVerifiedStatus()}</TableHeadCell>
+        <SortableHeadCell key="id" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableId()}</SortableHeadCell>
+        <SortableHeadCell key={languageTag() === 'ko' ? 'name_ko' : 'name'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableUserName()}</SortableHeadCell>
+        <SortableHeadCell key="email" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableEmail()}</SortableHeadCell>
+        <SortableHeadCell key={languageTag() === 'ko' ? 'institute_ko' : 'institute'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableInstitute()}</SortableHeadCell>
+        <SortableHeadCell key="joined" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableJoinDate()}</SortableHeadCell>
+        <SortableHeadCell key="active" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableActiveStatus()}</SortableHeadCell>
+        <SortableHeadCell key="verified" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.admin_tableVerifiedStatus()}</SortableHeadCell>
         <TableHeadCell class="w-1">{m.admin_tableActions()}</TableHeadCell>
     </TableHead>
     <TableBody>

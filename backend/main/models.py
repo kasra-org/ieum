@@ -1,7 +1,13 @@
+import re
+
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.db.models import prefetch_related_objects
 from django.db.models.functions import Upper
+
+# Hangul syllables and jamo, in every block they are encoded in.
+HANGUL = re.compile('[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7af\ud7b0-\ud7ff]')
+
 
 def default_main_languages():
     return ['en']
@@ -748,6 +754,11 @@ class PaymentHistory(models.Model):
     ]
 
     attendee = models.ForeignKey(Attendee, on_delete=models.SET_NULL, null=True, blank=True, related_name='payments')
+    # Or a walk-in, paid at the desk by card or cash and recorded by an admin.
+    # One or the other, never both; the copies below keep the record whole
+    # once either is deleted.
+    onsite_attendee = models.ForeignKey(OnSiteAttendee, on_delete=models.SET_NULL, null=True, blank=True,
+                                        related_name='payments')
     event = models.ForeignKey('Event', on_delete=models.SET_NULL, null=True, related_name='payments')
     amount = models.IntegerField(default=0)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed')
@@ -802,6 +813,24 @@ class PaymentHistory(models.Model):
         self.attendee_department = attendee.department
         self.attendee_job_title = attendee.job_title
         self.attendee_email = attendee.user.email if attendee.user else ''
+
+    def copy_onsite_info(self, onsite):
+        """Copy a walk-in's details for receipt preservation.
+
+        A walk-in gives one name and one institute, in whichever language
+        they wrote them; Korean goes to the Korean copies, so the payment
+        list shows it where it shows the Korean name of a registration.
+        """
+        name, institute = onsite.name.strip(), onsite.institute.strip()
+        if HANGUL.search(name):
+            self.attendee_korean_name = name
+        else:
+            self.attendee_first_name = name
+        self.attendee_institute = institute
+        if HANGUL.search(institute):
+            self.attendee_institute_ko = institute
+        self.attendee_job_title = onsite.job_title
+        self.attendee_email = onsite.email
 
     def copy_event_info(self, event):
         """Copy event information for receipt preservation"""

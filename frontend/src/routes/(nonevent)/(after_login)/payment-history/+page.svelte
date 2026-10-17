@@ -7,6 +7,8 @@
     import ChangeRequestModal from '$lib/components/ChangeRequestModal.svelte';
     import { getDisplayVenue, getDisplayOrganizers, formatDate, formatDateRange } from '$lib/utils.js';
     import ReceiptButtons from '$lib/components/ReceiptButtons.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
+    import { sortRows } from '$lib/tableSort.js';
 
     function formatAmount(amount) {
         const formattedAmount = amount.toLocaleString('ko-KR', { maximumFractionDigits: 0 });
@@ -58,9 +60,20 @@
         currentPage = 1;
     });
 
+    // Column sorting (see $lib/tableSort.js), by what each column shows.
+    const paymentsColumn = {
+        date: r => r.checkout_date,
+        event: r => r.event_name,
+        organizers: r => getDisplayOrganizers(r),
+        status: r => getStatusText(r.status),
+    };
+    let sortPayments = $state([]);
+    const sortPaymentsBy = (sort) => { sortPayments = sort; currentPage = 1; };
+    let sortedPayments = $derived(sortRows(filteredPayments, sortPayments, (r, key) => paymentsColumn[key](r)));
+
     let totalPages = $derived(Math.ceil(filteredPayments.length / itemsPerPage));
     let paginatedPayments = $derived(
-        filteredPayments.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+        sortedPayments.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
     );
 
     function handlePageChange(page) {
@@ -85,10 +98,10 @@
 <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
     <TableSearch placeholder={m.paymentHistory_searchPlaceholder()} hoverable={true} striped={true} bind:inputValue={searchTerm}>
         <TableHead>
-            <TableHeadCell>{m.paymentHistory_checkoutDate()}</TableHeadCell>
-            <TableHeadCell>{m.paymentHistory_eventName()}</TableHeadCell>
-            <TableHeadCell>{m.paymentHistory_organizers()}</TableHeadCell>
-            <TableHeadCell>{m.paymentHistory_status()}</TableHeadCell>
+<SortableHeadCell key="date" sort={sortPayments} onsort={sortPaymentsBy}>{m.paymentHistory_checkoutDate()}</SortableHeadCell>
+            <SortableHeadCell key="event" sort={sortPayments} onsort={sortPaymentsBy}>{m.paymentHistory_eventName()}</SortableHeadCell>
+            <SortableHeadCell key="organizers" sort={sortPayments} onsort={sortPaymentsBy}>{m.paymentHistory_organizers()}</SortableHeadCell>
+            <SortableHeadCell key="status" sort={sortPayments} onsort={sortPaymentsBy}>{m.paymentHistory_status()}</SortableHeadCell>
         </TableHead>
         <TableBody>
             {#if filteredPayments.length === 0}

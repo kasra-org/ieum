@@ -508,6 +508,23 @@ export const actions = {
             return { success: false, code: response.data?.code, error: response.data?.message || 'Failed to reorder organizers' };
         }
     },
+    add_onsite_attendee: async ({ cookies, params, request }) => {
+        let formdata = await request.formData();
+        const response = await post(`api/event/${params.slug}/onsite/add`, {
+            name: formdata.get('name'),
+            email: formdata.get('email'),
+            institute: formdata.get('institute'),
+            job_title: formdata.get('job_title'),
+            category: formdata.get('category') || null,
+            is_confirmed: formdata.get('is_confirmed') === 'true',
+        }, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            error(response.status, response.data);
+        }
+        return;
+    },
     update_onsite_attendee: async ({ cookies, params, request }) => {
         let formdata = await request.formData();
         const response = await post(`api/event/${params.slug}/onsite/${formdata.get('id')}/update`, {
@@ -562,12 +579,15 @@ export const actions = {
     },
     create_payment: async ({ cookies, params, request }) => {
         let formdata = await request.formData();
+        // A registration or a walk-in, by whichever tab the payment was
+        // entered on.
         const attendee_id = parseInt(formdata.get('attendee_id'));
-        if (isNaN(attendee_id)) {
+        const onsite_attendee_id = parseInt(formdata.get('onsite_attendee_id'));
+        if (isNaN(attendee_id) && isNaN(onsite_attendee_id)) {
             error(400, { code: 'attendee_required' });
         }
         const data = {
-            attendee_id,
+            ...(isNaN(onsite_attendee_id) ? { attendee_id } : { onsite_attendee_id }),
             amount: parseInt(formdata.get('amount')) || 0,
             order_id: generateOrderId(),
             payment_type: formdata.get('payment_type'),

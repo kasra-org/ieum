@@ -1617,6 +1617,216 @@ class InstitutionEnglishNameTests(TestCase):
         self.assertEqual(self.update(institution, 'Pusan National University', '부산대학교').status_code, 200)
 
 
+class OnSitePaymentTests(TestCase):
+    """A walk-in who paid at the desk, by card or cash, is recorded from the
+    payments tab as a registration's manual payment is."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Symposium', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, published=True)
+        self.category, = add_categories(self.event, ('Regular', 50000))
+        self.category.onsite_fee = 70000
+        self.category.save()
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA', is_staff=True)
+        self.client.force_login(self.admin_user)
+        self.walkin = OnSiteAttendee.objects.create(
+            event=self.event, name='홍길동', email='walk@example.com', institute='부산대학교',
+            job_title='학생', category=self.category)
+
+    def pay(self, **fields):
+        payload = {'amount': 70000, 'order_id': f'ORD{PaymentHistory.objects.count()}', 'payment_type': 'cash'}
+        payload.update(fields)
+        return self.client.post(f'/api/event/{self.event.id}/payment/add', data=json.dumps(payload),
+                                content_type='application/json')
+
+    def test_a_walk_in_payment_is_recorded_and_confirms_them(self):
+        response = self.pay(onsite_attendee_id=self.walkin.id, payment_type='card', card_type='신한카드')
+        self.assertEqual(response.status_code, 200)
+        payment = PaymentHistory.objects.get()
+        self.assertEqual((payment.onsite_attendee_id, payment.attendee_id, payment.amount, payment.provider),
+                         (self.walkin.id, None, 70000, 'manual'))
+        # The walk-in wrote in Korean, so the Korean copies carry it.
+        self.assertEqual((payment.attendee_name, payment.attendee_korean_name, payment.attendee_institute_ko,
+                          payment.attendee_email), ('홍길동', '홍길동', '부산대학교', 'walk@example.com'))
+        self.walkin.refresh_from_db()
+        self.assertTrue(self.walkin.is_confirmed)
+        row, = self.client.get(f'/api/event/{self.event.id}/payments').json()['items']
+        self.assertEqual((row['onsite_attendee_id'], row['attendee_name'], row['manual_payment_type']),
+                         (self.walkin.id, '홍길동', 'card'))
+        summary = self.client.get(f'/api/event/{self.event.id}/payments').json()['summary']
+        self.assertEqual((summary['count_completed'], summary['total_completed']), (1, 70000))
+
+    def test_the_picker_lists_only_walk_ins_not_yet_paid(self):
+        other = OnSiteAttendee.objects.create(event=self.event, name='Kim', email='k@example.com',
+                                              institute='PNU', category=self.category)
+        self.pay(onsite_attendee_id=self.walkin.id)
+        url = f'/api/event/{self.event.id}/onsite?has_completed_payment=false'
+        self.assertEqual([r['id'] for r in self.client.get(url).json()['items']], [other.id])
+        # Paid twice is refused; a cancelled payment frees them again.
+        self.assertEqual(self.pay(onsite_attendee_id=self.walkin.id).json()['code'], 'payment_exists')
+        PaymentHistory.objects.update(status='cancelled')
+        self.assertEqual(self.pay(onsite_attendee_id=self.walkin.id).status_code, 200)
+
+    def test_exactly_one_payer_and_of_this_event(self):
+        attendee = Attendee.objects.create(event=self.event, user_email='a@example.com', first_name='A',
+                                           last_name='B', nationality=1, institute='PNU', category=self.category)
+        self.assertEqual(self.pay().json()['code'], 'attendee_required')
+        self.assertEqual(self.pay(attendee_id=attendee.id, onsite_attendee_id=self.walkin.id).json()['code'],
+                         'attendee_required')
+        elsewhere = Event.objects.create(name='Other', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+                                         venue='Seoul', capacity=10)
+        stranger = OnSiteAttendee.objects.create(event=elsewhere, name='X', email='x@example.com', institute='PNU')
+        response = self.pay(onsite_attendee_id=stranger.id)
+        self.assertEqual((response.status_code, response.json()['code']), (404, 'attendee_not_found'))
+        self.assertFalse(PaymentHistory.objects.exists())
+
+    def test_the_record_survives_the_walk_in_being_removed(self):
+        self.pay(onsite_attendee_id=self.walkin.id)
+        self.walkin.delete()
+        row, = self.client.get(f'/api/event/{self.event.id}/payments').json()['items']
+        self.assertEqual((row['onsite_attendee_id'], row['attendee_name']), (None, '홍길동'))
+
+
+class ColumnSortTests(TestCase):
+    """The admin tables sort by their column headers on the server, so the
+    whole list is in order before it is paged - `order=a,-b`."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Symposium', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, published=True)
+        self.cheap, self.dear = add_categories(self.event, ('Student', 0), ('Regular', 50000))
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA', is_staff=True)
+        self.client.force_login(self.admin_user)
+        def register(first, last, korean, institute, category, **extra):
+            a = Attendee.objects.create(event=self.event, user_email=f'{first.lower()}@example.com',
+                                        first_name=first, last_name=last, korean_name=korean, nationality=1,
+                                        institute=institute, category=category, **extra)
+            self.event.attendees.add(a)
+            return a
+        self.ann = register('Ann', 'Lee', '이안', 'Yale', self.cheap)
+        self.bob = register('Bob', 'Kim', '', 'Brown', self.cheap, job_title='Prof')
+        self.cal = register('cal', 'Park', '박칼', 'Yale', self.cheap, roles=['staff'])
+        self.dan = register('Dan', 'Oh', '', 'Duke', self.cheap, roles=['organizer'])
+
+    def names(self, order, **params):
+        query = '&'.join([f'order={order}', 'status=all', 'limit=50'] + [f'{k}={v}' for k, v in params.items()])
+        return [r['first_name'] for r in self.client.get(f'/api/event/{self.event.id}/attendees?{query}').json()['items']]
+
+    def test_one_column_either_way_case_aside(self):
+        self.assertEqual(self.names('name'), ['Ann', 'Bob', 'cal', 'Dan'])
+        self.assertEqual(self.names('-name'), ['Dan', 'cal', 'Bob', 'Ann'])
+
+    def test_later_columns_break_the_ties_of_earlier_ones(self):
+        self.assertEqual(self.names('institute,-name'), ['Bob', 'Dan', 'cal', 'Ann'])
+
+    def test_blanks_go_last_whichever_the_direction(self):
+        self.assertEqual(self.names('job_title')[0], 'Bob')
+        self.assertEqual(self.names('-job_title')[0], 'Bob')
+        self.assertEqual(self.names('korean_name')[-2:], ['Bob', 'Dan'])
+        # The Korean name, or the English where there is none - as shown;
+        # Hangul sorts before the Latin letters.
+        self.assertEqual(self.names('name_ko'), ['cal', 'Ann', 'Bob', 'Dan'])
+
+    def test_korean_sorts_as_a_korean_reader_expects(self):
+        # 이 after 김 and 박: the database's own collation would put it first.
+        Attendee.objects.filter(id=self.bob.id).update(korean_name='김밥')
+        Attendee.objects.filter(id=self.dan.id).update(korean_name='최단')
+        self.assertEqual(self.names('korean_name'), ['Bob', 'cal', 'Ann', 'Dan'])
+
+    def test_unknown_columns_leave_the_list_as_it_was(self):
+        self.assertEqual(self.names('nonsense,-password'), ['Ann', 'Bob', 'cal', 'Dan'])
+
+    def test_the_role_column_sorts_by_first_role(self):
+        Speaker.objects.create(event=self.event, name='S', email='bob@example.com', type='invited',
+                               is_speaker=False, is_chair=True)
+        self.assertEqual(self.names('role'), ['Dan', 'Bob', 'cal', 'Ann'])
+
+    def test_the_export_follows_the_same_order(self):
+        rows = self.client.get(f'/api/event/{self.event.id}/attendees/export?status=all&order=-name').json()
+        self.assertEqual([r['first_name'] for r in rows], ['Dan', 'cal', 'Bob', 'Ann'])
+
+    def test_paging_a_sorted_list_never_repeats_a_row(self):
+        seen = []
+        for offset in range(4):
+            seen += self.names('institute', offset=offset, limit=1)
+        self.assertEqual(sorted(seen), ['Ann', 'Bob', 'Dan', 'cal'])
+
+    def test_payments_and_walk_ins_sort_too(self):
+        for amount, name in ((30000, 'Zed'), (10000, 'Amy'), (20000, '가나')):
+            p = PaymentHistory(event=self.event, amount=amount, provider='manual', payment_type='직접입력')
+            if name == '가나':
+                p.attendee_korean_name = name
+            else:
+                p.attendee_first_name = name
+            p.save()
+        payments = self.client.get(f'/api/event/{self.event.id}/payments?order=-amount').json()['items']
+        self.assertEqual([p['amount'] for p in payments], [30000, 20000, 10000])
+        payers = self.client.get(f'/api/event/{self.event.id}/payments?order=payer').json()['items']
+        self.assertEqual([p['attendee_name'] for p in payers], ['가나', 'Amy', 'Zed'])
+        for name in ('Yu', 'Ko'):
+            OnSiteAttendee.objects.create(event=self.event, name=name, email=f'{name}@example.com', institute='PNU')
+        walkins = self.client.get(f'/api/event/{self.event.id}/onsite?order=name').json()['items']
+        self.assertEqual([w['name'] for w in walkins], ['Ko', 'Yu'])
+
+
+class AdminOnSiteAddTests(TestCase):
+    """An event admin adds a walk-in by hand, with no on-site code and
+    outside the event's dates."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Symposium', start_date=date(2020, 1, 1), end_date=date(2020, 1, 2),
+            venue='Seoul', capacity=100, published=True)
+        self.category, = add_categories(self.event, ('Regular', 50000))
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA')
+        self.event.admins.add(self.admin_user)
+        self.client.force_login(self.admin_user)
+
+    def add(self, **fields):
+        payload = {'name': '홍길동', 'email': 'walk@example.com', 'institute': '부산대학교', 'job_title': '학생'}
+        payload.update(fields)
+        return self.client.post(f'/api/event/{self.event.id}/onsite/add', data=json.dumps(payload),
+                                content_type='application/json')
+
+    def test_an_admin_adds_a_walk_in(self):
+        self.assertEqual(self.add(category=self.category.id, is_confirmed=True).status_code, 200)
+        walkin = OnSiteAttendee.objects.get()
+        self.assertEqual((walkin.name, walkin.institute, walkin.category_id, walkin.is_confirmed,
+                          walkin.onsiteattendee_nametag_id), ('홍길동', '부산대학교', self.category.id, True, 1))
+        # Typed text, not a new institution.
+        self.assertFalse(Institution.objects.exists())
+
+    def test_name_email_and_category_are_checked(self):
+        self.assertEqual(self.add(name=' ').json()['code'], 'name_required')
+        self.assertEqual(self.add(email='').json()['code'], 'email_required')
+        other = Event.objects.create(name='Other', start_date=date(2020, 1, 1), end_date=date(2020, 1, 2),
+                                     venue='Seoul', capacity=10)
+        foreign, = add_categories(other, ('Cheap', 0))
+        self.assertEqual(self.add(category=foreign.id).json()['code'], 'invalid_category')
+        self.assertFalse(OnSiteAttendee.objects.exists())
+
+    def test_only_the_event_admins(self):
+        self.client.force_login(User.objects.create_user(username='x@example.com', email='x@example.com',
+                                                         password='pw12345!aA'))
+        self.assertNotEqual(self.add().status_code, 200)
+        self.assertFalse(OnSiteAttendee.objects.exists())
+
+    def test_editing_a_walk_in_keeps_the_institute_as_typed(self):
+        self.add()
+        walkin = OnSiteAttendee.objects.get()
+        self.client.post(f'/api/event/{self.event.id}/onsite/{walkin.id}/update',
+                         data=json.dumps({'name': '홍길동', 'email': 'walk@example.com', 'institute': '서울대학교',
+                                          'job_title': '학생'}), content_type='application/json')
+        walkin.refresh_from_db()
+        self.assertEqual(walkin.institute, '서울대학교')
+        self.assertFalse(Institution.objects.exists())
+
+
 class AdminFeeWaiverTests(TestCase):
     """An event admin can excuse one registration from its category's fee."""
 

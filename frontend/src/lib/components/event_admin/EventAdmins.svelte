@@ -10,6 +10,8 @@
     import UserSelectionModal from '$lib/components/UserSelectionModal.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
+    import { sortRows } from '$lib/tableSort.js';
 
     let { data } = $props();
 
@@ -46,9 +48,19 @@
         currentPage = 1;
     });
 
+    // Column sorting (see $lib/tableSort.js), by what each column shows.
+    const eventAdminsColumn = {
+        name: r => getDisplayName(r),
+        email: r => r.email,
+        institute: r => getDisplayInstitute(r),
+    };
+    let sortEventAdmins = $state([]);
+    const sortEventAdminsBy = (sort) => { sortEventAdmins = sort; currentPage = 1; };
+    let sortedEventAdmins = $derived(sortRows(filteredEventAdmins, sortEventAdmins, (r, key) => eventAdminsColumn[key](r)));
+
     let totalPages = $derived(Math.ceil(filteredEventAdmins.length / itemsPerPage));
     let paginatedEventAdmins = $derived(
-        filteredEventAdmins.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+        sortedEventAdmins.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
     );
 
     function handlePageChange(page) {
@@ -110,9 +122,9 @@
 </div>
 <TableSearch placeholder={m.eventAdmins_searchPlaceholder()} hoverable={true} bind:inputValue={searchTermEventAdmin} bind:field={searchField} fields={searchFields}>
     <TableHead>
-        <TableHeadCell>{m.eventAdmins_name()}</TableHeadCell>
-        <TableHeadCell>{m.eventAdmins_email()}</TableHeadCell>
-        <TableHeadCell>{m.eventAdmins_institute()}</TableHeadCell>
+<SortableHeadCell key="name" sort={sortEventAdmins} onsort={sortEventAdminsBy}>{m.eventAdmins_name()}</SortableHeadCell>
+        <SortableHeadCell key="email" sort={sortEventAdmins} onsort={sortEventAdminsBy}>{m.eventAdmins_email()}</SortableHeadCell>
+        <SortableHeadCell key="institute" sort={sortEventAdmins} onsort={sortEventAdminsBy}>{m.eventAdmins_institute()}</SortableHeadCell>
         <TableHeadCell class="w-1">{m.eventAdmins_actions()}</TableHeadCell>
     </TableHead>
     <TableBody tableBodyClass="divide-y">

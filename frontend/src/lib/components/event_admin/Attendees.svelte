@@ -15,6 +15,8 @@
 
     import RegistrationForm from '$lib/components/RegistrationForm.svelte';
     import TablePagination from '$lib/components/TablePagination.svelte';
+    import SortableHeadCell from '$lib/components/SortableHeadCell.svelte';
+    import { orderParam } from '$lib/tableSort.js';
     import ConfirmModal from '$lib/components/ConfirmModal.svelte';
     import ActionTooltip from '$lib/components/ActionTooltip.svelte';
     import SendEmailModal from '$lib/components/SendEmailModal.svelte';
@@ -36,7 +38,9 @@
     // page on screen. Deliberately not list.exportAll(): those actions always
     // covered every registrant, whatever was typed in the search box.
     async function fetchRoster(extra = {}) {
+        // In the order on screen, so the CSV lists them as the table does.
         const params = new URLSearchParams({ status: 'registered', ...extra });
+        if (list.sort.length) params.set('order', orderParam(list.sort));
         const response = await fetch(`${list.url}/export?${params}`, { headers: { Accept: 'application/json' } });
         if (!response.ok) throw new Error(`${response.status}`);
         return response.json();
@@ -838,22 +842,24 @@
                 }}
             />
         </TableHeadCell>
-        <TableHeadCell>{m.attendees_id()}</TableHeadCell>
-        <TableHeadCell class="w-1">{m.attendees_attended()}</TableHeadCell>
-        <TableHeadCell>{m.attendees_role()}</TableHeadCell>
-        <TableHeadCell>{m.attendees_name()}</TableHeadCell>
-        <TableHeadCell>{m.attendees_tier()}</TableHeadCell>
-        <TableHeadCell>{m.attendees_fee()}</TableHeadCell>
-        <TableHeadCell class="w-1 whitespace-nowrap">{m.attendees_abstractSubmitted()}</TableHeadCell>
-        <TableHeadCell>{m.attendees_email()}</TableHeadCell>
-        <TableHeadCell>{m.attendees_nationality()}</TableHeadCell>
-        <TableHeadCell>{m.attendees_institute()}</TableHeadCell>
+        <!-- Sorted on the server, the whole roster before it is paged; a
+             column showing Korean where there is some sorts by what it shows. -->
+        <SortableHeadCell key="id" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_id()}</SortableHeadCell>
+        <SortableHeadCell key="attended" sort={list.sort} onsort={(s) => list.setSort(s)} class="w-1">{m.attendees_attended()}</SortableHeadCell>
+        <SortableHeadCell key="role" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_role()}</SortableHeadCell>
+        <SortableHeadCell key={languageTag() === 'ko' ? 'name_ko' : 'name'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_name()}</SortableHeadCell>
+        <SortableHeadCell key={languageTag() === 'ko' ? 'category_ko' : 'category'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_tier()}</SortableHeadCell>
+        <SortableHeadCell key="fee" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_fee()}</SortableHeadCell>
+        <SortableHeadCell key="abstract" sort={list.sort} onsort={(s) => list.setSort(s)} class="w-1">{m.attendees_abstractSubmitted()}</SortableHeadCell>
+        <SortableHeadCell key="email" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_email()}</SortableHeadCell>
+        <SortableHeadCell key="nationality" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_nationality()}</SortableHeadCell>
+        <SortableHeadCell key={languageTag() === 'ko' ? 'institute_ko' : 'institute'} sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_institute()}</SortableHeadCell>
         {#if expand_attendees}
-            <TableHeadCell>{m.attendees_koreanName()}</TableHeadCell>
-            <TableHeadCell>{m.attendees_department()}</TableHeadCell>
-            <TableHeadCell>{m.attendees_jobTitle()}</TableHeadCell>
-            <TableHeadCell>{m.attendees_disability()}</TableHeadCell>
-            <TableHeadCell>{m.attendees_dietary()}</TableHeadCell>
+            <SortableHeadCell key="korean_name" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_koreanName()}</SortableHeadCell>
+            <SortableHeadCell key="department" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_department()}</SortableHeadCell>
+            <SortableHeadCell key="job_title" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_jobTitle()}</SortableHeadCell>
+            <SortableHeadCell key="disability" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_disability()}</SortableHeadCell>
+            <SortableHeadCell key="dietary" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.attendees_dietary()}</SortableHeadCell>
             {#each custom_headers_attendees as header}
                 <TableHeadCell>{@render process_spaces(header)}</TableHeadCell>
             {/each}
