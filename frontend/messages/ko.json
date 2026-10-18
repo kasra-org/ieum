@@ -58,6 +58,7 @@
 	"cookieConsent_accept": "동의",
 
 	"common_submit": "제출",
+	"table_sortHint": "Shift + 클릭으로 다중 정렬",
 	"common_cancel": "취소",
 	"common_save": "저장",
 	"common_delete": "삭제",

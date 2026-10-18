@@ -6,6 +6,7 @@
     import { TableHeadCell } from '$lib/components/ui';
     import { ArrowDown, ArrowUp, ArrowUpDown } from '@lucide/svelte';
     import { nextSort } from '$lib/tableSort.js';
+    import * as m from '$lib/paraglide/messages.js';
 
     let { key, sort = [], onsort, class: className = '', children } = $props();
 
@@ -14,6 +15,9 @@
 </script>
 
 <TableHeadCell class={className} aria-sort={dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : undefined}>
+    <!-- The hint shows below the header, as ActionTooltip's does above: the
+         table's scrolling wrapper would clip it above the header row. -->
+    <span class="group relative inline-flex">
     <!-- Shift+click would otherwise select the header text. -->
     <button
         type="button"
@@ -33,4 +37,9 @@
             <span class="text-[10px] leading-none text-primary-700">{index + 1}</span>
         {/if}
     </button>
+    <span role="tooltip" class="invisible group-hover:visible absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 text-xs font-normal normal-case text-white bg-gray-800 rounded whitespace-nowrap z-50">
+        {m.table_sortHint()}
+        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-800"></span>
+    </span>
+    </span>
 </TableHeadCell>

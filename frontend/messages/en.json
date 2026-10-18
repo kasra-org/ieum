@@ -58,6 +58,7 @@
 	"cookieConsent_accept": "Accept",
 
 	"common_submit": "Submit",
+	"table_sortHint": "Shift + click to sort by several columns",
 	"common_cancel": "Cancel",
 	"common_save": "Save",
 	"common_delete": "Delete",
