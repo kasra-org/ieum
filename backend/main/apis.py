@@ -26,7 +26,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.template import Template, Context
 from django.db import IntegrityError, transaction
-from django.db.models import Case, CharField, Count, Exists, F, IntegerField, Max, OuterRef, Prefetch, Q, Sum, Value, When, prefetch_related_objects
+from django.db.models import Case, CharField, Count, Exists, F, IntegerField, Max, OuterRef, Prefetch, Q, Subquery, Sum, Value, When, prefetch_related_objects
 from django.db.models.functions import Cast, Coalesce, Collate, Concat, Length, LPad, NullIf, Trim
 
 from django.conf import settings
@@ -427,10 +427,12 @@ def get_payment_history(request):
     payments = PaymentHistory.objects.filter(attendee__user=user).select_related('event')
 
     payment_history = []
+    # Dated where they were paid, as their receipts are.
+    zone = business_zone()
     for payment in payments:
         payment_history.append({
             'number': payment.toss_order_id or str(payment.id),
-            'checkout_date': payment.created_at.strftime('%Y-%m-%d'),
+            'checkout_date': payment.created_at.astimezone(zone).strftime('%Y-%m-%d'),
             'amount': payment.amount,
             'event_id': payment.event.id if payment.event else None,
             'event_name': payment.event_name,
@@ -490,7 +492,42 @@ def get_receipt_by_link(request, token: str):
             {"code": "not_found", "message": "Payment not found"},
             status=404,
         )
-    return receipt_payload(payment)
+    receipt = receipt_payload(payment)
+    # An admin of the event opening it from the payments or on-site tab may
+    # send it from here; the walk-in opening their own link sees none of it.
+    user = request.user
+    if payment.event_id and user.is_authenticated and (
+            user.is_staff or Event.objects.filter(id=payment.event_id, admins=user).exists()):
+        receipt['payment_id'] = payment.id
+        receipt['send_to'] = ((payment.onsite_attendee.email if payment.onsite_attendee_id else '')
+                              or payment.attendee_email)
+    return receipt
+
+
+def business_zone():
+    """The timezone the business keeps (BusinessSettings): dates on receipts
+    and in the payment lists read in it, and times typed in its forms mean
+    it - the server itself keeps UTC."""
+    from zoneinfo import ZoneInfo
+    return ZoneInfo(BusinessSettings.get_instance().timezone)
+
+
+def parse_local_datetime(text, zone):
+    """`YYYY-MM-DDTHH:MM[:SS]` as a form's datetime input sends it, read in
+    `zone` unless it says otherwise; None when blank. ValueError if not a
+    date and time at all."""
+    text = (text or '').strip()
+    if not text:
+        return None
+    value = datetime.fromisoformat(text.replace('Z', '+00:00'))
+    return value if value.tzinfo else value.replace(tzinfo=zone)
+
+
+def is_desk_payment(payment):
+    """A walk-in's payment entered by an admin - the record of money taken at
+    the desk, which the admin may correct or delete outright. Marked by its
+    receipt link, which it keeps after the walk-in's own record is gone."""
+    return payment.provider == 'manual' and bool(payment.receipt_token)
 
 
 def receipt_payload(payment):
@@ -501,7 +538,9 @@ def receipt_payload(payment):
     manual = getattr(payment, 'manual_transaction', None) if payment.provider == 'manual' else None
     return {
         'number': payment.toss_order_id or str(payment.id),
-        'checkout_date': payment.created_at.strftime('%Y-%m-%d'),
+        # The day it was paid where it was paid - in UTC a morning payment
+        # in Korea is dated the day before.
+        'checkout_date': payment.created_at.astimezone(business_zone()).strftime('%Y-%m-%d'),
         'amount': payment.amount,
         'event_id': payment.event.id if payment.event else None,
         'event_name': payment.event_name,
@@ -3698,8 +3737,14 @@ ONSITE_SORTS = {
 
 
 def filtered_onsite(event, search='', field='all', ids='', confirmed=None, has_completed_payment=None):
+    # Their latest completed desk payment, for the row's receipt icons -
+    # read in the same query as the rows.
+    paid_at_desk = (PaymentHistory.objects.filter(onsite_attendee=OuterRef('pk'), status='completed')
+                    .order_by('-created_at', '-id'))
     onsite = (event.onsite_attendees.select_related('category', 'event')
-              .annotate(nametag_text=Cast('onsiteattendee_nametag_id', CharField()))
+              .annotate(nametag_text=Cast('onsiteattendee_nametag_id', CharField()),
+                        receipt_payment_id=Subquery(paid_at_desk.values('id')[:1]),
+                        receipt_token=Subquery(paid_at_desk.values('receipt_token')[:1]))
               .filter(search_q(search, field, ONSITE_SEARCH_FIELDS)))
     if ids:
         onsite = onsite.filter(id__in=parse_ids(ids))
@@ -3991,8 +4036,9 @@ def ensure_provider_enabled(request, provider):
 
 # ===== Event Payment Management (Event Admin) =====
 
-def payment_row(payment):
-    """One payment as the admin table shows it, manual-entry details included."""
+def payment_row(payment, zone):
+    """One payment as the admin table shows it, manual-entry details included;
+    dates and times in `zone`, the business's (business_zone)."""
     # Get manual transaction details if exists
     manual_payment_type = ''
     supply_amount = 0
@@ -4014,13 +4060,14 @@ def payment_row(payment):
         approval_number = mt.approval_number
         installment = mt.installment
         if mt.transaction_datetime:
-            transaction_datetime = mt.transaction_datetime.strftime('%Y-%m-%d %H:%M:%S')
+            transaction_datetime = mt.transaction_datetime.astimezone(zone).strftime('%Y-%m-%d %H:%M:%S')
         transaction_description = mt.transaction_description
 
     return {
         'id': payment.id,
         'number': payment.toss_order_id or str(payment.id),
-        'checkout_date': payment.created_at.strftime('%Y-%m-%d'),
+        'checkout_date': payment.created_at.astimezone(zone).strftime('%Y-%m-%d'),
+        'paid_at': payment.created_at.astimezone(zone).strftime('%Y-%m-%dT%H:%M'),
         'amount': payment.amount,
         'status': payment.status,
         'payment_type': payment.payment_type,
@@ -4113,7 +4160,8 @@ def get_event_payments(request, event_id: int, search: str = '', field: str = 'a
     summary = {key: value or 0 for key, value in totals.items()}
     page = page_of(ordered(filtered_payments(event, search, field, status), order, PAYMENT_SORTS),
                    offset, limit, summary=summary)
-    page['items'] = [payment_row(p) for p in page['items']]
+    zone = business_zone()
+    page['items'] = [payment_row(p, zone) for p in page['items']]
     return page
 
 
@@ -4123,7 +4171,8 @@ def export_event_payments(request, event_id: int, search: str = '', field: str =
                           order: str = ''):
     """Every payment matching the same filters, unpaged - for the CSV export."""
     event = Event.objects.get(id=event_id)
-    return [payment_row(p) for p in ordered(filtered_payments(event, search, field, status), order, PAYMENT_SORTS)]
+    zone = business_zone()
+    return [payment_row(p, zone) for p in ordered(filtered_payments(event, search, field, status), order, PAYMENT_SORTS)]
 
 
 @api.post("/event/{event_id}/payment/add", response=MessageSchema)
@@ -4172,6 +4221,16 @@ def create_event_payment(request, event_id: int, data: PaymentCreateSchema):
             status=400,
         )
 
+    # Times typed in the form, in the business's timezone. When a walk-in
+    # paid may be given (entered afterwards, from the desk's slips).
+    zone = business_zone()
+    try:
+        paid_at = parse_local_datetime(data.paid_at, zone) if onsite else None
+        transferred_at = parse_local_datetime(data.transaction_datetime, zone)
+    except ValueError:
+        return api.create_response(
+            request, {"code": "invalid_datetime", "message": "Invalid date and time."}, status=400)
+
     # Create payment with "직접입력" as the main payment type
     payment = PaymentHistory(
         attendee=attendee,
@@ -4192,6 +4251,10 @@ def create_event_payment(request, event_id: int, data: PaymentCreateSchema):
         payment.copy_onsite_info(onsite)
     payment.copy_event_info(event)
     payment.save()
+    if paid_at:
+        # created_at stamps itself on the first save; this is when it was paid.
+        payment.created_at = paid_at
+        payment.save(update_fields=['created_at'])
 
     # Taking a walk-in's money at the desk is what confirming them means
     # where the event charges on site - so recording it confirms them.
@@ -4212,8 +4275,7 @@ def create_event_payment(request, event_id: int, data: PaymentCreateSchema):
         manual_tx.approval_number = data.approval_number
         manual_tx.installment = data.installment
     elif data.payment_type == 'transfer':
-        if data.transaction_datetime:
-            manual_tx.transaction_datetime = datetime.fromisoformat(data.transaction_datetime.replace('Z', '+00:00'))
+        manual_tx.transaction_datetime = transferred_at
         manual_tx.transaction_description = data.transaction_description
     manual_tx.save()
 
@@ -4224,12 +4286,89 @@ def create_event_payment(request, event_id: int, data: PaymentCreateSchema):
     return {"code": "success", "message": "Payment created successfully."}
 
 
+def desk_payment_or_error(request, event, payment_id):
+    """(payment, None) for a walk-in's desk payment on `event`, else
+    (None, the error response) - only those are edited or deleted outright;
+    a gateway's payment is cancelled, which refunds it."""
+    payment = (PaymentHistory.objects.select_related('manual_transaction')
+               .filter(id=payment_id, event=event).first())
+    if payment is None:
+        return None, api.create_response(
+            request, {"code": "payment_not_found", "message": "Payment not found."}, status=404)
+    if not is_desk_payment(payment):
+        return None, api.create_response(
+            request, {"code": "not_desk_payment", "message": "Only a desk payment can be changed this way."},
+            status=400)
+    return payment, None
+
+
+@api.post("/event/{event_id}/payment/{payment_id}/update", response=MessageSchema)
+@ensure_event_staff
+def update_desk_payment(request, event_id: int, payment_id: int, data: PaymentUpdateSchema):
+    """Correct a walk-in's desk payment as entered - the amount actually
+    taken, how, when - so its receipt says what happened. The receipt link
+    and the walk-in stay as they were."""
+    event = Event.objects.get(id=event_id)
+    payment, error = desk_payment_or_error(request, event, payment_id)
+    if error:
+        return error
+    if data.payment_type not in ('card', 'transfer', 'cash'):
+        return api.create_response(
+            request, {"code": "invalid_payment_type", "message": "Invalid payment type."}, status=400)
+    if data.amount < 0:
+        return api.create_response(
+            request, {"code": "negative_amount", "message": "The amount cannot be negative."}, status=400)
+    zone = business_zone()
+    try:
+        paid_at = parse_local_datetime(data.paid_at, zone)
+        transferred_at = parse_local_datetime(data.transaction_datetime, zone)
+    except ValueError:
+        return api.create_response(
+            request, {"code": "invalid_datetime", "message": "Invalid date and time."}, status=400)
+    payment.amount = data.amount
+    payment.note = data.note
+    if paid_at:
+        payment.created_at = paid_at
+    payment.save(update_fields=['amount', 'note', 'created_at'])
+    tx, _ = ManualTransaction.objects.get_or_create(payment=payment, defaults={'payment_type': data.payment_type})
+    tx.payment_type = data.payment_type
+    tx.supply_amount = data.supply_amount
+    tx.vat = data.vat
+    # Only the chosen method's details are kept; switching from card to
+    # cash drops the card's.
+    card = data.payment_type == 'card'
+    tx.card_type = data.card_type if card else ''
+    tx.card_number = data.card_number if card else ''
+    tx.approval_number = data.approval_number if card else ''
+    tx.installment = data.installment if card else 'single'
+    transfer = data.payment_type == 'transfer'
+    tx.transaction_datetime = transferred_at if transfer else None
+    tx.transaction_description = data.transaction_description if transfer else ''
+    tx.save()
+    return {"code": "success", "message": "Payment updated."}
+
+
+@api.post("/event/{event_id}/payment/{payment_id}/delete", response=MessageSchema)
+@ensure_event_staff
+def delete_desk_payment(request, event_id: int, payment_id: int):
+    """Delete a walk-in's desk payment entered by mistake. Its receipt link
+    stops working; the walk-in stays registered (and confirmed, if they
+    were), and can be paid for again."""
+    event = Event.objects.get(id=event_id)
+    payment, error = desk_payment_or_error(request, event, payment_id)
+    if error:
+        return error
+    payment.delete()
+    return {"code": "success", "message": "Payment deleted."}
+
+
 @api.post("/event/{event_id}/payment/{payment_id}/receipt/send", response=MessageSchema)
 @ensure_event_staff
 def send_payment_receipt(request, event_id: int, payment_id: int):
-    """Send a walk-in their receipt (again) - one recorded before receipts
-    were sent, say, or to an address since corrected. Registrants see theirs
-    from their own account, so only desk payments carry a receipt link."""
+    """Send a walk-in their receipt (again), from the payments tab or their
+    row on the on-site tab - one recorded before receipts were sent, say, or
+    to an address since corrected. Registrants see theirs from their own account, so only desk
+    payments carry a receipt link."""
     event = Event.objects.get(id=event_id)
     payment = PaymentHistory.objects.filter(id=payment_id, event=event).first()
     if payment is None or not payment.receipt_token:

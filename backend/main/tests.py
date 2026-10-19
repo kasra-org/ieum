@@ -18,7 +18,7 @@ from main import email_body, nicepay
 from main.apis import template_attachment_paths
 from main.tasks import build_email, cleanup_media_files
 from main.utils import render_email_template
-from main.models import CustomAnswer, CustomQuestion, Abstract, AbstractVote, Attendee, Institution, EmailAttachment, EmailTemplate, Event, EventInvitation, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory, Speaker
+from main.models import CustomAnswer, CustomQuestion, Abstract, AbstractVote, Attendee, Institution, EmailAttachment, EmailTemplate, Event, EventInvitation, NicePayTransaction, OnSiteAttendee, PaymentHistory, PaymentSettings, RegistrationCategory, Speaker, BusinessSettings
 
 User = get_user_model()
 
@@ -1817,6 +1817,13 @@ class OnSiteReceiptTests(TestCase):
         self.assertEqual((receipt['amount'], receipt['attendee_name'], receipt['attendee_institute_ko'],
                           receipt['payment_type'], receipt['status']), (65000, '홍길동', '부산대학교', 'cash', 'completed'))
         self.assertEqual(self.client.get('/api/receipt/not-a-token').status_code, 404)
+        # Nothing to send it with for the walk-in; an event admin gets it.
+        self.assertIsNone(receipt['payment_id'])
+        self.assertIsNone(receipt['send_to'])
+        self.client.force_login(self.admin_user)
+        receipt = self.client.get(f'/api/receipt/{token}').json()
+        self.assertEqual((receipt['payment_id'], receipt['send_to']),
+                         (PaymentHistory.objects.get().id, 'walk@example.com'))
 
     @patch('main.apis.send_mail')
     def test_an_admin_sends_it_again_to_the_corrected_address(self, mock_send):
@@ -1834,10 +1841,20 @@ class OnSiteReceiptTests(TestCase):
         self.assertEqual(response.json()['code'], 'payment_not_found')
 
     @patch('main.apis.send_mail')
-    def test_the_admin_list_carries_the_link_and_the_template_is_editable(self, mock_send):
+    def test_the_walk_in_row_carries_the_link_and_the_template_is_editable(self, mock_send):
+        row, = self.client.get(f'/api/event/{self.event.id}/onsite').json()['items']
+        self.assertEqual((row['receipt_payment_id'], row['receipt_token']), (None, None))
         self.pay()
+        payment = PaymentHistory.objects.get()
+        row, = self.client.get(f'/api/event/{self.event.id}/onsite').json()['items']
+        self.assertEqual((row['receipt_payment_id'], row['receipt_token']), (payment.id, payment.receipt_token))
+        # The payments tab has it too.
         row, = self.client.get(f'/api/event/{self.event.id}/payments').json()['items']
-        self.assertEqual(row['receipt_token'], PaymentHistory.objects.get().receipt_token)
+        self.assertEqual(row['receipt_token'], payment.receipt_token)
+        # A refunded payment is no receipt to issue.
+        PaymentHistory.objects.update(status='cancelled')
+        row, = self.client.get(f'/api/event/{self.event.id}/onsite').json()['items']
+        self.assertIsNone(row['receipt_payment_id'])
         templates = self.client.get(f'/api/event/{self.event.id}/email_templates').json()
         self.assertIn('{{ receipt_link }}', templates['receipt']['body'])
 
@@ -1852,6 +1869,85 @@ class OnSiteReceiptTests(TestCase):
         receipt = self.client.get('/api/me/payment/ORD2').json()
         self.assertEqual((receipt['payment_type'], receipt['amount']), ('transfer', 50000))
         self.assertFalse(PaymentHistory.objects.get(toss_order_id='ORD2').receipt_token)
+
+
+class DeskPaymentEditTests(TestCase):
+    """A walk-in's desk payment is the admin's own record: they may date it
+    when entering it, correct anything in it, and delete it - unlike a
+    gateway's payment, which is cancelled."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Symposium', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, published=True)
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA', is_staff=True)
+        self.client.force_login(self.admin_user)
+        self.walkin = OnSiteAttendee.objects.create(event=self.event, name='Kim', email='k@example.com', institute='PNU')
+
+    @patch('main.apis.send_mail')
+    def pay(self, mock_send, **fields):
+        payload = {'onsite_attendee_id': self.walkin.id, 'amount': 70000, 'order_id': 'ORD1', 'payment_type': 'card'}
+        payload.update(fields)
+        return self.client.post(f'/api/event/{self.event.id}/payment/add', data=json.dumps(payload),
+                                content_type='application/json')
+
+    def post(self, path, **payload):
+        return self.client.post(f'/api/event/{self.event.id}/payment/{path}', data=json.dumps(payload),
+                                content_type='application/json')
+
+    def test_a_desk_payment_is_dated_as_typed_in_the_business_timezone(self):
+        # 08:30 in Seoul is the day before in UTC; the receipt keeps Seoul's day.
+        self.assertEqual(self.pay(paid_at='2026-01-02T08:30').status_code, 200)
+        payment = PaymentHistory.objects.get()
+        self.assertEqual(payment.created_at.isoformat(), '2026-01-01T23:30:00+00:00')
+        row, = self.client.get(f'/api/event/{self.event.id}/payments').json()['items']
+        self.assertEqual((row['checkout_date'], row['paid_at']), ('2026-01-02', '2026-01-02T08:30'))
+        receipt = self.client.get(f'/api/receipt/{payment.receipt_token}').json()
+        self.assertEqual(receipt['checkout_date'], '2026-01-02')
+        other = OnSiteAttendee.objects.create(event=self.event, name='Lee', email='l@example.com', institute='PNU')
+        self.assertEqual(self.pay(onsite_attendee_id=other.id, order_id='ORD2', paid_at='yesterday').json()['code'],
+                         'invalid_datetime')
+
+    def test_everything_about_it_can_be_corrected(self):
+        self.pay(card_type='신한카드', card_number='1234')
+        payment = PaymentHistory.objects.get()
+        token = payment.receipt_token
+        response = self.post(f'{payment.id}/update', amount=65000, payment_type='cash', paid_at='2026-01-02T10:00',
+                             note='잘못 결제', supply_amount=59091, vat=5909, card_type='ignored')
+        self.assertEqual(response.status_code, 200)
+        payment.refresh_from_db()
+        tx = payment.manual_transaction
+        self.assertEqual((payment.amount, payment.note, payment.receipt_token), (65000, '잘못 결제', token))
+        self.assertEqual((tx.payment_type, tx.card_type, tx.card_number, tx.supply_amount, tx.vat),
+                         ('cash', '', '', 59091, 5909))
+        receipt = self.client.get(f'/api/receipt/{token}').json()
+        self.assertEqual((receipt['amount'], receipt['payment_type'], receipt['checkout_date']),
+                         (65000, 'cash', '2026-01-02'))
+        self.assertEqual(self.post(f'{payment.id}/update', amount=-1, payment_type='cash').json()['code'],
+                         'negative_amount')
+        self.assertEqual(self.post(f'{payment.id}/update', amount=1, payment_type='bitcoin').json()['code'],
+                         'invalid_payment_type')
+
+    def test_it_can_be_deleted_and_taken_again(self):
+        self.pay()
+        payment = PaymentHistory.objects.get()
+        self.assertEqual(self.post(f'{payment.id}/delete').status_code, 200)
+        self.assertFalse(PaymentHistory.objects.exists())
+        self.assertEqual(self.client.get(f'/api/receipt/{payment.receipt_token}').status_code, 404)
+        self.assertTrue(OnSiteAttendee.objects.filter(id=self.walkin.id).exists())
+        self.assertEqual(self.pay(order_id='ORD2').status_code, 200)
+
+    def test_a_gateway_payment_is_not_edited_or_deleted(self):
+        user = User.objects.create_user(username='r@example.com', email='r@example.com', password='pw12345!aA')
+        attendee = Attendee.objects.create(event=self.event, user=user, first_name='R', last_name='S',
+                                           nationality=1, institute='PNU')
+        paid = PaymentHistory.objects.create(event=self.event, attendee=attendee, amount=50000, provider='toss',
+                                             payment_type='카드', toss_order_id='T1')
+        self.assertEqual(self.post(f'{paid.id}/update', amount=1, payment_type='cash').json()['code'],
+                         'not_desk_payment')
+        self.assertEqual(self.post(f'{paid.id}/delete').json()['code'], 'not_desk_payment')
+        self.assertEqual(PaymentHistory.objects.get(id=paid.id).amount, 50000)
 
 
 class AdminOnSiteAddTests(TestCase):
@@ -3159,6 +3255,9 @@ class AdminListQueryCountTests(TestCase):
             username='ea@example.com', email='ea@example.com', password='pw12345!aA', is_staff=True)
         self.event.admins.add(self.admin_user)
         self.client.force_login(self.admin_user)
+        # The business settings row is made on first read; made now, so that
+        # first read is not counted against the smaller list.
+        BusinessSettings.get_instance()
         self.n = 0
 
     def grow(self, count):

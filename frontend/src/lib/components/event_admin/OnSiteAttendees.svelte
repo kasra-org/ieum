@@ -6,7 +6,7 @@
     import { enhance } from '$app/forms';
     import { apiMessage } from '$lib/apiMessages.js';
     import { invalidateAll } from '$app/navigation';
-    import { Award, CircleCheck, Tag, UserMinus, UserPen } from '@lucide/svelte';
+    import { Award, CircleCheck, ReceiptText, Tag, UserMinus, UserPen } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { generateNametagPDF, generateBatchNametagPDF, generateCertificatePDF, loadKoreanFonts } from '$lib/pdfUtils.js';
     import { getCategoryLabel, downloadTsv } from '$lib/utils.js';
@@ -139,6 +139,12 @@
         selected_attendee = $state.snapshot(row);
         remove_attendee_modal = true;
     };
+
+    // A walk-in's receipt for their desk payment, opened from their row by
+    // its link (they have no account); an admin sends it from there.
+    const openReceipt = (row) => window.open(
+        `/receipt/t/${row.receipt_token}`, '_blank',
+        'width=800,height=900,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes');
 
     // Adding a walk-in by hand: at the desk, or afterwards from a paper list.
     let add_modal = $state(false);
@@ -689,6 +695,12 @@
                         <ActionTooltip text={m.onsiteAttendees_certificate()}>
                             <Button color="none" size="none" onclick={() => showCertificateModal(row)} disabled={!row.is_confirmed}>
                                 <Award class="w-5 h-5 {row.is_confirmed ? '' : 'opacity-30'}" />
+                            </Button>
+                        </ActionTooltip>
+                        <!-- Their desk payment's receipt; greyed out until one is recorded. -->
+                        <ActionTooltip text={m.transactions_viewReceipt()}>
+                            <Button color="none" size="none" onclick={() => openReceipt(row)} disabled={!row.receipt_token}>
+                                <ReceiptText class="w-5 h-5 {row.receipt_token ? '' : 'opacity-30'}" />
                             </Button>
                         </ActionTooltip>
                         <ActionTooltip text={m.onsiteAttendees_detailsTitle()}>

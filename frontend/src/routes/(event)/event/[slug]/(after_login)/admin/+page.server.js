@@ -595,6 +595,8 @@ export const actions = {
             order_id: generateOrderId(),
             payment_type: formdata.get('payment_type'),
             note: formdata.get('note') || '',
+            // Only the walk-in tab asks when it was paid; blank is now.
+            paid_at: formdata.get('paid_at') || '',
             // Common fields for all payment types
             supply_amount: parseInt(formdata.get('supply_amount')) || 0,
             vat: parseInt(formdata.get('vat')) || 0,
@@ -619,9 +621,33 @@ export const actions = {
         }
         return;
     },
-    send_receipt: async ({ cookies, params, request }) => {
+    update_desk_payment: async ({ cookies, params, request }) => {
         let formdata = await request.formData();
-        const response = await post(`api/event/${params.slug}/payment/${parseInt(formdata.get('payment_id'))}/receipt/send`, {}, cookies);
+        const type = formdata.get('payment_type');
+        const response = await post(`api/event/${params.slug}/payment/${parseInt(formdata.get('id'))}/update`, {
+            amount: parseInt(formdata.get('amount')) || 0,
+            payment_type: type,
+            paid_at: formdata.get('paid_at') || '',
+            note: formdata.get('note') || '',
+            supply_amount: parseInt(formdata.get('supply_amount')) || 0,
+            vat: parseInt(formdata.get('vat')) || 0,
+            card_type: formdata.get('card_type') || '',
+            card_number: formdata.get('card_number') || '',
+            approval_number: formdata.get('approval_number') || '',
+            installment: formdata.get('installment') || 'single',
+            transaction_datetime: formdata.get('transaction_datetime') || '',
+            transaction_description: formdata.get('transaction_description') || '',
+        }, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            error(response.status, response.data);
+        }
+        return;
+    },
+    delete_desk_payment: async ({ cookies, params, request }) => {
+        let formdata = await request.formData();
+        const response = await post(`api/event/${params.slug}/payment/${parseInt(formdata.get('id'))}/delete`, {}, cookies);
         if (response.ok && response.status === 200) {
             return response.data;
         } else {

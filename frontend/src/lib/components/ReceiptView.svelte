@@ -7,7 +7,9 @@
     // The receipt itself, shared by the registrant's page (from their
     // account) and the walk-in's (by the link they were emailed), so both
     // read the same: the payment's own copies, its recorded amount.
-    let { payment, contactEmail = null } = $props();
+    // `tools`, when given, shows under the toolbar and never prints - the
+    // event admin's send button on a walk-in's receipt.
+    let { payment, contactEmail = null, tools } = $props();
 
     // Language selector state
     let selectedLanguage = $state(languageTag());
@@ -134,10 +136,17 @@
     {#if payment}
         <!-- Print and Close Buttons -->
         <div class="no-print mb-6 flex justify-center items-center gap-2">
-            <Select items={languageOptions} bind:value={selectedLanguage} onchange={changeLanguage} class="w-32" />
-            <Button color="primary" onclick={handlePrint}>{m.common_print()}</Button>
-            <Button color="light" onclick={() => window.close()}>{m.common_close()}</Button>
+            <!-- The select fills its box; held to this width, the buttons
+                 beside it keep their labels on one line. -->
+            <div class="w-36 shrink-0">
+                <Select items={languageOptions} bind:value={selectedLanguage} onchange={changeLanguage} />
+            </div>
+            <Button color="primary" class="whitespace-nowrap" onclick={handlePrint}>{m.common_print()}</Button>
+            <Button color="light" class="whitespace-nowrap" onclick={() => window.close()}>{m.common_close()}</Button>
         </div>
+        {#if tools}
+            <div class="no-print mb-6">{@render tools()}</div>
+        {/if}
 
         <!-- Receipt Content -->
         <div class="receipt-content bg-white p-8">

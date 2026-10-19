@@ -3,7 +3,7 @@
     import { Modal, Heading, Textarea, Select, Label, Input, Alert, Spinner } from '$lib/components/ui';
     import { enhance, deserialize } from '$app/forms';
     import { untrack } from 'svelte';
-    import { CircleX, Mail, Pencil, Plus, ReceiptText } from '@lucide/svelte';
+    import { CircleX, Pencil, Plus, ReceiptText, Trash2 } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
@@ -195,6 +195,14 @@
     let selected_onsite_id = $state(null);
     let selected_onsite = $state(null);
     let payment_amount = $state(0);
+    // When a walk-in paid: entered afterwards from the desk's slips, it still
+    // dates their receipt right. The business's local time, as typed.
+    let payment_paid_at = $state('');
+    const nowLocal = () => {
+        const d = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
 
     // Which category the attendee registered under decides the price, so
     // recording a manual payment offers the same choice - at the on-site
@@ -267,6 +275,7 @@
 
     const showCreateModal = () => {
         payer_kind = 'attendee';
+        payment_paid_at = nowLocal();
         selected_attendee_id = null;
         selected_onsite_id = selected_onsite = null;
         payment_category = data.event.registration_categories?.[0]?.id ?? null;
@@ -366,36 +375,80 @@
         };
     };
 
-    // A walk-in's receipt: they have no account, so it opens by its link -
-    // here for the admin to view or print, and emailed to the walk-in, once
-    // when the payment is recorded and again from here when asked.
+    // A walk-in's receipt: they have no account, so it opens by its link;
+    // the admin sends it to them from there.
     const openWalkInReceipt = (payment) => window.open(
         `/receipt/t/${payment.receipt_token}`, '_blank',
         'width=800,height=900,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes');
-    let receipt_send_open = $state(false);
-    let receipt_send_payment = $state(null);
-    let receipt_sending = $state(false);
-    let receipt_notice = $state(null);
-    const askSendReceipt = (payment) => {
-        receipt_send_payment = payment;
-        receipt_notice = null;
-        receipt_send_open = true;
+
+    // Correcting a desk payment in full: what was taken, how, and when.
+    let desk_edit_modal = $state(false);
+    let desk_edit = $state(null);
+    let desk_edit_error = $state('');
+    const showDeskEditModal = (payment) => {
+        desk_edit = {
+            id: payment.id,
+            label: `#${payment.number.toString().padStart(6, '0')} - ${getDisplayNameWithInstitute(payment)}`,
+            amount: payment.amount,
+            payment_type: payment.manual_payment_type || 'card',
+            paid_at: payment.paid_at,
+            supply_amount: payment.supply_amount,
+            vat: payment.vat,
+            card_type: payment.card_type,
+            card_number: payment.card_number,
+            approval_number: payment.approval_number,
+            installment: payment.installment || 'single',
+            // Shown 'YYYY-MM-DD HH:MM:SS'; the input wants a 'T'.
+            transaction_datetime: (payment.transaction_datetime || '').replace(' ', 'T'),
+            transaction_description: payment.transaction_description,
+            note: payment.note,
+        };
+        desk_edit_error = '';
+        desk_edit_modal = true;
     };
-    async function sendReceipt() {
-        receipt_sending = true;
+    // The amount set, the supply amount and VAT follow, as when adding.
+    const deskAmountChanged = () => {
+        desk_edit.supply_amount = calculateSuppliedAmount(desk_edit.amount);
+        desk_edit.vat = calculateVat(desk_edit.amount);
+    };
+    const afterDeskEdit = () => {
+        return async ({ result, update }) => {
+            if (result.type === 'success') {
+                await update({ reset: false });
+                desk_edit_modal = false;
+            } else {
+                desk_edit_error = apiMessage(result.error ?? result.data, m.transactions_updateError);
+            }
+        };
+    };
+
+    let desk_delete_open = $state(false);
+    let desk_delete_payment = $state(null);
+    let desk_deleting = $state(false);
+    let desk_delete_error = $state('');
+    const askDeleteDeskPayment = (payment) => {
+        desk_delete_payment = payment;
+        desk_delete_error = '';
+        desk_delete_open = true;
+    };
+    async function deleteDeskPayment() {
+        desk_deleting = true;
         const body = new FormData();
-        body.append('payment_id', receipt_send_payment.id);
+        body.append('id', desk_delete_payment.id);
         try {
-            const response = await fetch('?/send_receipt', { method: 'POST', body });
-            const result = deserialize(await response.text());
-            receipt_notice = result.type === 'success'
-                ? { color: 'green', message: m.transactions_receiptSent() }
-                : { color: 'red', message: apiMessage(result.error ?? result.data, m.transactions_receiptSendError) };
+            const result = deserialize(await (await fetch('?/delete_desk_payment', { method: 'POST', body })).text());
+            if (result.type === 'success') {
+                desk_delete_open = false;
+                await list.load();
+            } else {
+                desk_delete_error = apiMessage(result.error ?? result.data, m.transactions_deleteError);
+                desk_delete_open = false;
+            }
         } catch (e) {
-            receipt_notice = { color: 'red', message: m.transactions_receiptSendError() };
+            desk_delete_error = m.transactions_deleteError();
+            desk_delete_open = false;
         } finally {
-            receipt_sending = false;
-            receipt_send_open = false;
+            desk_deleting = false;
         }
     }
 
@@ -542,8 +595,8 @@
 {#if list.error && list.items.length > 0}
     <Alert color="red" class="mb-3">{m.common_error()}</Alert>
 {/if}
-{#if receipt_notice}
-    <Alert color={receipt_notice.color} class="mb-3">{receipt_notice.message}</Alert>
+{#if desk_delete_error}
+    <Alert color="red" class="mb-3">{desk_delete_error}</Alert>
 {/if}
 <TableSearch placeholder={m.transactions_searchPlaceholder()} hoverable={true} bind:inputValue={list.search} bind:field={list.field} fields={searchFields}>
     <TableHead>
@@ -596,19 +649,27 @@
                                     <ReceiptText class="w-5 h-5" />
                                 </Button>
                             </ActionTooltip>
-                            {#if payment.status === 'completed'}
-                                <ActionTooltip text={m.transactions_sendReceipt()}>
-                                    <Button color="none" size="none" onclick={() => askSendReceipt(payment)}>
-                                        <Mail class="w-5 h-5" />
-                                    </Button>
-                                </ActionTooltip>
-                            {/if}
                         {/if}
-                        <ActionTooltip text={m.transactions_editNote()}>
-                            <Button color="none" size="none" onclick={() => showNoteModal(payment)}>
-                                <Pencil class="w-5 h-5" />
-                            </Button>
-                        </ActionTooltip>
+                        {#if payment.receipt_token}
+                            <!-- A desk payment is the admin's own record: corrected in
+                                 full, or deleted, rather than only annotated. -->
+                            <ActionTooltip text={m.transactions_editPayment()}>
+                                <Button color="none" size="none" onclick={() => showDeskEditModal(payment)}>
+                                    <Pencil class="w-5 h-5" />
+                                </Button>
+                            </ActionTooltip>
+                            <ActionTooltip text={m.transactions_deletePayment()}>
+                                <Button color="none" size="none" onclick={() => askDeleteDeskPayment(payment)}>
+                                    <Trash2 class="w-5 h-5 text-red-500" />
+                                </Button>
+                            </ActionTooltip>
+                        {:else}
+                            <ActionTooltip text={m.transactions_editNote()}>
+                                <Button color="none" size="none" onclick={() => showNoteModal(payment)}>
+                                    <Pencil class="w-5 h-5" />
+                                </Button>
+                            </ActionTooltip>
+                        {/if}
                         {#if payment.status !== 'cancelled'}
                             <ActionTooltip text={m.transactions_cancelPayment()}>
                                 <Button color="none" size="none" onclick={() => showCancelModal(payment)}>
@@ -717,6 +778,13 @@
             </div>
         </div>
 
+        {#if payer_kind === 'onsite'}
+            <div class="mb-4">
+                <Label for="paid_at" class="block mb-2">{m.transactions_paidAt()}*</Label>
+                <Input id="paid_at" name="paid_at" type="datetime-local" bind:value={payment_paid_at} required />
+            </div>
+        {/if}
+
         <div class="grid grid-cols-2 gap-4 mb-4">
             <div>
                 <Label for="supply_amount" class="block mb-2">{m.cardReceipt_supplyAmount()}</Label>
@@ -783,6 +851,100 @@
         </div>
     </form>
 </Modal>
+
+<!-- Edit Desk Payment Modal: a walk-in's desk payment, corrected in full -->
+<Modal id="desk_edit_modal" size="lg" title={m.transactions_editPayment()} bind:open={desk_edit_modal} outsideclose>
+    {#if desk_edit}
+        <form method="post" action="?/update_desk_payment" use:enhance={afterDeskEdit}>
+            <input type="hidden" name="id" value={desk_edit.id} />
+            <p class="text-sm text-gray-500 mb-4">{m.transactions_paymentInfo()}: {desk_edit.label}</p>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <Label for="desk_amount" class="block mb-2">{m.transactions_amount()}*</Label>
+                    <Input id="desk_amount" name="amount" type="number" min="0" bind:value={desk_edit.amount} oninput={deskAmountChanged} required />
+                </div>
+                <div>
+                    <Label for="desk_payment_type" class="block mb-2">{m.transactions_type()}*</Label>
+                    <Select id="desk_payment_type" name="payment_type" bind:value={desk_edit.payment_type} items={paymentTypeOptions} required />
+                </div>
+            </div>
+            <div class="mb-4">
+                <Label for="desk_paid_at" class="block mb-2">{m.transactions_paidAt()}*</Label>
+                <Input id="desk_paid_at" name="paid_at" type="datetime-local" bind:value={desk_edit.paid_at} required />
+            </div>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <Label for="desk_supply_amount" class="block mb-2">{m.cardReceipt_supplyAmount()}</Label>
+                    <Input id="desk_supply_amount" name="supply_amount" type="number" bind:value={desk_edit.supply_amount} />
+                </div>
+                <div>
+                    <Label for="desk_vat" class="block mb-2">{m.cardReceipt_vat()}</Label>
+                    <Input id="desk_vat" name="vat" type="number" bind:value={desk_edit.vat} />
+                </div>
+            </div>
+            {#if desk_edit.payment_type === 'card'}
+                <div class="border border-gray-200 rounded-lg p-4 mb-4 bg-gray-50">
+                    <Heading tag="h3" class="text-lg font-semibold mb-4">{m.transactions_cardInfo()}</Heading>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <Label for="desk_card_type" class="block mb-2">{m.cardReceipt_cardType()}</Label>
+                            <Input id="desk_card_type" name="card_type" type="text" bind:value={desk_edit.card_type} placeholder={m.transactions_cardTypePlaceholder()} />
+                        </div>
+                        <div>
+                            <Label for="desk_card_number" class="block mb-2">{m.cardReceipt_cardNumber()}</Label>
+                            <Input id="desk_card_number" name="card_number" type="text" bind:value={desk_edit.card_number} placeholder="1234-56**-****-7890" />
+                        </div>
+                        <div>
+                            <Label for="desk_approval_number" class="block mb-2">{m.cardReceipt_approvalNumber()}</Label>
+                            <Input id="desk_approval_number" name="approval_number" type="text" bind:value={desk_edit.approval_number} />
+                        </div>
+                        <div>
+                            <Label for="desk_installment" class="block mb-2">{m.cardReceipt_installment()}</Label>
+                            <Select id="desk_installment" name="installment" bind:value={desk_edit.installment} items={installmentOptions} />
+                        </div>
+                    </div>
+                </div>
+            {/if}
+            {#if desk_edit.payment_type === 'transfer'}
+                <div class="border border-gray-200 rounded-lg p-4 mb-4 bg-gray-50">
+                    <Heading tag="h3" class="text-lg font-semibold mb-4">{m.transactions_transferInfo()}</Heading>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <Label for="desk_transaction_datetime" class="block mb-2">{m.transactions_transactionDatetime()}</Label>
+                            <Input id="desk_transaction_datetime" name="transaction_datetime" type="datetime-local" step="1" bind:value={desk_edit.transaction_datetime} />
+                        </div>
+                        <div>
+                            <Label for="desk_transaction_description" class="block mb-2">{m.transactions_transactionDescription()}</Label>
+                            <Input id="desk_transaction_description" name="transaction_description" type="text" bind:value={desk_edit.transaction_description} />
+                        </div>
+                    </div>
+                </div>
+            {/if}
+            <div class="mb-4">
+                <Label for="desk_note" class="block mb-2">{m.transactions_note()}</Label>
+                <Textarea id="desk_note" name="note" bind:value={desk_edit.note} rows="3" placeholder={m.transactions_notePlaceholder()} class="w-full" />
+            </div>
+            {#if desk_edit_error}
+                <Alert color="red" class="mb-4">{desk_edit_error}</Alert>
+            {/if}
+            <div class="flex justify-end gap-2">
+                <Button color="light" onclick={() => desk_edit_modal = false}>{m.common_cancel()}</Button>
+                <Button color="primary" type="submit">{m.common_save()}</Button>
+            </div>
+        </form>
+    {/if}
+</Modal>
+
+<ConfirmModal
+    bind:open={desk_delete_open}
+    title={m.transactions_deletePayment()}
+    message={m.transactions_deletePaymentConfirm()}
+    confirmLabel={m.common_delete()}
+    cancelLabel={m.common_cancel()}
+    confirmColor="red"
+    onConfirm={deleteDeskPayment}
+    loading={desk_deleting}
+/>
 
 <!-- Edit Note Modal -->
 <Modal id="note_modal" size="md" title={m.transactions_editNote()} bind:open={note_modal} outsideclose>
@@ -987,13 +1149,3 @@
         </div>
     {/if}
 </Modal>
-
-<ConfirmModal
-    bind:open={receipt_send_open}
-    title={m.transactions_sendReceipt()}
-    message={m.transactions_sendReceiptConfirm()}
-    confirmLabel={m.transactions_sendReceipt()}
-    cancelLabel={m.common_cancel()}
-    onConfirm={sendReceipt}
-    loading={receipt_sending}
-/>
