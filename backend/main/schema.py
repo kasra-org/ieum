@@ -354,6 +354,7 @@ class EventAdminSchema(Schema):
     email_template_abstract_submission: Union[EmailTemplateSchema, None]
     email_template_certificate: Union[EmailTemplateSchema, None]
     email_template_invitation: Union[EmailTemplateSchema, None]
+    email_template_receipt: Union[EmailTemplateSchema, None] = None
     invitation_code: str
     onsite_code: str
     published: bool
@@ -664,7 +665,8 @@ class PaymentHistorySchema(Schema):
     number: str
     checkout_date: str
     amount: int
-    event_id: int
+    # None once the event itself is deleted; the copies below remain.
+    event_id: Optional[int] = None
     event_name: str
     start_date: str
     end_date: str
@@ -781,6 +783,9 @@ class EventPaymentSchema(Schema):
     attendee_id: Optional[int] = None
     # Set instead of attendee_id for a walk-in paid at the desk.
     onsite_attendee_id: Optional[int] = None
+    # A walk-in's receipt link key (/receipt/t/<token>); blank for others,
+    # who see their receipt from their own account.
+    receipt_token: str = ""
     attendee_name: str
     attendee_name_ko: str
     attendee_email: str

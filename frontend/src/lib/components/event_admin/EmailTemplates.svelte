@@ -21,11 +21,15 @@
     // endpoint creates one on demand, so read it from there.
     const invitation = data.email_templates?.invitation ?? data.event.email_template_invitation;
     let invitationBody = $state(invitation?.body ?? '');
+    // Made on demand too: the email a walk-in gets with their receipt link.
+    const receipt = data.email_templates?.receipt ?? data.event.email_template_receipt;
+    let receiptBody = $state(receipt?.body ?? '');
 
     let registrationAttachments = $state(data.event.email_template_registration?.attachments ?? []);
     let abstractAttachments = $state(data.event.email_template_abstract_submission?.attachments ?? []);
     let certificateAttachments = $state(data.event.email_template_certificate?.attachments ?? []);
     let invitationAttachments = $state(invitation?.attachments ?? []);
+    let receiptAttachments = $state(receipt?.attachments ?? []);
 
     const afterSubmit = () => {
         return async ({ result, action, update }) => {
@@ -130,6 +134,29 @@
         <EmailAttachments
             bind:value={invitationAttachments}
             name="email_template_invitation_attachments"
+            label={m.emailTemplates_attachments()}
+        />
+    </div>
+
+    <Heading tag="h3" class="text-lg font-bold mb-2">{m.emailTemplates_receipt()}</Heading>
+    <p class="font-light mb-6 text-sm text-gray-500">{m.emailTemplates_receiptHelp({ link: '{{ receipt_link }}', amount: '{{ amount }}' })}</p>
+    <div class="mb-6">
+        <Label for="email_template_receipt_subject" class="block mb-2">{m.emailTemplates_subject()}</Label>
+        <Input id="email_template_receipt_subject" name="email_template_receipt_subject" value={receipt?.subject ?? ''} />
+    </div>
+    <div class="mb-6">
+        <MarkdownEditor
+            bind:value={receiptBody}
+            id="email_template_receipt_body"
+            name="email_template_receipt_body"
+            label={m.emailTemplates_body()}
+            rows={10}
+        />
+    </div>
+    <div class="mb-6">
+        <EmailAttachments
+            bind:value={receiptAttachments}
+            name="email_template_receipt_attachments"
             label={m.emailTemplates_attachments()}
         />
     </div>

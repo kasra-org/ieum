@@ -1773,6 +1773,87 @@ class ColumnSortTests(TestCase):
         self.assertEqual([w['name'] for w in walkins], ['Ko', 'Yu'])
 
 
+class OnSiteReceiptTests(TestCase):
+    """A walk-in's desk payment gets a receipt they open by link, emailed to
+    them when it is recorded - for the amount recorded, whatever the fee."""
+
+    def setUp(self):
+        self.event = Event.objects.create(
+            name='Symposium', start_date=date(2026, 1, 1), end_date=date(2026, 1, 2),
+            venue='Seoul', capacity=100, published=True)
+        self.category, = add_categories(self.event, ('Regular', 50000))
+        self.category.onsite_fee = 70000
+        self.category.save()
+        self.admin_user = User.objects.create_user(
+            username='ea@example.com', email='ea@example.com', password='pw12345!aA', is_staff=True)
+        self.client.force_login(self.admin_user)
+        self.walkin = OnSiteAttendee.objects.create(
+            event=self.event, name='홍길동', email='walk@example.com', institute='부산대학교', category=self.category)
+
+    def pay(self, amount=65000, payment_type='card'):
+        return self.client.post(f'/api/event/{self.event.id}/payment/add', data=json.dumps({
+            'onsite_attendee_id': self.walkin.id, 'amount': amount, 'order_id': 'ORD1',
+            'payment_type': payment_type}), content_type='application/json')
+
+    @patch('main.apis.send_mail')
+    def test_recording_a_desk_payment_emails_the_receipt_link(self, mock_send):
+        self.assertEqual(self.pay().status_code, 200)
+        payment = PaymentHistory.objects.get()
+        self.assertTrue(payment.receipt_token)
+        subject, body, to = mock_send.delay_on_commit.call_args.args[:3]
+        self.assertEqual(to, 'walk@example.com')
+        self.assertIn(f'/receipt/t/{payment.receipt_token}', body)
+        # The amount taken, not the 70,000 the category charges on site.
+        self.assertIn('65,000', body)
+        self.assertNotIn('70,000', body)
+        self.assertIn('Symposium', subject)
+
+    @patch('main.apis.send_mail')
+    def test_the_link_opens_the_receipt_without_an_account(self, mock_send):
+        self.pay(payment_type='cash')
+        token = PaymentHistory.objects.get().receipt_token
+        self.client.logout()
+        receipt = self.client.get(f'/api/receipt/{token}').json()
+        self.assertEqual((receipt['amount'], receipt['attendee_name'], receipt['attendee_institute_ko'],
+                          receipt['payment_type'], receipt['status']), (65000, '홍길동', '부산대학교', 'cash', 'completed'))
+        self.assertEqual(self.client.get('/api/receipt/not-a-token').status_code, 404)
+
+    @patch('main.apis.send_mail')
+    def test_an_admin_sends_it_again_to_the_corrected_address(self, mock_send):
+        self.pay()
+        payment = PaymentHistory.objects.get()
+        OnSiteAttendee.objects.filter(id=self.walkin.id).update(email='fixed@example.com')
+        url = f'/api/event/{self.event.id}/payment/{payment.id}/receipt/send'
+        self.assertEqual(self.client.post(url).status_code, 200)
+        self.assertEqual(mock_send.delay_on_commit.call_args.args[2], 'fixed@example.com')
+        # Not for a refunded payment, nor for a registrant's, which has no link.
+        PaymentHistory.objects.filter(id=payment.id).update(status='cancelled')
+        self.assertEqual(self.client.post(url).json()['code'], 'payment_not_completed')
+        other = PaymentHistory.objects.create(event=self.event, amount=1000, provider='manual')
+        response = self.client.post(f'/api/event/{self.event.id}/payment/{other.id}/receipt/send')
+        self.assertEqual(response.json()['code'], 'payment_not_found')
+
+    @patch('main.apis.send_mail')
+    def test_the_admin_list_carries_the_link_and_the_template_is_editable(self, mock_send):
+        self.pay()
+        row, = self.client.get(f'/api/event/{self.event.id}/payments').json()['items']
+        self.assertEqual(row['receipt_token'], PaymentHistory.objects.get().receipt_token)
+        templates = self.client.get(f'/api/event/{self.event.id}/email_templates').json()
+        self.assertIn('{{ receipt_link }}', templates['receipt']['body'])
+
+    def test_a_registrants_receipt_says_how_a_manual_payment_was_made(self):
+        user = User.objects.create_user(username='r@example.com', email='r@example.com', password='pw12345!aA')
+        attendee = Attendee.objects.create(event=self.event, user=user, first_name='R', last_name='S',
+                                           nationality=1, institute='PNU', category=self.category)
+        self.client.post(f'/api/event/{self.event.id}/payment/add', data=json.dumps({
+            'attendee_id': attendee.id, 'amount': 50000, 'order_id': 'ORD2', 'payment_type': 'transfer'}),
+            content_type='application/json')
+        self.client.force_login(user)
+        receipt = self.client.get('/api/me/payment/ORD2').json()
+        self.assertEqual((receipt['payment_type'], receipt['amount']), ('transfer', 50000))
+        self.assertFalse(PaymentHistory.objects.get(toss_order_id='ORD2').receipt_token)
+
+
 class AdminOnSiteAddTests(TestCase):
     """An event admin adds a walk-in by hand, with no on-site code and
     outside the event's dates."""

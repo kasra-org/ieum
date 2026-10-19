@@ -7,6 +7,7 @@ from datetime import datetime as _dt
 import uuid
 import re
 import requests
+import secrets
 from functools import wraps
 
 from datetime import datetime, timedelta
@@ -462,7 +463,7 @@ def get_payment_by_id(request, order_id: str):
     lookup = Q(toss_order_id=order_id)
     if order_id.isdigit():
         lookup |= Q(id=int(order_id))
-    payment = (PaymentHistory.objects.select_related('event')
+    payment = (PaymentHistory.objects.select_related('event', 'manual_transaction')
                .filter(lookup, attendee__user=user).first())
     if payment is None:
         return api.create_response(
@@ -470,7 +471,34 @@ def get_payment_by_id(request, order_id: str):
             {"code": "not_found", "message": "Payment not found"},
             status=404,
         )
+    return receipt_payload(payment)
 
+
+@api.get("/receipt/{token}", response=PaymentHistorySchema, auth=None)
+@rate_limit(max_requests=30, window_seconds=60)
+def get_receipt_by_link(request, token: str):
+    """A walk-in's receipt, by the link emailed to them: they have no account
+    to see it through, so the secret in the link is what opens it. The same
+    receipt a registrant sees, from the same copies of the payment."""
+    payment = None
+    if token:
+        payment = (PaymentHistory.objects.select_related('event', 'manual_transaction')
+                   .filter(receipt_token=token).first())
+    if payment is None:
+        return api.create_response(
+            request,
+            {"code": "not_found", "message": "Payment not found"},
+            status=404,
+        )
+    return receipt_payload(payment)
+
+
+def receipt_payload(payment):
+    """What a receipt shows, from the payment's own copies - so the amount is
+    the one recorded, whatever the category charges."""
+    # A payment entered by hand is recorded as '직접입력'; the receipt says
+    # how it was actually paid - card, transfer or cash.
+    manual = getattr(payment, 'manual_transaction', None) if payment.provider == 'manual' else None
     return {
         'number': payment.toss_order_id or str(payment.id),
         'checkout_date': payment.created_at.strftime('%Y-%m-%d'),
@@ -484,7 +512,7 @@ def get_payment_by_id(request, order_id: str):
         'organizers_en': payment.event_organizers_en,
         'organizers_ko': payment.event_organizers_ko,
         'status': payment.status,
-        'payment_type': payment.payment_type,
+        'payment_type': manual.payment_type if manual else payment.payment_type,
         'provider': payment.provider,
         'attendee_name': payment.attendee_name,
         'attendee_name_ko': payment.attendee_korean_name,
@@ -681,7 +709,7 @@ def delete_institution(request, institution_id: int):
         )
 
 EMAIL_TEMPLATE_FIELDS = ('email_template_registration', 'email_template_abstract_submission',
-                         'email_template_certificate', 'email_template_invitation')
+                         'email_template_certificate', 'email_template_invitation', 'email_template_receipt')
 
 
 def with_active_categories(events):
@@ -1288,6 +1316,69 @@ def ensure_invitation_template(event):
     return event.email_template_invitation
 
 
+def default_receipt_body():
+    """Starting text for the email a walk-in gets with their receipt; the
+    admin edits it per event. `{{ amount }}` is the amount recorded for the
+    payment - not the category's fee, which a desk payment may not match."""
+    return (
+        "{{ name }}님, {{ event.name }} 현장 등록 결제가 확인되었습니다.\n\n"
+        "- 결제 금액: {{ amount }}원\n"
+        "- 결제일: {{ payment_date }}\n\n"
+        "[영수증 보기]({{ receipt_link }})\n\n"
+        "---\n\n"
+        "Dear {{ name }},\n\n"
+        "Your on-site registration payment for {{ event.name }} has been received.\n\n"
+        "- Amount paid: KRW {{ amount }}\n"
+        "- Date: {{ payment_date }}\n\n"
+        "[View your receipt]({{ receipt_link }})\n\n"
+        "{{ event.name }}"
+    )
+
+
+def ensure_receipt_template(event):
+    """The walk-in receipt email's template, made on first use."""
+    if event.email_template_receipt is None:
+        event.email_template_receipt = EmailTemplate.objects.create(
+            subject=settings.ACCOUNT_EMAIL_SUBJECT_PREFIX + "[{{ event.name }}] 결제 영수증 / Payment receipt",
+            body=default_receipt_body(),
+        )
+        event.save(update_fields=['email_template_receipt'])
+    return event.email_template_receipt
+
+
+def receipt_link(payment):
+    return f"{settings.HEADLESS_URL_ROOT}/receipt/t/{payment.receipt_token}"
+
+
+def send_receipt_email(payment, event):
+    """Queue the walk-in's receipt email; False when there is no address.
+
+    To the walk-in's address as it is now - corrected since, perhaps - or,
+    their record gone, the one copied when they paid."""
+    address = (payment.onsite_attendee.email if payment.onsite_attendee_id else '') or payment.attendee_email
+    if not address:
+        return False
+    template = ensure_receipt_template(event)
+    context = {
+        "event": event,
+        "attendee": payment.onsite_attendee,
+        # From the payment's copies, which outlive the walk-in's record.
+        "name": payment.attendee_korean_name or payment.attendee_name,
+        "amount": f"{payment.amount:,}",
+        "payment_date": payment.created_at.strftime('%Y-%m-%d'),
+        "receipt_link": receipt_link(payment),
+    }
+    send_mail.delay_on_commit(
+        render_email_template(template.subject, context),
+        render_email_template(template.body, context),
+        address,
+        reply_to=event.main_admin.email if event.main_admin else None,
+        rich=True,
+        attachments=template_attachment_paths(template),
+    )
+    return True
+
+
 def template_attachment_paths(template):
     """The files to attach to every send of this template."""
     if template is None:
@@ -1355,6 +1446,12 @@ def update_event_emailtemplates(request, event_id: int):
         invitation.body = data.get("email_template_invitation_body", "")
         invitation.save()
         sync_template_attachments(invitation, data.get("email_template_invitation_attachments"))
+    if "email_template_receipt_subject" in data:
+        receipt = ensure_receipt_template(event)
+        receipt.subject = data["email_template_receipt_subject"]
+        receipt.body = data.get("email_template_receipt_body", "")
+        receipt.save()
+        sync_template_attachments(receipt, data.get("email_template_receipt_attachments"))
     return {"code": "success", "message": "Email templates updated."}
 
 @api.get("/event/{event_id}/registered", response=RegistrationStatusSchema)
@@ -3501,6 +3598,7 @@ def get_email_templates(request, event_id: int):
         "abstract": event.email_template_abstract_submission,
         "certificate": event.email_template_certificate,
         "invitation": ensure_invitation_template(event),
+        "receipt": ensure_receipt_template(event),
     }
     return rtn
 
@@ -3931,6 +4029,7 @@ def payment_row(payment):
         'note': payment.note,
         'attendee_id': payment.attendee_id,
         'onsite_attendee_id': payment.onsite_attendee_id,
+        'receipt_token': payment.receipt_token or '',
         'attendee_name': payment.attendee_name,
         'attendee_name_ko': payment.attendee_korean_name or '',
         'attendee_email': payment.attendee_email or '',
@@ -4077,6 +4176,8 @@ def create_event_payment(request, event_id: int, data: PaymentCreateSchema):
     payment = PaymentHistory(
         attendee=attendee,
         onsite_attendee=onsite,
+        # A walk-in sees their receipt by link, having no account.
+        receipt_token=secrets.token_urlsafe(32) if onsite else None,
         event=event,
         amount=data.amount,
         status='completed',
@@ -4116,7 +4217,33 @@ def create_event_payment(request, event_id: int, data: PaymentCreateSchema):
         manual_tx.transaction_description = data.transaction_description
     manual_tx.save()
 
+    # The walk-in's receipt goes to them at once, once this commits.
+    if onsite:
+        send_receipt_email(payment, event)
+
     return {"code": "success", "message": "Payment created successfully."}
+
+
+@api.post("/event/{event_id}/payment/{payment_id}/receipt/send", response=MessageSchema)
+@ensure_event_staff
+def send_payment_receipt(request, event_id: int, payment_id: int):
+    """Send a walk-in their receipt (again) - one recorded before receipts
+    were sent, say, or to an address since corrected. Registrants see theirs
+    from their own account, so only desk payments carry a receipt link."""
+    event = Event.objects.get(id=event_id)
+    payment = PaymentHistory.objects.filter(id=payment_id, event=event).first()
+    if payment is None or not payment.receipt_token:
+        return api.create_response(
+            request, {"code": "payment_not_found", "message": "Payment not found."}, status=404)
+    # A refunded payment's receipt says so, but the email says it was received.
+    if payment.status != 'completed':
+        return api.create_response(
+            request, {"code": "payment_not_completed", "message": "Only a completed payment's receipt can be sent."},
+            status=400)
+    if not send_receipt_email(payment, event):
+        return api.create_response(
+            request, {"code": "no_email", "message": "No email address is recorded for this payment."}, status=400)
+    return {"code": "success", "message": "Receipt sent."}
 
 
 @api.post("/event/{event_id}/payment/{payment_id}/cancel", response=MessageSchema)

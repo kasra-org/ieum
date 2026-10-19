@@ -1,9 +1,9 @@
 <script>
     import { TableSearch, TableHead, TableHeadCell, TableBody, TableBodyRow, TableBodyCell, Button, Badge } from '$lib/components/ui';
     import { Modal, Heading, Textarea, Select, Label, Input, Alert, Spinner } from '$lib/components/ui';
-    import { enhance } from '$app/forms';
+    import { enhance, deserialize } from '$app/forms';
     import { untrack } from 'svelte';
-    import { CircleX, Pencil, Plus } from '@lucide/svelte';
+    import { CircleX, Mail, Pencil, Plus, ReceiptText } from '@lucide/svelte';
     import * as m from '$lib/paraglide/messages.js';
     import { apiMessage } from '$lib/apiMessages.js';
     import { languageTag } from '$lib/paraglide/runtime.js';
@@ -366,6 +366,39 @@
         };
     };
 
+    // A walk-in's receipt: they have no account, so it opens by its link -
+    // here for the admin to view or print, and emailed to the walk-in, once
+    // when the payment is recorded and again from here when asked.
+    const openWalkInReceipt = (payment) => window.open(
+        `/receipt/t/${payment.receipt_token}`, '_blank',
+        'width=800,height=900,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes');
+    let receipt_send_open = $state(false);
+    let receipt_send_payment = $state(null);
+    let receipt_sending = $state(false);
+    let receipt_notice = $state(null);
+    const askSendReceipt = (payment) => {
+        receipt_send_payment = payment;
+        receipt_notice = null;
+        receipt_send_open = true;
+    };
+    async function sendReceipt() {
+        receipt_sending = true;
+        const body = new FormData();
+        body.append('payment_id', receipt_send_payment.id);
+        try {
+            const response = await fetch('?/send_receipt', { method: 'POST', body });
+            const result = deserialize(await response.text());
+            receipt_notice = result.type === 'success'
+                ? { color: 'green', message: m.transactions_receiptSent() }
+                : { color: 'red', message: apiMessage(result.error ?? result.data, m.transactions_receiptSendError) };
+        } catch (e) {
+            receipt_notice = { color: 'red', message: m.transactions_receiptSendError() };
+        } finally {
+            receipt_sending = false;
+            receipt_send_open = false;
+        }
+    }
+
     // Payment type options
     const paymentTypeOptions = [
         { value: 'card', name: m.receipt_paymentTypeCard() },
@@ -509,6 +542,9 @@
 {#if list.error && list.items.length > 0}
     <Alert color="red" class="mb-3">{m.common_error()}</Alert>
 {/if}
+{#if receipt_notice}
+    <Alert color={receipt_notice.color} class="mb-3">{receipt_notice.message}</Alert>
+{/if}
 <TableSearch placeholder={m.transactions_searchPlaceholder()} hoverable={true} bind:inputValue={list.search} bind:field={list.field} fields={searchFields}>
     <TableHead>
         <SortableHeadCell key="number" sort={list.sort} onsort={(s) => list.setSort(s)}>{m.transactions_id()}</SortableHeadCell>
@@ -554,6 +590,20 @@
                 </TableBodyCell>
                 <TableBodyCell>
                     <div class="flex justify-center gap-2">
+                        {#if payment.receipt_token}
+                            <ActionTooltip text={m.transactions_viewReceipt()}>
+                                <Button color="none" size="none" onclick={() => openWalkInReceipt(payment)}>
+                                    <ReceiptText class="w-5 h-5" />
+                                </Button>
+                            </ActionTooltip>
+                            {#if payment.status === 'completed'}
+                                <ActionTooltip text={m.transactions_sendReceipt()}>
+                                    <Button color="none" size="none" onclick={() => askSendReceipt(payment)}>
+                                        <Mail class="w-5 h-5" />
+                                    </Button>
+                                </ActionTooltip>
+                            {/if}
+                        {/if}
                         <ActionTooltip text={m.transactions_editNote()}>
                             <Button color="none" size="none" onclick={() => showNoteModal(payment)}>
                                 <Pencil class="w-5 h-5" />
@@ -937,3 +987,13 @@
         </div>
     {/if}
 </Modal>
+
+<ConfirmModal
+    bind:open={receipt_send_open}
+    title={m.transactions_sendReceipt()}
+    message={m.transactions_sendReceiptConfirm()}
+    confirmLabel={m.transactions_sendReceipt()}
+    cancelLabel={m.common_cancel()}
+    onConfirm={sendReceipt}
+    loading={receipt_sending}
+/>

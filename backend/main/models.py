@@ -364,6 +364,9 @@ class Event(models.Model):
     # Sent by an admin to a named address; the body carries a personal link that
     # registers whoever opens it - see EventInvitation.
     email_template_invitation = models.ForeignKey('EmailTemplate', on_delete=models.SET_NULL, blank=True, null=True, related_name='email_template_invitation')
+    # Sent to a walk-in when their desk payment is recorded, with a link to
+    # their receipt. Made on demand, as the invitation one is.
+    email_template_receipt = models.ForeignKey('EmailTemplate', on_delete=models.SET_NULL, blank=True, null=True, related_name='email_template_receipt')
     invitation_code = models.CharField(max_length=100, blank=True)  # Empty = public event, non-empty = invitation only
     onsite_code = models.CharField(max_length=6, blank=True)  # Auto-generated code for onsite registration URL
     attendees = models.ManyToManyField('Attendee', related_name='events', blank=True)
@@ -534,6 +537,8 @@ class Event(models.Model):
             self.email_template_certificate.delete()
         if self.email_template_invitation:
             self.email_template_invitation.delete()
+        if self.email_template_receipt:
+            self.email_template_receipt.delete()
         super().delete(*args, **kwargs)
 
 class Organizer(models.Model):
@@ -771,6 +776,9 @@ class PaymentHistory(models.Model):
     # Our generated order ID. Indexed: receipts are looked up by it.
     toss_order_id = models.CharField(max_length=64, blank=True, null=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # The secret in a walk-in's receipt link: they have no account to view
+    # it through, so the link itself is the key, as an invitation's is.
+    receipt_token = models.CharField(max_length=64, unique=True, null=True, blank=True)
 
     # Copied attendee information for receipts (preserved even if attendee is deleted)
     attendee_first_name = models.CharField(max_length=1000, blank=True)

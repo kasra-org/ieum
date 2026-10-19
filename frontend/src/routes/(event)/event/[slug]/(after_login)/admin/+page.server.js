@@ -113,6 +113,9 @@ export const actions = {
             email_template_invitation_subject: formdata.get('email_template_invitation_subject'),
             email_template_invitation_body: formdata.get('email_template_invitation_body'),
             email_template_invitation_attachments: parseAttachments(formdata.get('email_template_invitation_attachments')),
+            email_template_receipt_subject: formdata.get('email_template_receipt_subject'),
+            email_template_receipt_body: formdata.get('email_template_receipt_body'),
+            email_template_receipt_attachments: parseAttachments(formdata.get('email_template_receipt_attachments')),
         }, cookies);
         if (response.ok && response.status === 200) {
             return response.data;
@@ -609,6 +612,16 @@ export const actions = {
             data.transaction_description = formdata.get('transaction_description') || '';
         }
         const response = await post(`api/event/${params.slug}/payment/add`, data, cookies);
+        if (response.ok && response.status === 200) {
+            return response.data;
+        } else {
+            error(response.status, response.data);
+        }
+        return;
+    },
+    send_receipt: async ({ cookies, params, request }) => {
+        let formdata = await request.formData();
+        const response = await post(`api/event/${params.slug}/payment/${parseInt(formdata.get('payment_id'))}/receipt/send`, {}, cookies);
         if (response.ok && response.status === 200) {
             return response.data;
         } else {

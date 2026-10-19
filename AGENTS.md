@@ -318,6 +318,8 @@ All endpoints use base URL `/api/` with CSRF protection enabled.
 - `POST /api/event/{event_id}/onsite` - Register on-site (public)
 - `GET /api/event/{event_id}/onsite` - On-site attendees, paginated (event admin); `.../onsite/export` unpaged
 - `POST /api/event/{event_id}/onsite/add` - Add a walk-in by hand (event admin; no on-site code or date window)
+- `GET /api/receipt/{token}` - A walk-in's receipt by the secret link emailed to them (public; `/receipt/t/{token}` in the frontend)
+- `POST /api/event/{event_id}/payment/{payment_id}/receipt/send` - Email a walk-in their receipt link again (event admin); recording a desk payment sends it automatically, from the event's receipt template, with `{{ amount }}` the recorded amount
 - `POST /api/event/{event_id}/onsite/{onsite_id}/update` - Update on-site attendee
 - `POST /api/event/{event_id}/onsite/{onsite_id}/delete` - Delete on-site attendee
 
