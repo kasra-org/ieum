@@ -1833,12 +1833,12 @@ class OnSiteReceiptTests(TestCase):
         url = f'/api/event/{self.event.id}/payment/{payment.id}/receipt/send'
         self.assertEqual(self.client.post(url).status_code, 200)
         self.assertEqual(mock_send.delay_on_commit.call_args.args[2], 'fixed@example.com')
-        # Not for a refunded payment, nor for a registrant's, which has no link.
+        # Not for a refunded payment, nor one with no address to send to.
         PaymentHistory.objects.filter(id=payment.id).update(status='cancelled')
         self.assertEqual(self.client.post(url).json()['code'], 'payment_not_completed')
         other = PaymentHistory.objects.create(event=self.event, amount=1000, provider='manual')
         response = self.client.post(f'/api/event/{self.event.id}/payment/{other.id}/receipt/send')
-        self.assertEqual(response.json()['code'], 'payment_not_found')
+        self.assertEqual(response.json()['code'], 'no_email')
 
     @patch('main.apis.send_mail')
     def test_the_walk_in_row_carries_the_link_and_the_template_is_editable(self, mock_send):
@@ -1868,7 +1868,30 @@ class OnSiteReceiptTests(TestCase):
         self.client.force_login(user)
         receipt = self.client.get('/api/me/payment/ORD2').json()
         self.assertEqual((receipt['payment_type'], receipt['amount']), ('transfer', 50000))
-        self.assertFalse(PaymentHistory.objects.get(toss_order_id='ORD2').receipt_token)
+        # Not a desk payment, though entered by hand: cancelled, not deleted.
+        self.assertFalse(PaymentHistory.objects.get(toss_order_id='ORD2').is_desk)
+
+    @patch('main.apis.send_mail')
+    def test_any_payment_has_a_receipt_an_admin_can_send(self, mock_send):
+        user = User.objects.create_user(username='r@example.com', email='r@example.com', password='pw12345!aA')
+        attendee = Attendee.objects.create(event=self.event, user=user, first_name='Rae', last_name='Song',
+                                           korean_name='송래', nationality=1, institute='PNU', category=self.category)
+        paid = PaymentHistory(event=self.event, attendee=attendee, amount=50000, provider='toss',
+                              payment_type='카드', toss_order_id='T1')
+        paid.copy_attendee_info(attendee)
+        paid.save()
+        self.assertTrue(paid.receipt_token)
+        receipt = self.client.get(f'/api/receipt/{paid.receipt_token}').json()
+        self.assertEqual((receipt['amount'], receipt['attendee_name_ko'], receipt['send_to']), (50000, '송래', 'r@example.com'))
+        # Their account's address as it is now.
+        User.objects.filter(id=user.id).update(email='new@example.com')
+        url = f'/api/event/{self.event.id}/payment/{paid.id}/receipt/send'
+        self.assertEqual(self.client.post(url).status_code, 200)
+        subject, body, to = mock_send.delay_on_commit.call_args.args[:3]
+        self.assertEqual(to, 'new@example.com')
+        self.assertIn('50,000', body)
+        self.assertIn(f'/receipt/t/{paid.receipt_token}', body)
+        self.assertNotIn('현장', body)
 
 
 class DeskPaymentEditTests(TestCase):

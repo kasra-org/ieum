@@ -1,4 +1,5 @@
 import re
+import secrets
 
 from django.contrib.auth.models import AbstractUser
 from django.db import models
@@ -776,9 +777,15 @@ class PaymentHistory(models.Model):
     # Our generated order ID. Indexed: receipts are looked up by it.
     toss_order_id = models.CharField(max_length=64, blank=True, null=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    # The secret in a walk-in's receipt link: they have no account to view
-    # it through, so the link itself is the key, as an invitation's is.
+    # The secret in the payment's receipt link (/receipt/t/<token>), made on
+    # first save: the link itself is the key, as an invitation's is - for a
+    # walk-in, who has no account to see it through, and for the admins
+    # opening and sending any payment's receipt.
     receipt_token = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    # Money a walk-in paid at the desk, entered by an admin: their own record,
+    # which they may correct in full or delete - unlike a gateway's payment,
+    # which is cancelled. Kept after the walk-in's own record is gone.
+    is_desk = models.BooleanField(default=False)
 
     # Copied attendee information for receipts (preserved even if attendee is deleted)
     attendee_first_name = models.CharField(max_length=1000, blank=True)
@@ -808,6 +815,11 @@ class PaymentHistory(models.Model):
             middle = f" {self.attendee_middle_initial}" if self.attendee_middle_initial else ""
             return f'{self.attendee_first_name}{middle} {self.attendee_last_name}'.strip()
         return self.attendee_korean_name or ''
+
+    def save(self, *args, **kwargs):
+        if not self.receipt_token:
+            self.receipt_token = secrets.token_urlsafe(32)
+        super().save(*args, **kwargs)
 
     def copy_attendee_info(self, attendee):
         """Copy attendee information for receipt preservation"""

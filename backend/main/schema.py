@@ -800,10 +800,11 @@ class EventPaymentSchema(Schema):
     attendee_id: Optional[int] = None
     # Set instead of attendee_id for a walk-in paid at the desk.
     onsite_attendee_id: Optional[int] = None
-    # A walk-in's receipt link key (/receipt/t/<token>); blank for others,
-    # who see their receipt from their own account. Set, the payment is a
-    # desk one the admin may edit and delete outright.
+    # The receipt link's key (/receipt/t/<token>), which the admin opens the
+    # receipt by, and sends it from.
     receipt_token: str = ""
+    # A walk-in's desk payment, which the admin may edit and delete outright.
+    is_desk: bool = False
     # When it was paid, in the business's timezone, as the edit form takes it.
     paid_at: str = ""
     attendee_name: str

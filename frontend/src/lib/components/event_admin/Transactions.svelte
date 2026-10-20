@@ -375,8 +375,8 @@
         };
     };
 
-    // A walk-in's receipt: they have no account, so it opens by its link;
-    // the admin sends it to them from there.
+    // Any payment's receipt, opened by its link - the one a walk-in, having
+    // no account, is emailed - where the admin can send it to the payer.
     const openWalkInReceipt = (payment) => window.open(
         `/receipt/t/${payment.receipt_token}`, '_blank',
         'width=800,height=900,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes');
@@ -650,7 +650,7 @@
                                 </Button>
                             </ActionTooltip>
                         {/if}
-                        {#if payment.receipt_token}
+                        {#if payment.is_desk}
                             <!-- A desk payment is the admin's own record: corrected in
                                  full, or deleted, rather than only annotated. -->
                             <ActionTooltip text={m.transactions_editPayment()}>

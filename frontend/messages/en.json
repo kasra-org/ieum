@@ -453,8 +453,8 @@
 	"emailTemplates_certificate": "Certificate of Attendance",
 	"emailTemplates_invitation": "Invitation",
 	"emailTemplates_invitationHelp": "Sent from the attendee list to people who have not registered. Keep {link} in the body: it becomes each recipient's personal registration link.",
-	"emailTemplates_receipt": "On-site payment receipt",
-	"emailTemplates_receiptHelp": "Sent to a walk-in when their desk payment is recorded on the payments tab, and again when you send it from there. {link} becomes the link to their receipt, so keep it; {amount} is the amount recorded for the payment.",
+	"emailTemplates_receipt": "Payment receipt",
+	"emailTemplates_receiptHelp": "Sent with a payment's receipt link: to a walk-in when their desk payment is recorded, and to any payer when you send it from their receipt (open it from the payments or on-site tab). {link} becomes the link to the receipt, so keep it; {amount} is the amount recorded for the payment.",
 	"emailTemplates_update": "Update",
 
 	"eventQuestions_title": "Addtional Questions",

@@ -484,7 +484,8 @@ def get_receipt_by_link(request, token: str):
     receipt a registrant sees, from the same copies of the payment."""
     payment = None
     if token:
-        payment = (PaymentHistory.objects.select_related('event', 'manual_transaction')
+        payment = (PaymentHistory.objects
+                   .select_related('event', 'manual_transaction', 'attendee__user', 'onsite_attendee')
                    .filter(receipt_token=token).first())
     if payment is None:
         return api.create_response(
@@ -499,8 +500,7 @@ def get_receipt_by_link(request, token: str):
     if payment.event_id and user.is_authenticated and (
             user.is_staff or Event.objects.filter(id=payment.event_id, admins=user).exists()):
         receipt['payment_id'] = payment.id
-        receipt['send_to'] = ((payment.onsite_attendee.email if payment.onsite_attendee_id else '')
-                              or payment.attendee_email)
+        receipt['send_to'] = receipt_address(payment)
     return receipt
 
 
@@ -525,9 +525,8 @@ def parse_local_datetime(text, zone):
 
 def is_desk_payment(payment):
     """A walk-in's payment entered by an admin - the record of money taken at
-    the desk, which the admin may correct or delete outright. Marked by its
-    receipt link, which it keeps after the walk-in's own record is gone."""
-    return payment.provider == 'manual' and bool(payment.receipt_token)
+    the desk, which the admin may correct or delete outright."""
+    return payment.provider == 'manual' and payment.is_desk
 
 
 def receipt_payload(payment):
@@ -1356,17 +1355,18 @@ def ensure_invitation_template(event):
 
 
 def default_receipt_body():
-    """Starting text for the email a walk-in gets with their receipt; the
-    admin edits it per event. `{{ amount }}` is the amount recorded for the
-    payment - not the category's fee, which a desk payment may not match."""
+    """Starting text for the email with a payment's receipt link - sent to a
+    walk-in when their desk payment is recorded, and to anyone when an admin
+    sends a receipt; edited per event. `{{ amount }}` is the amount recorded
+    for the payment - not the category's fee, which a payment may not match."""
     return (
-        "{{ name }}님, {{ event.name }} 현장 등록 결제가 확인되었습니다.\n\n"
+        "{{ name }}님, {{ event.name }} 등록비 결제가 확인되었습니다.\n\n"
         "- 결제 금액: {{ amount }}원\n"
         "- 결제일: {{ payment_date }}\n\n"
         "[영수증 보기]({{ receipt_link }})\n\n"
         "---\n\n"
         "Dear {{ name }},\n\n"
-        "Your on-site registration payment for {{ event.name }} has been received.\n\n"
+        "Your registration payment for {{ event.name }} has been received.\n\n"
         "- Amount paid: KRW {{ amount }}\n"
         "- Date: {{ payment_date }}\n\n"
         "[View your receipt]({{ receipt_link }})\n\n"
@@ -1375,7 +1375,7 @@ def default_receipt_body():
 
 
 def ensure_receipt_template(event):
-    """The walk-in receipt email's template, made on first use."""
+    """The receipt email's template, made on first use."""
     if event.email_template_receipt is None:
         event.email_template_receipt = EmailTemplate.objects.create(
             subject=settings.ACCOUNT_EMAIL_SUBJECT_PREFIX + "[{{ event.name }}] 결제 영수증 / Payment receipt",
@@ -1385,16 +1385,25 @@ def ensure_receipt_template(event):
     return event.email_template_receipt
 
 
+def receipt_address(payment):
+    """Where a payment's receipt goes: the payer's address as it is now -
+    corrected since, perhaps - or, their record gone, the one copied when
+    they paid."""
+    current = ''
+    if payment.onsite_attendee_id:
+        current = payment.onsite_attendee.email
+    elif payment.attendee_id:
+        current = payment.attendee.email
+    return current or payment.attendee_email
+
+
 def receipt_link(payment):
     return f"{settings.HEADLESS_URL_ROOT}/receipt/t/{payment.receipt_token}"
 
 
 def send_receipt_email(payment, event):
-    """Queue the walk-in's receipt email; False when there is no address.
-
-    To the walk-in's address as it is now - corrected since, perhaps - or,
-    their record gone, the one copied when they paid."""
-    address = (payment.onsite_attendee.email if payment.onsite_attendee_id else '') or payment.attendee_email
+    """Queue a payment's receipt email; False when there is no address."""
+    address = receipt_address(payment)
     if not address:
         return False
     template = ensure_receipt_template(event)
@@ -1404,7 +1413,7 @@ def send_receipt_email(payment, event):
         # From the payment's copies, which outlive the walk-in's record.
         "name": payment.attendee_korean_name or payment.attendee_name,
         "amount": f"{payment.amount:,}",
-        "payment_date": payment.created_at.strftime('%Y-%m-%d'),
+        "payment_date": payment.created_at.astimezone(business_zone()).strftime('%Y-%m-%d'),
         "receipt_link": receipt_link(payment),
     }
     send_mail.delay_on_commit(
@@ -4077,6 +4086,7 @@ def payment_row(payment, zone):
         'attendee_id': payment.attendee_id,
         'onsite_attendee_id': payment.onsite_attendee_id,
         'receipt_token': payment.receipt_token or '',
+        'is_desk': is_desk_payment(payment),
         'attendee_name': payment.attendee_name,
         'attendee_name_ko': payment.attendee_korean_name or '',
         'attendee_email': payment.attendee_email or '',
@@ -4235,8 +4245,8 @@ def create_event_payment(request, event_id: int, data: PaymentCreateSchema):
     payment = PaymentHistory(
         attendee=attendee,
         onsite_attendee=onsite,
-        # A walk-in sees their receipt by link, having no account.
-        receipt_token=secrets.token_urlsafe(32) if onsite else None,
+        # Money taken at the desk: the admin's own record (is_desk_payment).
+        is_desk=bool(onsite),
         event=event,
         amount=data.amount,
         status='completed',
@@ -4370,8 +4380,9 @@ def send_payment_receipt(request, event_id: int, payment_id: int):
     to an address since corrected. Registrants see theirs from their own account, so only desk
     payments carry a receipt link."""
     event = Event.objects.get(id=event_id)
-    payment = PaymentHistory.objects.filter(id=payment_id, event=event).first()
-    if payment is None or not payment.receipt_token:
+    payment = (PaymentHistory.objects.select_related('attendee__user', 'onsite_attendee')
+               .filter(id=payment_id, event=event).first())
+    if payment is None:
         return api.create_response(
             request, {"code": "payment_not_found", "message": "Payment not found."}, status=404)
     # A refunded payment's receipt says so, but the email says it was received.

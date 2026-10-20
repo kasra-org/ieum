@@ -318,8 +318,8 @@ All endpoints use base URL `/api/` with CSRF protection enabled.
 - `POST /api/event/{event_id}/onsite` - Register on-site (public)
 - `GET /api/event/{event_id}/onsite` - On-site attendees, paginated (event admin); `.../onsite/export` unpaged
 - `POST /api/event/{event_id}/onsite/add` - Add a walk-in by hand (event admin; no on-site code or date window)
-- `GET /api/receipt/{token}` - A walk-in's receipt by the secret link emailed to them (public; `/receipt/t/{token}` in the frontend)
-- `POST /api/event/{event_id}/payment/{payment_id}/receipt/send` - Email a walk-in their receipt link again (event admin; offered on the receipt page itself when an event admin opens it); recording a desk payment sends it automatically, from the event's receipt template, with `{{ amount }}` the recorded amount
+- `GET /api/receipt/{token}` - A payment's receipt by its secret link (public; `/receipt/t/{token}` in the frontend). Every payment gets a link on save; walk-ins are emailed theirs, and admins open any payment's receipt from the payments/on-site tabs and send it from there
+- `POST /api/event/{event_id}/payment/{payment_id}/receipt/send` - Email any payment's receipt link to its payer (event admin; offered on the receipt page itself when an event admin opens it); recording a desk payment sends it automatically, from the event's receipt template, with `{{ amount }}` the recorded amount
 - `POST /api/event/{event_id}/payment/{payment_id}/update` / `.../delete` - Correct in full (amount, method, details, `paid_at`) or delete a walk-in's desk payment (event admin; gateway payments are cancelled instead). Times are typed and shown in `BusinessSettings.timezone`.
 - `POST /api/event/{event_id}/onsite/{onsite_id}/update` - Update on-site attendee
 - `POST /api/event/{event_id}/onsite/{onsite_id}/delete` - Delete on-site attendee
