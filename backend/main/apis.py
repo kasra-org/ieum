@@ -1355,20 +1355,25 @@ def ensure_invitation_template(event):
 
 
 def default_receipt_body():
-    """Starting text for the email with a payment's receipt link - sent to a
-    walk-in when their desk payment is recorded, and to anyone when an admin
-    sends a receipt; edited per event. `{{ amount }}` is the amount recorded
-    for the payment - not the category's fee, which a payment may not match."""
+    """Starting text for the email that sends a payment's receipt - to a
+    walk-in when their desk payment is recorded, and to anyone an admin
+    sends a receipt to; edited per event. It hands over the receipt; it does
+    not confirm the payment, which the payer already knows about.
+    `{{ amount }}` is the amount recorded for the payment - not the
+    category's fee, which a payment may not match. `{{ name }}` is the
+    Korean name where there is one, `{{ name_en }}` the English."""
     return (
-        "{{ name }}님, {{ event.name }} 등록비 결제가 확인되었습니다.\n\n"
+        "{{ name }}님, {{ event.name }} 등록비 결제 영수증을 송부드립니다.\n\n"
         "- 결제 금액: {{ amount }}원\n"
         "- 결제일: {{ payment_date }}\n\n"
+        "아래 링크에서 영수증을 확인 및 출력하실 수 있습니다.\n\n"
         "[영수증 보기]({{ receipt_link }})\n\n"
         "---\n\n"
-        "Dear {{ name }},\n\n"
-        "Your registration payment for {{ event.name }} has been received.\n\n"
+        "Dear {{ name_en }},\n\n"
+        "Please find below the receipt for your registration payment for {{ event.name }}.\n\n"
         "- Amount paid: KRW {{ amount }}\n"
         "- Date: {{ payment_date }}\n\n"
+        "You can view and print it at the link below.\n\n"
         "[View your receipt]({{ receipt_link }})\n\n"
         "{{ event.name }}"
     )
@@ -1410,8 +1415,11 @@ def send_receipt_email(payment, event):
     context = {
         "event": event,
         "attendee": payment.onsite_attendee,
-        # From the payment's copies, which outlive the walk-in's record.
+        # From the payment's copies, which outlive the payer's record: the
+        # Korean name for the Korean text, the English for the English -
+        # each falling back to the other where the payer gave only one.
         "name": payment.attendee_korean_name or payment.attendee_name,
+        "name_en": payment.attendee_name,
         "amount": f"{payment.amount:,}",
         "payment_date": payment.created_at.astimezone(business_zone()).strftime('%Y-%m-%d'),
         "receipt_link": receipt_link(payment),

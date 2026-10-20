@@ -454,7 +454,7 @@
 	"emailTemplates_invitation": "초대",
 	"emailTemplates_invitationHelp": "참가자 목록에서 아직 등록하지 않은 사람에게 보내는 메일입니다. 본문의 {link}는 수신자별 개인 등록 링크로 바뀌므로 반드시 남겨 두세요.",
 	"emailTemplates_receipt": "결제 영수증",
-	"emailTemplates_receiptHelp": "결제의 영수증 링크와 함께 보내는 메일입니다. 현장 참가자의 결제를 추가하면 자동으로 보내지고, 결제 내역·현장 참가자 탭에서 영수증을 열어 누구에게나 보낼 수 있습니다. 본문의 {link}는 영수증 링크로 바뀌므로 반드시 남겨 두세요. {amount}는 결제에 기록된 금액입니다.",
+	"emailTemplates_receiptHelp": "결제의 영수증 링크와 함께 보내는 메일입니다. 현장 참가자의 결제를 추가하면 자동으로 보내지고, 결제 내역·현장 참가자 탭에서 영수증을 열어 누구에게나 보낼 수 있습니다. 본문의 {link}는 영수증 링크로 바뀌므로 반드시 남겨 두세요. {amount}는 결제에 기록된 금액, {name}은 결제자의 국문 이름(없으면 영문), {name_en}은 영문 이름입니다.",
 	"emailTemplates_update": "업데이트",
 
 	"eventQuestions_title": "추가 질문",

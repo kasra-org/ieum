@@ -139,7 +139,7 @@
     </div>
 
     <Heading tag="h3" class="text-lg font-bold mb-2">{m.emailTemplates_receipt()}</Heading>
-    <p class="font-light mb-6 text-sm text-gray-500">{m.emailTemplates_receiptHelp({ link: '{{ receipt_link }}', amount: '{{ amount }}' })}</p>
+    <p class="font-light mb-6 text-sm text-gray-500">{m.emailTemplates_receiptHelp({ link: '{{ receipt_link }}', amount: '{{ amount }}', name: '{{ name }}', name_en: '{{ name_en }}' })}</p>
     <div class="mb-6">
         <Label for="email_template_receipt_subject" class="block mb-2">{m.emailTemplates_subject()}</Label>
         <Input id="email_template_receipt_subject" name="email_template_receipt_subject" value={receipt?.subject ?? ''} />

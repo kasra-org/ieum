@@ -454,7 +454,7 @@
 	"emailTemplates_invitation": "Invitation",
 	"emailTemplates_invitationHelp": "Sent from the attendee list to people who have not registered. Keep {link} in the body: it becomes each recipient's personal registration link.",
 	"emailTemplates_receipt": "Payment receipt",
-	"emailTemplates_receiptHelp": "Sent with a payment's receipt link: to a walk-in when their desk payment is recorded, and to any payer when you send it from their receipt (open it from the payments or on-site tab). {link} becomes the link to the receipt, so keep it; {amount} is the amount recorded for the payment.",
+	"emailTemplates_receiptHelp": "Sent with a payment's receipt link: to a walk-in when their desk payment is recorded, and to any payer when you send it from their receipt (open it from the payments or on-site tab). {link} becomes the link to the receipt, so keep it; {amount} is the amount recorded for the payment; {name} is the payer's Korean name (English if none), {name_en} their English name.",
 	"emailTemplates_update": "Update",
 
 	"eventQuestions_title": "Addtional Questions",

@@ -1892,6 +1892,9 @@ class OnSiteReceiptTests(TestCase):
         self.assertIn('50,000', body)
         self.assertIn(f'/receipt/t/{paid.receipt_token}', body)
         self.assertNotIn('현장', body)
+        # Korean name in the Korean text, English in the English.
+        self.assertIn('송래님', body)
+        self.assertIn('Dear Rae Song,', body)
 
 
 class DeskPaymentEditTests(TestCase):
